@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OctaMind — AI Agent Platform</title>
+    <title>OctaMind — AI Agent Platform by Pink Raven</title>
     <meta name="description"
         content="A modular, open-source AI platform where you create and manage specialized agents that automate Gmail, Drive, Slack, Calendar and more — using natural language." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -152,12 +152,46 @@
             letter-spacing: -0.5px;
         }
 
-        .nav-logo span {
-            color: var(--pink);
-        }
+        .nav-logo span { color: var(--pink); }
 
-        .logo-octopus {
-            font-size: 1.6rem;
+        .logo-octopus { font-size: 1.6rem; }
+
+        /* Logo images */
+        .logo-img {
+            width: 34px; height: 34px;
+            object-fit: contain; border-radius: 8px;
+            flex-shrink: 0;
+        }
+        .logo-img-sm {
+            width: 18px; height: 18px;
+            object-fit: contain; border-radius: 4px; flex-shrink: 0;
+        }
+        /* "by Pink Raven" pill next to product name */
+        .by-company {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 0.62rem; font-weight: 600;
+            color: var(--muted);
+            border-left: 1px solid var(--border-dim);
+            padding-left: 10px; margin-left: 4px;
+            white-space: nowrap; letter-spacing: 0.3px;
+        }
+        /* Footer company + product lockup */
+        .footer-company-lockup {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 6px;
+        }
+        .footer-company-name {
+            font-size: 1.1rem; font-weight: 800; color: #fff; letter-spacing: -0.3px;
+        }
+        .footer-product-lockup {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: 14px; opacity: 0.7;
+        }
+        .footer-product-name {
+            font-size: 0.85rem; font-weight: 600; color: var(--pink-light);
+        }
+        .footer-product-label {
+            font-size: 0.72rem; color: var(--muted);
         }
 
         .nav-links {
@@ -1310,8 +1344,12 @@
     <!-- ── NAV ──────────────────────────────────────────── -->
     <nav id="navbar">
         <a href="#hero" class="nav-logo">
-            <span class="logo-octopus">🐙</span>
+            <img src="octopus.png" class="logo-img" alt="OctaMind" />
             Octa<span>Mind</span>
+            <span class="by-company">
+                <img src="pinkRaven.png" class="logo-img-sm" alt="Pink Raven" />
+                by Pink Raven
+            </span>
         </a>
         <div class="nav-links" id="navLinks">
             <a href="#features">Features</a>
@@ -1329,7 +1367,7 @@
     <!-- ── HERO ─────────────────────────────────────────── -->
     <section id="hero">
         <div class="badge">
-            <div class="badge-dot"></div> Open Source · Python 3.13 · MIT License
+            <div class="badge-dot"></div> A Pink Raven Product · Open Source · MIT License
         </div>
 
         <h1>
@@ -1787,7 +1825,7 @@
                 <div class="badge-dot"></div> Free &amp; Open Source
             </div>
             <h2>Start automating<br><em>your digital life today</em></h2>
-            <p>OctaMind is completely free and open source. No subscriptions, no usage limits on your own machine. Fork
+            <p>OctaMind is completely free and open source, built by <strong>Pink Raven</strong>. No subscriptions, no usage limits on your own machine. Fork
                 it, extend it, own it.</p>
             <div class="cta-buttons">
                 <a href="#quickstart" class="btn-primary">🚀 Get Started Free</a>
@@ -1806,10 +1844,16 @@
     <footer>
         <div class="footer-top">
             <div class="footer-brand">
-                <a href="#hero" class="nav-logo">
-                    <span class="logo-octopus">🐙</span> Octa<span>Mind</span>
-                </a>
-                <p>A modular, open-source AI agent platform. Automate your digital life with natural language.</p>
+                <div class="footer-company-lockup">
+                    <img src="pinkRaven.png" class="logo-img" alt="Pink Raven" />
+                    <span class="footer-company-name">Pink Raven</span>
+                </div>
+                <div class="footer-product-lockup">
+                    <img src="octopus.png" style="width:20px;height:20px;object-fit:contain;border-radius:4px;" alt="OctaMind" />
+                    <span class="footer-product-name">OctaMind</span>
+                    <span class="footer-product-label">— first product</span>
+                </div>
+                <p>OctaMind is the flagship product by Pink Raven — a modular, open-source AI agent platform that automates your digital life with natural language.</p>
             </div>
 
             <div class="footer-links">
@@ -1844,7 +1888,7 @@
         </div>
 
         <div class="footer-bottom">
-            <span>© 2026 OctaMind. MIT License.</span>
+            <span>© 2026 <strong>Pink Raven</strong> · OctaMind is MIT licensed.</span>
             <span>Built with <span class="heart">♥</span> and Python 🐍</span>
             <a href="https://github.com">⭐ Star on GitHub</a>
         </div>
