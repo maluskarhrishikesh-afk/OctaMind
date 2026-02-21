@@ -245,6 +245,47 @@ def main() -> None:
         with cols[idx % 2]:
             show_agent_card(agent)
 
+    # ── Multi-Agent Hub button (visible when 2+ agents are running) ───────────
+    try:
+        from src.agent.core.process_manager import get_all_agent_statuses, start_agent, get_agent_status
+        all_statuses = get_all_agent_statuses()
+        running_agents = [s for s in all_statuses if s.get("running") and s.get("id") != "__multi_agent__"]
+        if len(running_agents) >= 2:
+            st.markdown("---")
+            ma_status = get_agent_status("__multi_agent__")
+            if ma_status and ma_status.get("running"):
+                ma_url = ma_status.get("url", "")
+                col_a, col_b = st.columns([3, 1])
+                with col_a:
+                    st.markdown(
+                        "<div style='color:#c4b5fd;font-size:0.95rem;padding:8px 0;'>"
+                        "⚡ <b>Multi-Agent Hub</b> is running — send cross-agent commands!</div>",
+                        unsafe_allow_html=True,
+                    )
+                with col_b:
+                    if ma_url:
+                        st.link_button("Open ⚡", url=ma_url, type="primary", use_container_width=True)
+            else:
+                col_a, col_b = st.columns([3, 1])
+                with col_a:
+                    st.markdown(
+                        "<div style='color:#c4b5fd;font-size:0.95rem;padding:8px 0;'>"
+                        "⚡ <b>Multi-Agent</b> — combine Drive + Email in one command!</div>",
+                        unsafe_allow_html=True,
+                    )
+                with col_b:
+                    if st.button("Launch ⚡", type="primary", use_container_width=True):
+                        try:
+                            info = start_agent("__multi_agent__", "Multi-Agent Hub", "multi_agent")
+                            ma_url = info.get("url", "")
+                            if ma_url:
+                                st.link_button("Open ⚡", url=ma_url)
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(f"Could not start Multi-Agent Hub: {_e}")
+    except Exception:
+        pass  # Dashboard still works even if process_manager is unavailable
+
 
 if __name__ == "__main__":
     main()

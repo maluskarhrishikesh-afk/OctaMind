@@ -720,3 +720,71 @@
 - success (5 emails)
 - success (1 emails)
 - success (2 emails)
+
+### 2026-02-21 - Usage Patterns
+**Action Preferences:**
+- test_action (performed 10 times)
+
+### 2026-02-21 - Episodic Themes
+**Recurring Events:**
+- test_action: test command 14 (occurred 3 times)
+- test_action: test command 13 (occurred 3 times)
+- test_action: test command 12 (occurred 3 times)
+- test_action: test command 11 (occurred 3 times)
+- test_action: test command 10 (occurred 3 times)
+- test_action: test command 9 (occurred 3 times)
+- test_action: test command 8 (occurred 3 times)
+- test_action: test command 7 (occurred 3 times)
+- test_action: test command 6 (occurred 3 times)
+- test_action: test command 5 (occurred 3 times)
+- test_action: test command 4 (occurred 2 times)
+- test_action: test command 3 (occurred 2 times)
+- test_action: test command 2 (occurred 2 times)
+- test_action: test command 1 (occurred 2 times)
+- test_action: test command 0 (occurred 2 times)
+- test_action: day 2 command 4 (occurred 2 times)
+- test_action: day 2 command 3 (occurred 2 times)
+- test_action: day 2 command 2 (occurred 2 times)
+- test_action: day 2 command 1 (occurred 2 times)
+- test_action: day 2 command 0 (occurred 2 times)
+
+**User Context:**
+- success (6 emails)
+- success (1 emails)
+- success (11 emails)
+- success (4 emails)
+- success (13 emails)
+
+### 2026-02-21 - Usage Patterns
+**Action Preferences:**
+- test_action (performed 10 times)
+
+### 2026-02-21 - Episodic Themes
+**Recurring Events:**
+- test_action: test command 14 (occurred 3 times)
+- test_action: test command 13 (occurred 3 times)
+- test_action: test command 12 (occurred 3 times)
+- test_action: test command 11 (occurred 3 times)
+- test_action: test command 10 (occurred 3 times)
+- test_action: test command 9 (occurred 3 times)
+- test_action: test command 8 (occurred 3 times)
+- test_action: test command 7 (occurred 3 times)
+- test_action: test command 6 (occurred 3 times)
+- test_action: test command 5 (occurred 3 times)
+- test_action: test command 4 (occurred 2 times)
+- test_action: test command 3 (occurred 2 times)
+- test_action: test command 2 (occurred 2 times)
+- test_action: test command 1 (occurred 2 times)
+- test_action: test command 0 (occurred 2 times)
+- test_action: day 2 command 4 (occurred 2 times)
+- test_action: day 2 command 3 (occurred 2 times)
+- test_action: day 2 command 2 (occurred 2 times)
+- test_action: day 2 command 1 (occurred 2 times)
+- test_action: day 2 command 0 (occurred 2 times)
+
+**User Context:**
+- success (0 emails)
+- success (14 emails)
+- success (4 emails)
+- success (9 emails)
+- success (3 emails)

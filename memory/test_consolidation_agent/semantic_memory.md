@@ -798,3 +798,79 @@
 - success (22 emails)
 - success (38 emails)
 - success (12 emails)
+
+### 2026-02-21 - Usage Patterns
+**Timeframe Preferences:**
+- today (4 times)
+
+**Action Preferences:**
+- count_emails (performed 6 times)
+
+### 2026-02-21 - Episodic Themes
+**Key Insights:**
+- User checks 'count emails today' multiple times per session
+- User checks 'count emails today' multiple times per session
+
+**Recurring Events:**
+- regular cleanup behavior observed (occurred 2 times)
+- user shows strong preference for daily email counts (occurred 2 times)
+- count_emails: how many emails today? (occurred 6 times)
+- delete_emails: delete junk (occurred 2 times)
+- count_emails: count emails this morning (occurred 2 times)
+- list_emails: list important emails (occurred 2 times)
+- count_emails: what emails came today? (occurred 2 times)
+- count_emails: count emails today (occurred 12 times)
+- delete_emails: delete spam (occurred 2 times)
+- count_emails: count emails yesterday (occurred 2 times)
+- list_emails: show unread messages (occurred 2 times)
+- list_emails: list today's emails (occurred 2 times)
+- delete_emails: delete old emails (occurred 2 times)
+- search_emails: search for invoices (occurred 2 times)
+- list_emails: list unread emails (occurred 2 times)
+- count_emails: count emails this week (occurred 2 times)
+- delete_emails: delete junk emails (occurred 2 times)
+
+**User Context:**
+- success (3 deleted)
+- success (42 emails)
+- success (8 emails)
+- success (3 emails)
+- success (142 emails)
+
+### 2026-02-21 - Usage Patterns
+**Timeframe Preferences:**
+- today (4 times)
+
+**Action Preferences:**
+- count_emails (performed 6 times)
+
+### 2026-02-21 - Episodic Themes
+**Key Insights:**
+- User checks 'count emails today' multiple times per session
+- User checks 'count emails today' multiple times per session
+
+**Recurring Events:**
+- regular cleanup behavior observed (occurred 2 times)
+- user shows strong preference for daily email counts (occurred 2 times)
+- count_emails: how many emails today? (occurred 6 times)
+- delete_emails: delete junk (occurred 2 times)
+- count_emails: count emails this morning (occurred 2 times)
+- list_emails: list important emails (occurred 2 times)
+- count_emails: what emails came today? (occurred 2 times)
+- count_emails: count emails today (occurred 12 times)
+- delete_emails: delete spam (occurred 2 times)
+- count_emails: count emails yesterday (occurred 2 times)
+- list_emails: show unread messages (occurred 2 times)
+- list_emails: list today's emails (occurred 2 times)
+- delete_emails: delete old emails (occurred 2 times)
+- search_emails: search for invoices (occurred 2 times)
+- list_emails: list unread emails (occurred 2 times)
+- count_emails: count emails this week (occurred 2 times)
+- delete_emails: delete junk emails (occurred 2 times)
+
+**User Context:**
+- success (18 emails)
+- Proactive email hygiene
+- success (30 emails)
+- success (22 emails)
+- success (20 emails)

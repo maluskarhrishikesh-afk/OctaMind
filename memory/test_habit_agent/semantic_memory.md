@@ -436,3 +436,43 @@
 - success (6 emails)
 - success (15 emails)
 - success (13 emails)
+
+### 2026-02-21 - Usage Patterns
+**Frequent Commands:**
+- count emails (used 8 times)
+
+**Action Preferences:**
+- count_emails (performed 8 times)
+
+### 2026-02-21 - Episodic Themes
+**Recurring Events:**
+- count_emails: count emails (occurred 24 times)
+- list_emails: show me important emails (occurred 12 times)
+- count_emails: what emails came today? (occurred 14 times)
+
+**User Context:**
+- success (6 emails)
+- success (4 emails)
+- success (11 emails)
+- success (7 emails)
+- success (13 emails)
+
+### 2026-02-21 - Usage Patterns
+**Frequent Commands:**
+- count emails (used 8 times)
+
+**Action Preferences:**
+- count_emails (performed 8 times)
+
+### 2026-02-21 - Episodic Themes
+**Recurring Events:**
+- count_emails: count emails (occurred 24 times)
+- list_emails: show me important emails (occurred 12 times)
+- count_emails: what emails came today? (occurred 14 times)
+
+**User Context:**
+- success (14 emails)
+- success (4 emails)
+- success (3 emails)
+- success (10 emails)
+- success (11 emails)
