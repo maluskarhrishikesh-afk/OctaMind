@@ -117,7 +117,7 @@ for email in emails:
 
 **"credentials.json not found"**
 - Download OAuth 2.0 credentials from Google Cloud Console
-- Save as `credentials.json` in this Learn_Python directory
+- Save as `credentials.json` in this OctaMind directory
 
 **"ModuleNotFoundError: No module named 'google'"**
 - Install: `pip install google-api-python-client google-auth-oauthlib google-auth-httplib2`

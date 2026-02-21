@@ -1,4 +1,4 @@
-# Learn Python - Documentation
+# OctaMind - Documentation
 
 This folder contains all the project documentation.
 
@@ -81,7 +81,7 @@ See examples in [README_GMAIL_INTEGRATION.md](README_GMAIL_INTEGRATION.md)
 ## 📁 Project Structure
 
 ```
-Learn_Python/
+OctaMind/
 ├── documentation/          # This folder
 │   ├── README.md          # This file
 │   ├── UI_REFERENCE.md    # ← UI pages, layouts, design system

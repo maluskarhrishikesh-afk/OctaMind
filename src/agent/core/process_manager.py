@@ -25,7 +25,7 @@ _PORT_END = 8600
 # Map agent type → which Streamlit script to launch
 _AGENT_SCRIPTS: Dict[str, str] = {
     "gmail": "src/agent/ui/email_agent_ui.py",
-    "google_drive": "src/agent/ui/generic_agent_ui.py",
+    "google_drive": "src/agent/ui/drive_agent_ui.py",
     "slack": "src/agent/ui/generic_agent_ui.py",
     "calendar": "src/agent/ui/generic_agent_ui.py",
     "stock_market": "src/agent/ui/generic_agent_ui.py",

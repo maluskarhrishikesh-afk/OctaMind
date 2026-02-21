@@ -3,7 +3,7 @@
 > **Purpose:** Reference document listing what has been built, what is in-progress,
 > and what is planned. Updated daily as work progresses.
 >
-> **Last updated:** 2026-02-21 (Personality traits + Automation scheduler + Configure panel)
+> **Last updated:** 2026-02-21 (Personality traits + Automation scheduler + Configure panel + Automation bug fixes + Run-frequency selector)
 
 ---
 
@@ -203,11 +203,12 @@
 **Automation Scheduler (`src/agent/core/automation_scheduler.py`)**
 - Lightweight background daemon thread (no external dependencies — pure Python `threading`)
 - Singleton per agent process — started once via `start_scheduler(agent_id)`, called from `email_agent_ui.py` on startup
-- Checks all enabled automations every **60 seconds**
+- Checks all enabled automations every **30 seconds** (was 60 s; lowered to support the 30-second frequency option)
 - Per-automation state stored in `memory/<agent_id>/automation_config.json`
 - Reads config fresh on every tick (picks up live changes from Configure panel immediately)
 - Writes `last_run` ISO timestamp after each successful execution
 - Both interval scheduling and "never ran → run now" logic implemented
+- `_is_due()` reads `interval_minutes` from the saved config entry first, falls back to the catalog default
 
 **Gmail Automations (`src/agent/core/automations/gmail_automations.py`)**
 10 built-in automations for Gmail agents:
@@ -227,12 +228,13 @@
 
 - Each automation logs result to Python logger and writes episodic memory events where appropriate
 - Automations are **agent-type-aware** — the catalog system (`automation_config.py`) allows future agent types to register their own automations without touching existing code
-- Enabling/disabling a toggle in the Configure panel saves immediately to `automation_config.json` — the scheduler picks it up on the next 60-second tick
+- Enabling/disabling a toggle in the Configure panel saves immediately to `automation_config.json` — the scheduler picks it up on the next 30-second tick
+- **⏱ Run Frequency selector** — Settings expander shown for all enabled automations; 10 options from 30 s to 24 h; persisted as `interval_minutes` in `automation_config.json`
 
 **Automation Config (`src/agent/core/automations/automation_config.py`)**
 - `AUTOMATION_CATALOG` dict: agent_type → {automation_id → metadata, defaults, param_schema}
 - `load_automation_config(agent_id)` / `save_automation_config(agent_id, config)` — JSON I/O
-- `update_automation_state(agent_id, auto_id, enabled, params)` — atomic single-automation update
+- `update_automation_state(agent_id, auto_id, enabled, params, interval_minutes)` — atomic single-automation update; optional `interval_minutes` float is persisted alongside params and read by the scheduler
 - `get_automations_for_agent_type(agent_type)` — returns the relevant catalog subset
 
 ```bash
@@ -241,7 +243,7 @@ start.exe    ← launches dashboard, opens browser
 stop.exe     ← stops everything
 
 # Option B — terminal
-$env:PYTHONPATH = "C:\Hrishikesh\Learn_Python"
+$env:PYTHONPATH = "C:\Hrishikesh\OctaMind"
 & .venv\Scripts\Activate.ps1
 python -m streamlit run src/agent/agent_dashboard.py --server.port 8501
 ```
@@ -352,6 +354,26 @@ stop.py  / stop.exe          ← Stop OctaMind (double-click)
 agents.json                  ← Agent configurations
 running_agents.json          ← Live process tracking (pid + port)
 ```
+
+---
+
+## 📝 Recent Changes (2026-02-21) — Automation Bug Fixes + Run-Frequency Selector
+
+### Automation Bug Fixes (`src/agent/core/automations/gmail_automations.py`)
+- **`out_of_office`** — Fixed critical bug: `send_email()` was called with `body=reply_message` but the parameter is `message=`; was silently `TypeError`-ing on every run so no reply was ever sent
+- **`out_of_office`** — Added deduplication: marks replied emails as read (`UNREAD` label removed) so the same email is never replied to again on the next tick
+- **`out_of_office`** — Inner `except Exception: pass` → `logger.error()` + error summary in the return string
+- **`auto_archive_newsletters`** — Query now filters `is:read label:promotions in:inbox` (was archiving all promotions incl. unread)
+- **`daily_digest`** — Digest content now saved to episodic memory (up to 600 chars); return value includes digest preview
+- **`auto_categorize`** — Per-email `except Exception: pass` → `logger.warning()` so failures appear in logs
+- **`weekly_report`** + **`auto_unsubscribe`** — Memory-write `except Exception: pass` → `logger.warning()` in both
+
+### Run-Frequency Selector (`src/agent/ui/agent_dashboard.py`)
+- Added **⏱ Run Frequency** selectbox in the Settings expander for every enabled automation
+- 10 presets: 30 s, 1 min, 5 min, 15 min (default), 30 min, 1 h, 2 h, 6 h, 12 h, 24 h
+- Persisted as `interval_minutes` (float) in `automation_config.json`
+- Settings expander now shown for **all** enabled automations (previously only for automations with `param_schema`)
+- Scheduler tick lowered from 60 s → 30 s to support sub-minute frequency
 
 ---
 

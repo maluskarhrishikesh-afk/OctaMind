@@ -70,7 +70,7 @@ src/agent/ui/agent_dashboard.py   ← port 8501 (main hub)
 ## 2. Repository Layout
 
 ```
-Learn_Python/
+OctaMind/
 ├── start.py                    Entry point – launch dashboard, open browser
 ├── stop.py                     Gracefully kill all OctaMind processes
 ├── run_agent_hub.py            Alternative launcher (no browser open)

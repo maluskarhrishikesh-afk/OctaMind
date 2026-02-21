@@ -1,4 +1,4 @@
-# Learn Python Project
+# OctaMind
 
 A comprehensive project integrating Gmail API and Gemma AI for intelligent email automation.
 
@@ -22,7 +22,7 @@ streamlit run src/agent/gemma_chat_ui.py
 ## 📁 Project Structure
 
 ```
-Learn_Python/
+OctaMind/
 ├── src/                    # Source code
 │   ├── email/             # Gmail integration
 │   └── agent/             # AI agents

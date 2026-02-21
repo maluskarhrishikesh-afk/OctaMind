@@ -1,4 +1,4 @@
-# Learn Python - Project Overview
+# OctaMind - Project Overview
 
 A comprehensive project integrating Gmail API and Gemma AI for intelligent email automation.
 
@@ -35,38 +35,40 @@ streamlit run src/agent/gemma_chat_ui.py
 ## 📁 Project Structure
 
 ```
-Learn_Python/
-├── src/                         # Main source code (NEW!)
-│   ├── email/                   # Gmail integration modules
-│   │   ├── gmail_service.py    # Core Gmail service
-│   │   ├── gmail_examples.py   # Basic examples
-│   │   ├── gmail_integration.py # Advanced integration
-│   │   └── mcp_server.py       # MCP server
-│   └── agent/                   # AI agent modules
-│       ├── model_downloader.py  # Model download utilities
-│       ├── gemma_runner.py      # Gemma runner (CLI)
-│       └── gemma_chat_ui.py     # Streamlit UI
+OctaMind/
+├── src/                              # Main source code
+│   ├── email/                        # Gmail integration modules
+│   │   ├── gmail_service.py         # Core Gmail service
+│   │   ├── gmail_auth.py            # OAuth helpers
+│   │   └── features/                # Phase 1–4 automation features
+│   └── agent/                        # AI agent modules
+│       ├── core/                    # Agent manager, process manager
+│       ├── llm/                     # LLM client
+│       ├── memory/                  # Persistent memory system
+│       └── ui/                      # Streamlit UIs
+│           ├── agent_dashboard.py   # Shim → dashboard/
+│           ├── email_agent_ui.py    # Shim → email_agent/
+│           ├── generic_agent_ui.py  # Generic agent chat
+│           ├── dashboard/           # Agent Hub (7 modules)
+│           └── email_agent/         # Gmail Agent UI (6 modules)
 │
-├── Convenience Scripts (use new src structure):
-│   ├── run_gmail_examples.py    # Run Gmail examples
-│   ├── run_gmail_integration.py # Run integration examples
-│   ├── run_gemma_chat.py        # Run Gemma CLI chat
-│   └── download_model.py        # Download Gemma model
+├── tests/                            # Test suite (153 tests)
+│   ├── agent/
+│   └── integration/
 │
-├── Legacy Files (for reference):
-│   ├── gmail_service.py         # Old version
-│   ├── app.py                   # Old version
-│   └── ... (other old files)
+├── Launcher Scripts:
+│   ├── start.py / stop.py           # Start/stop all agents
+│   └── run_agent_hub.py             # Launch the dashboard
 │
 ├── Configuration & Data:
-│   ├── credentials.json         # Gmail OAuth credentials
-│   ├── token.json              # Gmail auth token (auto-generated)
-│   └── model_cache/            # Cached Gemma models
+│   ├── agents.json                  # Agent registry
+│   ├── credentials.json             # Gmail OAuth credentials
+│   ├── token.json                   # Gmail auth token (auto-generated)
+│   └── model_cache/                 # Cached Gemma models
 │
 └── Documentation:
-    ├── README.md               # This file
-    ├── GMAIL_SETUP.md          # Gmail setup guide
-    └── src/README.md           # Source code documentation
+    ├── README.md                    # Root readme
+    └── documentation/               # All docs
 ```
 
 ## 🔧 Module Usage
@@ -262,7 +264,7 @@ When adding new features:
 **Import errors:**
 ```bash
 # Make sure you're in the project root
-cd C:\Hrishikesh\Learn_Python
+cd C:\Hrishikesh\OctaMind
 
 # Run with python module syntax
 python -m src.email.gmail_service

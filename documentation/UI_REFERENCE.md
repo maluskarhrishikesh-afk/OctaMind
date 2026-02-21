@@ -11,21 +11,24 @@
 OctaMind uses **three separate Streamlit applications** that communicate only through process management and shared JSON files. They do NOT share URL routes — each is a distinct process.
 
 ```
-┌─────────────────────────────────────────────┐
-│  Agent Hub Dashboard  (port 8501, always on) │
-│  agent_dashboard.py                          │
-│  — Create, start, stop, configure agents     │
-└──────────────────┬──────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  Agent Hub Dashboard  (port 8501, always on)             │
+│  agent_dashboard.py  →  ui/dashboard/  (7 modules)       │
+│  — Create, start, stop, configure agents                 │
+└──────────────────┬──────────────────────────────────────┘
                    │  spawns sub-process per agent
         ┌──────────┴──────────────┐
         ▼                         ▼
-┌───────────────────┐   ┌─────────────────────────┐
-│ Gmail Agent UI    │   │ Generic Agent Chat UI    │
-│ email_agent_ui.py │   │ generic_agent_ui.py      │
-│ port: dynamic     │   │ port: dynamic            │
-│ (Gmail agents)    │   │ (all other agent types)  │
-└───────────────────┘   └─────────────────────────┘
+┌───────────────────────────┐   ┌─────────────────────────┐
+│ Gmail Agent UI            │   │ Generic Agent Chat UI    │
+│ email_agent_ui.py         │   │ generic_agent_ui.py      │
+│  →  ui/email_agent/       │   │ port: dynamic            │
+│     (6 modules)           │   │ (all other agent types)  │
+│ port: dynamic             │   │                          │
+└───────────────────────────┘   └─────────────────────────┘
 ```
+
+> **Modular UI:** `agent_dashboard.py` and `email_agent_ui.py` are thin shims (~15–20 lines each). All logic lives in the `dashboard/` and `email_agent/` subpackages, keeping individual files short and focused.
 
 Each agent window runs on a unique port assigned at start time and shuts down automatically when the browser closes (watchdog thread).
 
@@ -33,7 +36,7 @@ Each agent window runs on a unique port assigned at start time and shuts down au
 
 ## Page 1 — Agent Hub Dashboard
 
-**File:** `src/agent/ui/agent_dashboard.py`  
+**File:** `src/agent/ui/agent_dashboard.py` (shim) → `src/agent/ui/dashboard/`  
 **Entry point:** `python start.py` or `streamlit run src/agent/ui/agent_dashboard.py`  
 **Default URL:** `http://localhost:8501`  
 **Page title:** `OctaMind — Agent Hub`
@@ -183,7 +186,7 @@ Adjust personality traits and set up recurring automations.
 
 ## Page 2 — Gmail Agent Chat
 
-**File:** `src/agent/ui/email_agent_ui.py`  
+**File:** `src/agent/ui/email_agent_ui.py` (shim) → `src/agent/ui/email_agent/`  
 **Launched by:** Dashboard "▶️ Start Agent" for Gmail-type agents  
 **URL:** `http://localhost:{dynamic_port}` (link shown on agent card)  
 **Page title:** `{Agent Name} — OctaMind`
@@ -397,12 +400,23 @@ padding: 24–32px;
 
 ## Source Files Quick Reference
 
-| File                               | Lines | Purpose                                |
-| ---------------------------------- | ----- | -------------------------------------- |
-| `src/agent/ui/agent_dashboard.py`  | ~762  | Agent Hub — main control centre        |
-| `src/agent/ui/email_agent_ui.py`   | ~1877 | Gmail agent chat + LLM orchestration   |
-| `src/agent/ui/generic_agent_ui.py` | ~399  | Generic chat for non-Gmail agent types |
-| `src/agent/assets/octopus.png`     | —     | Logo used across all UI pages          |
+| File                                        | Lines | Purpose                                              |
+| ------------------------------------------- | ----- | ---------------------------------------------------- |
+| `src/agent/ui/agent_dashboard.py`           | ~15   | Thin shim — re-exports `main` from `dashboard/`      |
+| `src/agent/ui/dashboard/app.py`             | ~200  | Agent Hub main() — sidebar + agent grid              |
+| `src/agent/ui/dashboard/agent_card.py`      | ~130  | `show_agent_card()` — card HTML + action buttons     |
+| `src/agent/ui/dashboard/configure_panel.py` | ~220  | `show_configure_panel()` — personality + automations |
+| `src/agent/ui/dashboard/create_form.py`     | ~120  | `show_create_agent_form()` — new-agent wizard        |
+| `src/agent/ui/dashboard/helpers.py`         | ~30   | Logo base64 helpers                                  |
+| `src/agent/ui/dashboard/styles.py`          | ~280  | `DARK_THEME_CSS` + `inject_css()`                    |
+| `src/agent/ui/email_agent_ui.py`            | ~20   | Thin shim — re-exports orchestrator + formatter      |
+| `src/agent/ui/email_agent/app.py`           | ~400  | Gmail agent main() — Streamlit rendering loop        |
+| `src/agent/ui/email_agent/conversation.py`  | ~80   | `handle_conversation()` — conversational LLM flow    |
+| `src/agent/ui/email_agent/formatters.py`    | ~500  | `format_email_result()` + date + Gmail-style cards   |
+| `src/agent/ui/email_agent/helpers.py`       | ~60   | Logo helpers + browser watchdog thread               |
+| `src/agent/ui/email_agent/orchestrator.py`  | ~700  | `execute_with_llm_orchestration()` + all tool routes |
+| `src/agent/ui/generic_agent_ui.py`          | ~399  | Generic chat for non-Gmail agent types               |
+| `src/agent/assets/octopus.png`              | —     | Logo used across all UI pages                        |
 
 ---
 
@@ -410,6 +424,6 @@ padding: 24–32px;
 
 1. **New agent type UI:** Copy `generic_agent_ui.py`, replace `_TYPE_META` with your type's metadata. Register in `AgentManager.AGENT_TYPES`. The process manager (`start_agent`) picks the launch file from `_AGENT_LAUNCHERS` in `process_manager.py`.
 
-2. **New panel on agent card:** Add a new `st.session_state` key for open/close state, follow the `configure_agent_id` pattern — toggle in the card button, render the panel function above the agent list in `main()`.
+2. **New panel on agent card:** Add a new `st.session_state` key for open/close state, follow the `configure_agent_id` pattern — toggle in `dashboard/agent_card.py`, render the panel function above the agent list in `dashboard/app.py::main()`.
 
-3. **New sidebar section in email agent:** Add a new `st.divider()` + section block inside the `with st.sidebar:` block in `email_agent_ui.py::main()`.
+3. **New sidebar section in email agent:** Add a new `st.divider()` + section block inside the `with st.sidebar:` block in `email_agent/app.py::main()`.

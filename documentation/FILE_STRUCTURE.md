@@ -1,9 +1,9 @@
 # Gmail Integration Files - Complete Structure
 
-## 📂 New Files Created in Learn_Python/
+## 📂 New Files Created in OctaMind/
 
 ```
-Learn_Python/
+OctaMind/
 ├── gmail_service.py                 ← MAIN MODULE (use this!)
 ├── gmail_examples.py                ← Simple examples
 ├── gmail_integration_examples.py    ← Advanced workflows
@@ -97,7 +97,7 @@ Learn_Python/
 ```
 1. Go to https://console.cloud.google.com/
 2. Create project → Enable Gmail API → Create OAuth 2.0 credentials
-3. Save as 'credentials.json' in Learn_Python/
+3. Save as 'credentials.json' in OctaMind/
 ```
 
 ### Step 2: Test Setup (1 command)
@@ -163,7 +163,7 @@ for recipient in ["user1@example.com", "user2@example.com"]:
 ## 📋 Checklist
 
 - [ ] Downloaded `credentials.json` from Google Cloud
-- [ ] Saved `credentials.json` in Learn_Python folder
+- [ ] Saved `credentials.json` in OctaMind folder
 - [ ] Ran `python test_gmail_setup.py` successfully
 - [ ] Verified all tests pass
 - [ ] Read one of the quick start guides
@@ -341,4 +341,4 @@ emails = list_emails(query='is:unread', max_results=5)
 
 ---
 
-**Happy emailing from Learn_Python!** 📧✨
+**Happy emailing from OctaMind!** 📧✨

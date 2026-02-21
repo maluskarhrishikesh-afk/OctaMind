@@ -66,5 +66,5 @@ You'll see a popup with your credentials - click "DOWNLOAD" (or the download ico
 Step 7: Save the Downloaded File
 The file downloads as client_secret_*.json or similar
 Rename it to: credentials.json
-Move it to: Your Learn_Python folder
-Path: Learn_Python
+Move it to: Your OctaMind folder
+Path: OctaMind

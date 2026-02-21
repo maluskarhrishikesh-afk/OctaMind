@@ -1,6 +1,6 @@
 # Gmail Service Setup Guide
 
-This guide explains how to set up Gmail authentication for sending emails from your Learn_Python project using the MCP Gmail service.
+This guide explains how to set up Gmail authentication for sending emails from your OctaMind project using the MCP Gmail service.
 
 ## Authentication Methods (in order of priority)
 
@@ -28,7 +28,7 @@ The Gmail service supports 3 authentication methods:
 2. Click "Create Credentials" → "OAuth client ID"
 3. Choose "Desktop application"
 4. Download the credentials file and name it `credentials.json`
-5. Place it in your Learn_Python directory (or the directory from which you run the script)
+5. Place it in your OctaMind directory (or the directory from which you run the script)
 
 ### Step 3: Automatic Authentication
 
@@ -230,7 +230,7 @@ example_send_email()
 - [ ] Create Google Cloud Project
 - [ ] Enable Gmail API
 - [ ] Create OAuth 2.0 credentials (download `credentials.json`)
-- [ ] Place `credentials.json` in Learn_Python directory
+- [ ] Place `credentials.json` in OctaMind directory
 - [ ] Run script - browser will open for authentication
 - [ ] Grant permissions
 - [ ] Test with `gmail_examples.py`

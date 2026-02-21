@@ -38,7 +38,8 @@ _scheduler_lock = threading.Lock()
 class AutomationScheduler:
     """Background scheduler for a single agent process."""
 
-    CHECK_INTERVAL_SECONDS = 60  # how often the loop polls (1 min)
+    # how often the loop polls (30 sec — supports sub-minute automations)
+    CHECK_INTERVAL_SECONDS = 30
 
     def __init__(self, agent_id: str) -> None:
         self.agent_id = agent_id
@@ -87,17 +88,20 @@ class AutomationScheduler:
         if not state.get("enabled", False):
             return False
 
-        # Look up the configured interval (fall back to 15 min)
-        interval_minutes = 15
-        try:
-            from src.agent.core.automations.automation_config import AUTOMATION_CATALOG
-            for catalog in AUTOMATION_CATALOG.values():
-                if automation_id in catalog:
-                    interval_minutes = catalog[automation_id].get(
-                        "interval_minutes", 15)
-                    break
-        except Exception:
-            pass
+        # User-configured interval in the saved config takes priority over catalog default
+        interval_minutes: float = state.get(
+            "interval_minutes", 0)  # type: ignore[assignment]
+        if not interval_minutes:
+            interval_minutes = 15
+            try:
+                from src.agent.core.automations.automation_config import AUTOMATION_CATALOG
+                for catalog in AUTOMATION_CATALOG.values():
+                    if automation_id in catalog:
+                        interval_minutes = catalog[automation_id].get(
+                            "interval_minutes", 15)
+                        break
+            except Exception:
+                pass
 
         last_run_str = state.get("last_run")
         if last_run_str is None:

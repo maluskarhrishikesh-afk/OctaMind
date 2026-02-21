@@ -8,7 +8,7 @@ A modular AI platform where users can create and manage multiple specialized age
 
 ### Core Components
 
-1. **Agent Hub (Dashboard)** - `src/agent/agent_dashboard.py`
+1. **Agent Hub Dashboard** - `src/agent/ui/dashboard/`
    - Central management interface
    - Create, view, configure, and delete agents
    - Real-time agent statistics
@@ -152,28 +152,40 @@ Agents are stored in `agents.json`:
 ## 📂 Project Structure
 
 ```
-Learn_Python/
+OctaMind/
 ├── src/
 │   ├── agent/
-│   │   ├── agent_dashboard.py      # Main dashboard UI
-│   │   ├── agent_manager.py        # Agent CRUD operations
-│   │   ├── email_agent_ui.py       # Gmail agent UI
-│   │   ├── llm_parser.py           # Natural language parsing
-│   │   ├── gemma_chat_ui.py        # (legacy)
-│   │   └── ...
+│   │   ├── core/                       # Agent manager, process manager
+│   │   ├── llm/                        # LLM client (GitHub Models / local)
+│   │   ├── memory/                     # Persistent memory system
+│   │   └── ui/
+│   │       ├── agent_dashboard.py      # Thin shim → dashboard/
+│   │       ├── email_agent_ui.py       # Thin shim → email_agent/
+│   │       ├── generic_agent_ui.py     # Generic chat UI (full)
+│   │       ├── dashboard/              # Agent Hub subpackage
+│   │       │   ├── app.py              # main() entry point
+│   │       │   ├── agent_card.py       # show_agent_card()
+│   │       │   ├── configure_panel.py  # show_configure_panel()
+│   │       │   ├── create_form.py      # show_create_agent_form()
+│   │       │   ├── helpers.py          # Logo helpers
+│   │       │   └── styles.py           # DARK_THEME_CSS
+│   │       └── email_agent/            # Gmail Agent UI subpackage
+│   │           ├── app.py              # main() entry point
+│   │           ├── conversation.py     # handle_conversation()
+│   │           ├── formatters.py       # format_email_result()
+│   │           ├── helpers.py          # Logo + watchdog
+│   │           └── orchestrator.py     # execute_with_llm_orchestration()
 │   └── email/
-│       ├── gmail_service.py        # Gmail API client
+│       ├── gmail_service.py            # Gmail API client
 │       └── ...
 ├── tests/
 │   ├── agent/
-│   │   └── test_llm_parser.py
-│   └── email/
-│       └── ...
-├── run_agent_hub.py                # Dashboard launcher
-├── agents.json                     # Agent storage
-├── credentials.json                # Gmail OAuth
-├── token.json                      # Gmail OAuth token
-└── .env                            # GitHub token
+│   └── integration/
+├── run_agent_hub.py                    # Dashboard launcher
+├── agents.json                         # Agent storage
+├── credentials.json                    # Gmail OAuth
+├── token.json                          # Gmail OAuth token
+└── .env                                # GitHub token
 ```
 
 ## 🔐 Security
@@ -253,7 +265,7 @@ To add a new agent type:
 
 1. Add template to `AgentManager.AGENT_TYPES` in `agent_manager.py`
 2. Create agent-specific UI (e.g., `drive_agent_ui.py`)
-3. Update dashboard routing in `agent_dashboard.py`
+3. Update dashboard routing in `src/agent/ui/dashboard/app.py`
 4. Document capabilities in this file
 
 ---

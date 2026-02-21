@@ -7,7 +7,7 @@
 All code has been successfully reorganized into a clean, maintainable structure:
 
 ```
-Learn_Python/
+OctaMind/
 └── src/
     ├── __init__.py
     ├── README.md

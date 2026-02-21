@@ -1,5 +1,5 @@
 """
-Tests package for Learn_Python project
+Tests package for OctaMind project
 
 This package contains all test files organized by functionality.
 """

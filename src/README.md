@@ -1,6 +1,6 @@
-# Learn Python - Source Code Structure
+# OctaMind - Source Code Structure
 
-This directory contains the organized source code for the Learn Python project.
+This directory contains the organized source code for the OctaMind project.
 
 ## Directory Structure
 
@@ -8,16 +8,34 @@ This directory contains the organized source code for the Learn Python project.
 src/
 ├── __init__.py              # Main package initialization
 ├── email/                   # Email-related modules
-│   ├── __init__.py         # Email package initialization
+│   ├── __init__.py
 │   ├── gmail_service.py    # Gmail API client and functions
-│   ├── gmail_examples.py   # Basic usage examples
-│   ├── gmail_integration.py # Advanced integration examples
-│   └── mcp_server.py       # MCP server for Gmail
+│   ├── gmail_auth.py       # OAuth helpers
+│   ├── gmail_summarizer.py # Email summarisation
+│   └── features/           # Phase 1–4 Gmail automation features
 └── agent/                   # AI Agent modules
-    ├── __init__.py         # Agent package initialization
-    ├── model_downloader.py # Model download utilities
-    ├── gemma_runner.py     # Gemma model runner
-    └── gemma_chat_ui.py    # Streamlit chat interface
+    ├── __init__.py
+    ├── core/               # Agent manager, process manager, automations
+    ├── llm/                # LLM client (GitHub Models / local)
+    ├── memory/             # Persistent memory system (6 memory files)
+    └── ui/                 # Streamlit user interfaces
+        ├── agent_dashboard.py      # Thin shim → dashboard/
+        ├── email_agent_ui.py       # Thin shim → email_agent/
+        ├── generic_agent_ui.py     # Generic chat UI (full)
+        ├── assets/                 # Shared assets (octopus.png, etc.)
+        ├── dashboard/              # Agent Hub subpackage (7 modules)
+        │   ├── app.py              # main() — page config, sidebar, grid
+        │   ├── agent_card.py       # show_agent_card()
+        │   ├── configure_panel.py  # show_configure_panel()
+        │   ├── create_form.py      # show_create_agent_form()
+        │   ├── helpers.py          # Logo base64 helpers
+        │   └── styles.py           # DARK_THEME_CSS + inject_css()
+        └── email_agent/            # Gmail Agent UI subpackage (6 modules)
+            ├── app.py              # main() — Streamlit rendering loop
+            ├── conversation.py     # handle_conversation()
+            ├── formatters.py       # format_email_result() + Gmail cards
+            ├── helpers.py          # Logo + browser watchdog thread
+            └── orchestrator.py     # execute_with_llm_orchestration()
 ```
 
 ## Email Module (`src/email/`)
@@ -100,7 +118,7 @@ print(response)
 
 ### Gmail Service Test:
 ```bash
-cd C:\Hrishikesh\Learn_Python
+cd C:\Hrishikesh\OctaMind
 python -m src.email.gmail_service
 ```
 

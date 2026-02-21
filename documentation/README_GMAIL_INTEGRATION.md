@@ -1,8 +1,8 @@
-# Gmail MCP Integration Setup - Learn_Python Project
+# Gmail MCP Integration Setup - OctaMind Project
 
 ## 📋 Overview
 
-You now have a complete Gmail integration system that connects your `Learn_Python` project with the `mcp-google-email` MCP server. This allows you to send emails, read emails, and automate email tasks.
+You now have a complete Gmail integration system that connects your `OctaMind` project with the `mcp-google-email` MCP server. This allows you to send emails, read emails, and automate email tasks.
 
 ---
 
@@ -27,7 +27,7 @@ You now have a complete Gmail integration system that connects your `Learn_Pytho
 2. Create a new project
 3. Enable Gmail API
 4. Create OAuth 2.0 credentials (Desktop app type)
-5. Download and save as **`credentials.json`** in your `Learn_Python` folder
+5. Download and save as **`credentials.json`** in your `OctaMind` folder
 
 ### Step 2: Test Your Setup
 ```bash
@@ -47,7 +47,7 @@ from gmail_service import send_email
 result = send_email(
     to="recipient@example.com",
     subject="Hello from Python!",
-    message="This email is from my Learn_Python project"
+    message="This email is from my OctaMind project"
 )
 
 if result['status'] == 'success':
@@ -248,7 +248,7 @@ python gmail_examples.py
 ### "credentials.json not found"
 ```
 Solution: Download OAuth 2.0 credentials from Google Cloud Console
-and save as 'credentials.json' in Learn_Python folder
+and save as 'credentials.json' in OctaMind folder
 ```
 
 ### "ModuleNotFoundError: google"
@@ -326,7 +326,7 @@ You don't need to interact with the MCP server directly - just use `gmail_servic
 ## ✅ Verification Checklist
 
 - [ ] OAuth credentials downloaded from Google Cloud
-- [ ] `credentials.json` saved in Learn_Python folder
+- [ ] `credentials.json` saved in OctaMind folder
 - [ ] `test_gmail_setup.py` runs successfully
 - [ ] Can send test email with `send_email()`
 - [ ] Can list emails with `list_emails()`

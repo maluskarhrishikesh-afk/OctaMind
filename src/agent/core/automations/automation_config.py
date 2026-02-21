@@ -159,13 +159,16 @@ def update_automation_state(
     automation_id: str,
     enabled: bool,
     params: Optional[Dict[str, Any]] = None,
+    interval_minutes: Optional[float] = None,
 ) -> None:
-    """Enable/disable one automation and optionally update its params."""
+    """Enable/disable one automation and optionally update its params and run interval."""
     config = load_automation_config(agent_id)
     entry = config.get(automation_id, {})
     entry["enabled"] = enabled
     if params is not None:
         entry["params"] = params
+    if interval_minutes is not None:
+        entry["interval_minutes"] = interval_minutes
     entry.setdefault("last_run", None)
     config[automation_id] = entry
     save_automation_config(agent_id, config)

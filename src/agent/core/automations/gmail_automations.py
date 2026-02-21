@@ -52,7 +52,7 @@ def auto_archive_newsletters(agent_id: str, params: Dict[str, Any]) -> str:
     try:
         service = _svc()
         result = service.users().messages().list(
-            userId="me", labelIds=["CATEGORY_PROMOTIONS"], maxResults=30
+            userId="me", q="is:read label:promotions in:inbox", maxResults=30
         ).execute()
         messages = result.get("messages", [])
         if not messages:
@@ -77,13 +77,14 @@ def daily_digest(agent_id: str, params: Dict[str, Any]) -> str:
         try:
             from src.agent.memory.agent_memory import get_agent_memory
             mem = get_agent_memory(agent_id)
+            digest_text = str(digest)[:600] if digest else "(empty)"
             mem.add_episodic_event(
-                event=f"[Auto] Daily email digest generated at {datetime.now().strftime('%H:%M')}",
+                event=f"[Auto] Daily digest at {datetime.now().strftime('%H:%M')}: {digest_text}",
                 importance="low",
             )
-        except Exception:
-            pass
-        return "Daily digest generated"
+        except Exception as exc:
+            logger.warning("[%s] daily_digest memory write: %s", agent_id, exc)
+        return f"Daily digest generated: {str(digest)[:200] if digest else '(empty)'}"
     except Exception as exc:
         logger.error("[%s] daily_digest: %s", agent_id, exc)
         return f"Error: {exc}"
@@ -151,8 +152,9 @@ def weekly_report(agent_id: str, params: Dict[str, Any]) -> str:
                 event=f"[Auto] Weekly report: {summary}",
                 importance="medium",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "[%s] weekly_report memory write: %s", agent_id, exc)
         return "Weekly report generated and saved to memory"
     except Exception as exc:
         logger.error("[%s] weekly_report: %s", agent_id, exc)
@@ -173,8 +175,9 @@ def auto_categorize(agent_id: str, params: Dict[str, Any]) -> str:
             try:
                 auto_categorize_email(m["id"])
                 count += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "[%s] auto_categorize email %s: %s", agent_id, m["id"], exc)
         return f"Categorized {count} email(s)"
     except Exception as exc:
         logger.error("[%s] auto_categorize: %s", agent_id, exc)
@@ -196,8 +199,9 @@ def auto_unsubscribe(agent_id: str, params: Dict[str, Any]) -> str:
                 event=f"[Auto] Found {count} newsletter senders: {sender_list}",
                 importance="low",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "[%s] auto_unsubscribe memory write: %s", agent_id, exc)
         return f"Detected {count} newsletter sender(s). Check agent memory for details."
     except Exception as exc:
         logger.error("[%s] auto_unsubscribe: %s", agent_id, exc)
@@ -205,7 +209,7 @@ def auto_unsubscribe(agent_id: str, params: Dict[str, Any]) -> str:
 
 
 def out_of_office(agent_id: str, params: Dict[str, Any]) -> str:
-    """Send out-of-office auto-replies to up to 5 new unread emails."""
+    """Send out-of-office auto-replies to new unread emails, then mark them read."""
     try:
         reply_message = params.get(
             "reply_message",
@@ -221,15 +225,16 @@ def out_of_office(agent_id: str, params: Dict[str, Any]) -> str:
 
         service = _svc()
         res = service.users().messages().list(
-            userId="me", q="is:unread -from:me", maxResults=10
+            userId="me", q="is:unread -from:me in:inbox", maxResults=10
         ).execute()
         messages = res.get("messages", [])
         count = 0
+        errors = []
         for m in messages[:5]:
             try:
                 meta = service.users().messages().get(
                     userId="me", id=m["id"], format="metadata",
-                    metadataHeaders=["From", "Subject"],
+                    metadataHeaders=["From", "Subject", "Message-ID"],
                 ).execute()
                 headers = {
                     h["name"]: h["value"]
@@ -237,17 +242,36 @@ def out_of_office(agent_id: str, params: Dict[str, Any]) -> str:
                 }
                 from_addr = headers.get("From", "")
                 subject = headers.get("Subject", "(no subject)")
-                if from_addr and "noreply" not in from_addr.lower():
-                    from src.email.gmail_service import send_email
-                    send_email(
-                        to=from_addr,
-                        subject=f"Re: {subject}",
-                        body=reply_message,
-                    )
+
+                # Skip no-reply senders and our own address
+                skip_patterns = ["noreply", "no-reply", "donotreply",
+                                 "notifications@", "mailer-daemon"]
+                if not from_addr or any(p in from_addr.lower() for p in skip_patterns):
+                    continue
+
+                from src.email.gmail_service import send_email
+                result = send_email(
+                    to=from_addr,
+                    subject=f"Re: {subject}",
+                    message=reply_message,   # ← fixed: was "body="
+                )
+                if result.get("status") == "success":
+                    # Mark as read so we don't reply again next run
+                    service.users().messages().modify(
+                        userId="me", id=m["id"],
+                        body={"removeLabelIds": ["UNREAD"]},
+                    ).execute()
                     count += 1
-            except Exception:
-                pass
-        return f"Sent {count} auto-reply message(s)"
+                else:
+                    errors.append(result.get("message", "unknown error"))
+            except Exception as exc:
+                logger.error("[%s] out_of_office inner: %s", agent_id, exc)
+                errors.append(str(exc))
+
+        summary = f"Sent {count} auto-reply message(s)"
+        if errors:
+            summary += f" | {len(errors)} error(s): {errors[0]}"
+        return summary
     except Exception as exc:
         logger.error("[%s] out_of_office: %s", agent_id, exc)
         return f"Error: {exc}"
