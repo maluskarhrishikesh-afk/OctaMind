@@ -1,0 +1,1903 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OctaMind — AI Agent Platform</title>
+    <meta name="description"
+        content="A modular, open-source AI platform where you create and manage specialized agents that automate Gmail, Drive, Slack, Calendar and more — using natural language." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+
+    <style>
+        /* ── Reset & Globals ─────────────────────────────── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --pink: #e91e8c;
+            --pink-light: #ff4db8;
+            --pink-dim: rgba(233, 30, 140, 0.15);
+            --teal: #a8dadc;
+            --bg0: #0a0e1a;
+            --bg1: #0f172a;
+            --bg2: #1a1a2e;
+            --bg3: #16213e;
+            --card-bg: rgba(255, 255, 255, 0.04);
+            --border: rgba(233, 30, 140, 0.25);
+            --border-dim: rgba(255, 255, 255, 0.06);
+            --text: #e2e8f0;
+            --muted: #8892a4;
+            --radius: 16px;
+            --glow: 0 0 40px rgba(233, 30, 140, 0.3);
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg0);
+            color: var(--text);
+            overflow-x: hidden;
+            line-height: 1.6;
+        }
+
+        /* ── Scrollbar ───────────────────────────────────── */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg1);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--pink);
+            border-radius: 3px;
+        }
+
+        /* ── Background Orbs ─────────────────────────────── */
+        .bg-orbs {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: 0;
+            overflow: hidden;
+        }
+
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(100px);
+            opacity: 0.18;
+            animation: drift 18s ease-in-out infinite alternate;
+        }
+
+        .orb-1 {
+            width: 600px;
+            height: 600px;
+            background: var(--pink);
+            top: -150px;
+            left: -150px;
+            animation-duration: 20s;
+        }
+
+        .orb-2 {
+            width: 500px;
+            height: 500px;
+            background: #7c3aed;
+            top: 40%;
+            right: -100px;
+            animation-duration: 25s;
+            animation-delay: -8s;
+        }
+
+        .orb-3 {
+            width: 400px;
+            height: 400px;
+            background: var(--teal);
+            bottom: -100px;
+            left: 30%;
+            animation-duration: 22s;
+            animation-delay: -12s;
+            opacity: 0.1;
+        }
+
+        @keyframes drift {
+            0% {
+                transform: translate(0, 0) scale(1);
+            }
+
+            100% {
+                transform: translate(60px, 40px) scale(1.1);
+            }
+        }
+
+        /* ── NAV ─────────────────────────────────────────── */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 6%;
+            background: rgba(10, 14, 26, 0.75);
+            backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border-dim);
+            transition: background 0.3s;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: #fff;
+            text-decoration: none;
+            letter-spacing: -0.5px;
+        }
+
+        .nav-logo span {
+            color: var(--pink);
+        }
+
+        .logo-octopus {
+            font-size: 1.6rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 32px;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: #fff;
+        }
+
+        .btn-nav {
+            padding: 8px 22px;
+            border-radius: 8px;
+            background: var(--pink);
+            color: #fff;
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-nav:hover {
+            background: var(--pink-light);
+            transform: translateY(-1px);
+            box-shadow: var(--glow);
+        }
+
+        /* ── Hamburger (mobile) ──────────────────────────── */
+        .hamburger {
+            display: none;
+            flex-direction: column;
+            gap: 5px;
+            cursor: pointer;
+        }
+
+        .hamburger span {
+            display: block;
+            width: 24px;
+            height: 2px;
+            background: var(--text);
+            border-radius: 2px;
+            transition: all 0.3s;
+        }
+
+        /* ── Sections ────────────────────────────────────── */
+        section {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ── HERO ────────────────────────────────────────── */
+        #hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 120px 6% 80px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 18px;
+            border-radius: 100px;
+            border: 1px solid var(--border);
+            background: var(--pink-dim);
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--pink-light);
+            margin-bottom: 32px;
+            letter-spacing: 0.5px;
+            animation: fadeUp 0.8s ease both;
+        }
+
+        .badge-dot {
+            width: 7px;
+            height: 7px;
+            background: var(--pink);
+            border-radius: 50%;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.4);
+                opacity: 0.6;
+            }
+        }
+
+        h1 {
+            font-size: clamp(2.8rem, 7vw, 5.5rem);
+            font-weight: 900;
+            line-height: 1.05;
+            letter-spacing: -2px;
+            margin-bottom: 24px;
+            animation: fadeUp 0.8s 0.1s ease both;
+        }
+
+        h1 .gradient-text {
+            background: linear-gradient(135deg, var(--pink) 0%, #b721ff 50%, var(--teal) 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-sub {
+            max-width: 640px;
+            font-size: 1.15rem;
+            color: var(--muted);
+            margin-bottom: 44px;
+            line-height: 1.7;
+            font-weight: 400;
+            animation: fadeUp 0.8s 0.2s ease both;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-bottom: 72px;
+            animation: fadeUp 0.8s 0.3s ease both;
+        }
+
+        .btn-primary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 32px;
+            border-radius: 10px;
+            background: var(--pink);
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 700;
+            text-decoration: none;
+            transition: all 0.25s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn-primary:hover {
+            background: var(--pink-light);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(233, 30, 140, 0.4);
+        }
+
+        .btn-secondary {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 32px;
+            border-radius: 10px;
+            background: transparent;
+            color: var(--text);
+            font-size: 0.95rem;
+            font-weight: 600;
+            text-decoration: none;
+            border: 1px solid var(--border-dim);
+            transition: all 0.25s;
+            cursor: pointer;
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--border);
+            background: var(--card-bg);
+            transform: translateY(-2px);
+        }
+
+        /* Terminal preview */
+        .hero-terminal {
+            width: 100%;
+            max-width: 680px;
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--border-dim);
+            overflow: hidden;
+            box-shadow: 0 40px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
+            animation: fadeUp 0.8s 0.4s ease both;
+        }
+
+        .terminal-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.04);
+            border-bottom: 1px solid var(--border-dim);
+        }
+
+        .terminal-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .td-red {
+            background: #ff5f57;
+        }
+
+        .td-amber {
+            background: #febc2e;
+        }
+
+        .td-green {
+            background: #28c840;
+        }
+
+        .terminal-title {
+            flex: 1;
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        .terminal-body {
+            padding: 24px 28px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            line-height: 1.8;
+        }
+
+        .t-comment {
+            color: #4a5568;
+        }
+
+        .t-prompt {
+            color: var(--teal);
+        }
+
+        .t-cmd {
+            color: #e2e8f0;
+        }
+
+        .t-output {
+            color: var(--muted);
+        }
+
+        .t-success {
+            color: #68d391;
+        }
+
+        .t-pink {
+            color: var(--pink-light);
+        }
+
+        .t-cursor {
+            display: inline-block;
+            width: 9px;
+            height: 16px;
+            background: var(--pink);
+            vertical-align: middle;
+            animation: blink 1.1s step-end infinite;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0;
+            }
+        }
+
+        /* ── Stat bar ────────────────────────────────────── */
+        .stats-bar {
+            display: flex;
+            gap: 0;
+            justify-content: center;
+            flex-wrap: wrap;
+            padding: 48px 6%;
+            background: rgba(255, 255, 255, 0.02);
+            border-top: 1px solid var(--border-dim);
+            border-bottom: 1px solid var(--border-dim);
+        }
+
+        .stat-item {
+            flex: 1;
+            min-width: 160px;
+            max-width: 250px;
+            padding: 28px 32px;
+            text-align: center;
+            border-right: 1px solid var(--border-dim);
+        }
+
+        .stat-item:last-child {
+            border-right: none;
+        }
+
+        .stat-number {
+            font-size: 2.4rem;
+            font-weight: 900;
+            color: #fff;
+            letter-spacing: -1px;
+        }
+
+        .stat-number span {
+            color: var(--pink);
+        }
+
+        .stat-label {
+            font-size: 0.82rem;
+            color: var(--muted);
+            margin-top: 4px;
+            font-weight: 500;
+        }
+
+        /* ── Section Headers ─────────────────────────────── */
+        .section-header {
+            text-align: center;
+            margin-bottom: 64px;
+        }
+
+        .section-tag {
+            display: inline-block;
+            padding: 4px 14px;
+            border-radius: 100px;
+            border: 1px solid var(--border);
+            background: var(--pink-dim);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--pink-light);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            font-size: clamp(1.8rem, 4vw, 2.8rem);
+            font-weight: 900;
+            letter-spacing: -1px;
+            line-height: 1.15;
+            color: #fff;
+            margin-bottom: 16px;
+        }
+
+        h2 em {
+            font-style: normal;
+            color: var(--pink);
+        }
+
+        .section-sub {
+            font-size: 1rem;
+            color: var(--muted);
+            max-width: 520px;
+            margin: 0 auto;
+            line-height: 1.7;
+        }
+
+        /* ── Sections padding ────────────────────────────── */
+        .section-pad {
+            padding: 100px 6%;
+        }
+
+        .section-pad-sm {
+            padding: 72px 6%;
+        }
+
+        /* ── FEATURES ────────────────────────────────────── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            max-width: 1100px;
+            margin: 0 auto;
+        }
+
+        .feature-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-dim);
+            border-radius: var(--radius);
+            padding: 36px 32px;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--pink), transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--border);
+            transform: translateY(-4px);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3), var(--glow);
+        }
+
+        .feature-card:hover::before {
+            opacity: 1;
+        }
+
+        .feature-icon {
+            font-size: 2.2rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 60px;
+            height: 60px;
+            background: var(--pink-dim);
+            border-radius: 14px;
+            border: 1px solid var(--border);
+        }
+
+        .feature-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+
+        .feature-desc {
+            font-size: 0.9rem;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        /* ── AGENT TYPES ─────────────────────────────────── */
+        #agents {
+            background: linear-gradient(180deg, transparent 0%, rgba(233, 30, 140, 0.04) 50%, transparent 100%);
+        }
+
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .agent-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-dim);
+            border-radius: var(--radius);
+            padding: 32px 24px;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: default;
+            position: relative;
+        }
+
+        .agent-card.active {
+            border-color: var(--border);
+            background: rgba(233, 30, 140, 0.08);
+        }
+
+        .agent-card:hover {
+            transform: translateY(-6px);
+            border-color: var(--border);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+        }
+
+        .agent-icon {
+            font-size: 2.8rem;
+            margin-bottom: 16px;
+        }
+
+        .agent-name {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+
+        .agent-desc {
+            font-size: 0.82rem;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .agent-badge {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            padding: 3px 10px;
+            border-radius: 100px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-live {
+            background: rgba(40, 167, 69, 0.2);
+            color: #68d391;
+            border: 1px solid rgba(40, 167, 69, 0.4);
+        }
+
+        .badge-soon {
+            background: rgba(233, 30, 140, 0.15);
+            color: var(--pink-light);
+            border: 1px solid var(--border);
+        }
+
+        /* ── HOW IT WORKS ────────────────────────────────── */
+        #how {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .steps {
+            display: flex;
+            gap: 0;
+            max-width: 960px;
+            margin: 0 auto;
+            border: 1px solid var(--border-dim);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .step {
+            flex: 1;
+            padding: 48px 36px;
+            text-align: center;
+            border-right: 1px solid var(--border-dim);
+            background: var(--card-bg);
+            transition: background 0.3s;
+            position: relative;
+        }
+
+        .step:last-child {
+            border-right: none;
+        }
+
+        .step:hover {
+            background: rgba(233, 30, 140, 0.06);
+        }
+
+        .step-number {
+            font-size: 3rem;
+            font-weight: 900;
+            color: var(--pink);
+            opacity: 0.3;
+            line-height: 1;
+            margin-bottom: 20px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .step-title {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+
+        .step-desc {
+            font-size: 0.87rem;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        /* ── DEMO COMMAND ────────────────────────────────── */
+        #demo {
+            text-align: center;
+        }
+
+        .commands-showcase {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .command-box {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-dim);
+            border-radius: 12px;
+            padding: 20px 28px;
+            margin-bottom: 14px;
+            text-align: left;
+            transition: all 0.25s;
+            cursor: default;
+        }
+
+        .command-box:hover {
+            border-color: var(--border);
+            transform: translateX(6px);
+            background: rgba(233, 30, 140, 0.06);
+        }
+
+        .cmd-icon {
+            font-size: 1.4rem;
+            flex-shrink: 0;
+        }
+
+        .cmd-text {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            color: var(--teal);
+        }
+
+        .cmd-result {
+            font-size: 0.78rem;
+            color: var(--muted);
+            margin-top: 4px;
+        }
+
+        /* ── ARCHITECTURE ────────────────────────────────── */
+        #architecture {
+            background: linear-gradient(180deg, transparent 0%, rgba(124, 58, 237, 0.05) 50%, transparent 100%);
+        }
+
+        .arch-diagram {
+            max-width: 820px;
+            margin: 0 auto;
+            background: rgba(10, 14, 26, 0.8);
+            border: 1px solid var(--border-dim);
+            border-radius: 20px;
+            padding: 48px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .arch-center {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .arch-hub {
+            display: inline-block;
+            padding: 18px 40px;
+            background: linear-gradient(135deg, var(--pink-dim), rgba(124, 58, 237, 0.2));
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            font-size: 0.9rem;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .arch-hub small {
+            display: block;
+            color: var(--muted);
+            font-size: 0.72rem;
+            margin-top: 4px;
+        }
+
+        .arch-arrow {
+            text-align: center;
+            color: var(--pink);
+            font-size: 1.2rem;
+            margin: 16px 0;
+            opacity: 0.6;
+        }
+
+        .arch-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+
+        .arch-node {
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border-dim);
+            background: var(--card-bg);
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--muted);
+            transition: border-color 0.2s;
+        }
+
+        .arch-node:hover {
+            border-color: var(--border);
+        }
+
+        .arch-node-icon {
+            font-size: 1.4rem;
+            margin-bottom: 8px;
+        }
+
+        .arch-node-title {
+            color: #fff;
+            font-weight: 600;
+            margin-bottom: 4px;
+            font-size: 0.78rem;
+        }
+
+        /* ── TECH STACK ──────────────────────────────────── */
+        #tech .tech-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            justify-content: center;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .tech-pill {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 22px;
+            border-radius: 100px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-dim);
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--text);
+            transition: all 0.25s;
+        }
+
+        .tech-pill:hover {
+            border-color: var(--border);
+            background: rgba(233, 30, 140, 0.08);
+            transform: translateY(-2px);
+        }
+
+        .tech-logo {
+            font-size: 1.2rem;
+        }
+
+        /* ── ROADMAP ─────────────────────────────────────── */
+        #roadmap {
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .roadmap-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 24px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .phase-card {
+            border: 1px solid var(--border-dim);
+            border-radius: var(--radius);
+            padding: 32px 28px;
+            background: var(--card-bg);
+            transition: all 0.3s;
+        }
+
+        .phase-card.current {
+            border-color: var(--border);
+            background: rgba(233, 30, 140, 0.06);
+        }
+
+        .phase-card:hover {
+            transform: translateY(-4px);
+            border-color: var(--border);
+        }
+
+        .phase-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .phase-number {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: var(--pink-dim);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 800;
+            color: var(--pink);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .phase-label {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .phase-status {
+            font-size: 0.72rem;
+            color: var(--muted);
+            margin-top: 2px;
+        }
+
+        .phase-items {
+            list-style: none;
+        }
+
+        .phase-items li {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-dim);
+            font-size: 0.87rem;
+            color: var(--muted);
+        }
+
+        .phase-items li:last-child {
+            border-bottom: none;
+        }
+
+        .phase-items li.done {
+            color: var(--text);
+        }
+
+        .check-done {
+            color: #68d391;
+            font-size: 0.9rem;
+        }
+
+        .check-todo {
+            color: var(--muted);
+            font-size: 0.9rem;
+            opacity: 0.4;
+        }
+
+        /* ── QUICKSTART ──────────────────────────────────── */
+        #quickstart {
+            background: linear-gradient(180deg, transparent, rgba(233, 30, 140, 0.06), transparent);
+        }
+
+        .qs-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 32px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .qs-step-label {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .qs-num {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: var(--pink);
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 800;
+            flex-shrink: 0;
+        }
+
+        .qs-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .code-block {
+            background: rgba(10, 14, 26, 0.9);
+            border: 1px solid var(--border-dim);
+            border-radius: 12px;
+            padding: 22px 24px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            line-height: 1.9;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .code-block .cb-comment {
+            color: #4a5568;
+        }
+
+        .code-block .cb-cmd {
+            color: var(--teal);
+        }
+
+        .code-block .cb-flag {
+            color: var(--pink-light);
+        }
+
+        .code-block .cb-str {
+            color: #fbbf24;
+        }
+
+        /* ── CTA SECTION ─────────────────────────────────── */
+        #cta {
+            text-align: center;
+            padding: 120px 6%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cta-card {
+            max-width: 760px;
+            margin: 0 auto;
+            background: linear-gradient(135deg, rgba(233, 30, 140, 0.12) 0%, rgba(124, 58, 237, 0.1) 50%, rgba(168, 218, 220, 0.06) 100%);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 72px 60px;
+            position: relative;
+        }
+
+        .cta-card h2 {
+            font-size: clamp(1.8rem, 4vw, 2.6rem);
+            margin-bottom: 16px;
+        }
+
+        .cta-card p {
+            font-size: 1rem;
+            color: var(--muted);
+            max-width: 440px;
+            margin: 0 auto 40px;
+            line-height: 1.7;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        /* ── FOOTER ──────────────────────────────────────── */
+        footer {
+            padding: 48px 6% 32px;
+            border-top: 1px solid var(--border-dim);
+            background: rgba(10, 14, 26, 0.5);
+        }
+
+        .footer-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 40px;
+            margin-bottom: 48px;
+        }
+
+        .footer-brand .nav-logo {
+            font-size: 1.2rem;
+            margin-bottom: 12px;
+            display: flex;
+        }
+
+        .footer-brand p {
+            font-size: 0.85rem;
+            color: var(--muted);
+            max-width: 280px;
+            line-height: 1.7;
+        }
+
+        .footer-links h4 {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #fff;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+        }
+
+        .footer-links ul {
+            list-style: none;
+        }
+
+        .footer-links ul li {
+            margin-bottom: 10px;
+        }
+
+        .footer-links ul a {
+            font-size: 0.87rem;
+            color: var(--muted);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .footer-links ul a:hover {
+            color: var(--pink-light);
+        }
+
+        .footer-bottom {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 0.8rem;
+            color: var(--muted);
+            padding-top: 24px;
+            border-top: 1px solid var(--border-dim);
+        }
+
+        .footer-bottom a {
+            color: var(--muted);
+            text-decoration: none;
+        }
+
+        .footer-bottom a:hover {
+            color: var(--pink-light);
+        }
+
+        .heart {
+            color: var(--pink);
+        }
+
+        /* ── Animations ──────────────────────────────────── */
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(24px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .reveal {
+            opacity: 0;
+            transform: translateY(32px);
+            transition: opacity 0.7s ease, transform 0.7s ease;
+        }
+
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* ── Responsive ──────────────────────────────────── */
+        @media (max-width: 860px) {
+            .nav-links {
+                display: none;
+            }
+
+            .nav-links.open {
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+                position: fixed;
+                top: 0;
+                right: 0;
+                bottom: 0;
+                width: 260px;
+                background: rgba(10, 14, 26, 0.97);
+                padding: 80px 32px 40px;
+                border-left: 1px solid var(--border-dim);
+                z-index: 200;
+                backdrop-filter: blur(20px);
+            }
+
+            .nav-links.open a {
+                font-size: 1rem;
+            }
+
+            .hamburger {
+                display: flex;
+                z-index: 300;
+            }
+
+            .steps {
+                flex-direction: column;
+            }
+
+            .step {
+                border-right: none;
+                border-bottom: 1px solid var(--border-dim);
+            }
+
+            .step:last-child {
+                border-bottom: none;
+            }
+
+            .qs-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .arch-row {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .cta-card {
+                padding: 48px 32px;
+            }
+
+            .footer-top {
+                flex-direction: column;
+            }
+
+            .stat-item {
+                border-right: none;
+                border-bottom: 1px solid var(--border-dim);
+            }
+        }
+
+        @media (max-width: 520px) {
+            h1 {
+                letter-spacing: -1.5px;
+            }
+
+            .hero-buttons {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .btn-primary,
+            .btn-secondary {
+                justify-content: center;
+            }
+
+            .arch-row {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Background orbs -->
+    <div class="bg-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <!-- ── NAV ──────────────────────────────────────────── -->
+    <nav id="navbar">
+        <a href="#hero" class="nav-logo">
+            <span class="logo-octopus">🐙</span>
+            Octa<span>Mind</span>
+        </a>
+        <div class="nav-links" id="navLinks">
+            <a href="#features">Features</a>
+            <a href="#agents">Agents</a>
+            <a href="#how">How it works</a>
+            <a href="#roadmap">Roadmap</a>
+            <a href="#quickstart">Quick Start</a>
+            <a href="https://github.com" class="btn-nav">⭐ Star on GitHub</a>
+        </div>
+        <div class="hamburger" id="hamburger" onclick="toggleNav()">
+            <span></span><span></span><span></span>
+        </div>
+    </nav>
+
+    <!-- ── HERO ─────────────────────────────────────────── -->
+    <section id="hero">
+        <div class="badge">
+            <div class="badge-dot"></div> Open Source · Python 3.13 · MIT License
+        </div>
+
+        <h1>
+            AI Agents that<br>
+            <span class="gradient-text">actually do things</span>
+        </h1>
+
+        <p class="hero-sub">
+            OctaMind is a modular, open-source AI platform where you create specialized agents
+            that automate Gmail, Drive, Slack, Calendar — and more — using plain natural language.
+        </p>
+
+        <div class="hero-buttons">
+            <a href="#quickstart" class="btn-primary">
+                🚀 Get Started
+            </a>
+            <a href="https://github.com" class="btn-secondary">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                    <path
+                        d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58l-.01-2.24c-3.34.72-4.04-1.41-4.04-1.41-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5 1 .11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 3-.4c1.02.01 2.04.14 3 .4 2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.92.43.37.81 1.1.81 2.22l-.01 3.29c0 .32.22.7.83.58C20.57 21.8 24 17.31 24 12c0-6.63-5.37-12-12-12z" />
+                </svg>
+                View on GitHub
+            </a>
+        </div>
+
+        <!-- Terminal window -->
+        <div class="hero-terminal">
+            <div class="terminal-bar">
+                <div class="terminal-dot td-red"></div>
+                <div class="terminal-dot td-amber"></div>
+                <div class="terminal-dot td-green"></div>
+                <div class="terminal-title">OctaMind — Agent Hub</div>
+            </div>
+            <div class="terminal-body">
+                <div class="t-comment"># Launch the Agent Hub dashboard</div>
+                <div><span class="t-prompt">❯ </span><span class="t-cmd">python start.py</span></div>
+                <div class="t-output"> Loading agents... <span class="t-success">✓ 3 agents found</span></div>
+                <div class="t-output"> Starting dashboard on <span class="t-pink">http://localhost:8501</span></div>
+                <br>
+                <div class="t-comment"># Chat with your Gmail agent</div>
+                <div><span class="t-prompt">You </span><span class="t-cmd">Delete all emails from LinkedIn</span></div>
+                <div><span class="t-prompt">Agent</span> <span class="t-success">Found 47 emails from LinkedIn. Deleted
+                        all. ✓</span></div>
+                <br>
+                <div><span class="t-prompt">You </span><span class="t-cmd">What's in my inbox today?</span></div>
+                <div><span class="t-prompt">Agent</span> <span class="t-output">You have 12 unread emails. 3 need your
+                        attention.</span> <span class="t-cursor"></span></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── STATS ─────────────────────────────────────────── -->
+    <div class="stats-bar">
+        <div class="stat-item reveal">
+            <div class="stat-number">5<span>+</span></div>
+            <div class="stat-label">Agent Types</div>
+        </div>
+        <div class="stat-item reveal">
+            <div class="stat-number">40<span>+</span></div>
+            <div class="stat-label">Gmail Actions</div>
+        </div>
+        <div class="stat-item reveal">
+            <div class="stat-number">153<span></span></div>
+            <div class="stat-label">Tests Passing</div>
+        </div>
+        <div class="stat-item reveal">
+            <div class="stat-number">6<span></span></div>
+            <div class="stat-label">Memory Layers</div>
+        </div>
+    </div>
+
+    <!-- ── FEATURES ─────────────────────────────────────── -->
+    <section id="features" class="section-pad">
+        <div class="section-header reveal">
+            <div class="section-tag">Features</div>
+            <h2>Everything you need to<br><em>automate your digital life</em></h2>
+            <p class="section-sub">From a single inbox action to complex multi-step workflows — OctaMind handles it all
+                through natural language.</p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card reveal">
+                <div class="feature-icon">🧠</div>
+                <div class="feature-title">LLM-Powered Orchestration</div>
+                <div class="feature-desc">Every natural language command is processed by GPT-4o mini, which
+                    intelligently selects and chains the right API actions — no rigid syntax needed.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🐙</div>
+                <div class="feature-title">Multi-Agent Platform</div>
+                <div class="feature-desc">Create unlimited specialized agents from a central hub. Each agent runs in its
+                    own Streamlit window on a unique port, fully isolated.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">💾</div>
+                <div class="feature-title">Persistent Agent Memory</div>
+                <div class="feature-desc">6-layer memory system: personality, habits, working, episodic, semantic, and
+                    consciousness — each agent remembers its context across sessions.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">⚡</div>
+                <div class="feature-title">10+ Gmail Automations</div>
+                <div class="feature-desc">Set-and-forget automations: auto-delete spam, archive newsletters, daily email
+                    digest, VIP contact labeling, out-of-office replies, and more.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🎭</div>
+                <div class="feature-title">Personality Tuning</div>
+                <div class="feature-desc">Customize each agent's tone, verbosity, humor, empathy, and proactiveness with
+                    precision sliders. Your agents, your style.</div>
+            </div>
+            <div class="feature-card reveal">
+                <div class="feature-icon">🔒</div>
+                <div class="feature-title">Safe by Design</div>
+                <div class="feature-desc">Configurable <code>max_operations</code> guard prevents runaway bulk actions.
+                    OAuth-only access — your credentials never leave your machine.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── AGENTS ─────────────────────────────────────────── -->
+    <section id="agents" class="section-pad">
+        <div class="section-header reveal">
+            <div class="section-tag">Agent Types</div>
+            <h2>Agents for every<br><em>service you use</em></h2>
+            <p class="section-sub">Start with Gmail today. Drive, Slack, Calendar and more are coming in the next
+                phases.</p>
+        </div>
+
+        <div class="agents-grid">
+            <div class="agent-card active reveal">
+                <span class="agent-badge badge-live">LIVE</span>
+                <div class="agent-icon">📧</div>
+                <div class="agent-name">Gmail Agent</div>
+                <div class="agent-desc">Send, read, delete, search, label, schedule, summarize, and automate your entire
+                    inbox.</div>
+            </div>
+            <div class="agent-card reveal">
+                <span class="agent-badge badge-soon">Soon</span>
+                <div class="agent-icon">📁</div>
+                <div class="agent-name">Google Drive</div>
+                <div class="agent-desc">List files, search content, upload, download, share with permissions, organize
+                    folders.</div>
+            </div>
+            <div class="agent-card reveal">
+                <span class="agent-badge badge-soon">Soon</span>
+                <div class="agent-icon">💬</div>
+                <div class="agent-name">Slack Agent</div>
+                <div class="agent-desc">Send messages, list channels, manage notifications, search conversations.</div>
+            </div>
+            <div class="agent-card reveal">
+                <span class="agent-badge badge-soon">Soon</span>
+                <div class="agent-icon">📅</div>
+                <div class="agent-name">Calendar</div>
+                <div class="agent-desc">Create events, view schedule, set reminders, reschedule, export ICS files.</div>
+            </div>
+            <div class="agent-card reveal">
+                <span class="agent-badge badge-soon">Soon</span>
+                <div class="agent-icon">📈</div>
+                <div class="agent-name">Stock Market</div>
+                <div class="agent-desc">Track prices, monitor market trends, manage portfolio, receive price alerts.
+                </div>
+            </div>
+            <div class="agent-card reveal">
+                <span class="agent-badge badge-live">LIVE</span>
+                <div class="agent-icon">🔧</div>
+                <div class="agent-name">Custom Agent</div>
+                <div class="agent-desc">Define your own agent with a custom role, personality, and natural language
+                    prompt.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── HOW IT WORKS ────────────────────────────────────── -->
+    <section id="how" class="section-pad">
+        <div class="section-header reveal">
+            <div class="section-tag">How It Works</div>
+            <h2>From command to action<br><em>in seconds</em></h2>
+            <p class="section-sub">Three steps from your words to a completed task.</p>
+        </div>
+
+        <div class="steps reveal">
+            <div class="step">
+                <div class="step-number">01</div>
+                <div class="step-title">You type naturally</div>
+                <div class="step-desc">Type any request in plain English — "delete all emails from LinkedIn" or "send a
+                    reply to my boss". No commands to memorize.</div>
+            </div>
+            <div class="step">
+                <div class="step-number">02</div>
+                <div class="step-title">LLM understands intent</div>
+                <div class="step-desc">GPT-4o mini analyses your request, selects the correct tool, and determines the
+                    exact parameters — max_operations guard keeps it safe.</div>
+            </div>
+            <div class="step">
+                <div class="step-number">03</div>
+                <div class="step-title">Agent executes &amp; remembers</div>
+                <div class="step-desc">The Gmail API action runs. Results are formatted and displayed. The interaction
+                    is stored in the agent's episodic memory for future context.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── DEMO COMMANDS ──────────────────────────────────── -->
+    <section id="demo" class="section-pad-sm">
+        <div class="section-header reveal">
+            <div class="section-tag">Natural Language</div>
+            <h2>Just <em>say what you want</em></h2>
+        </div>
+
+        <div class="commands-showcase">
+            <div class="command-box reveal">
+                <div class="cmd-icon">🗑️</div>
+                <div>
+                    <div class="cmd-text">"Delete all emails from LinkedIn from the past 30 days"</div>
+                    <div class="cmd-result">→ Found 134 matching emails. Deleted. ✓</div>
+                </div>
+            </div>
+            <div class="command-box reveal">
+                <div class="cmd-icon">📩</div>
+                <div>
+                    <div class="cmd-text">"Send a follow-up email to john@example.com about the project"</div>
+                    <div class="cmd-result">→ Draft composed with context. Sent. ✓</div>
+                </div>
+            </div>
+            <div class="command-box reveal">
+                <div class="cmd-icon">📊</div>
+                <div>
+                    <div class="cmd-text">"Give me a summary of my inbox this week"</div>
+                    <div class="cmd-result">→ 84 emails. 12 unread. 3 urgent. Weekly report generated. ✓</div>
+                </div>
+            </div>
+            <div class="command-box reveal">
+                <div class="cmd-icon">📅</div>
+                <div>
+                    <div class="cmd-text">"Schedule this email to be sent tomorrow at 9am"</div>
+                    <div class="cmd-result">→ Email queued for 2026-02-22 09:00. ✓</div>
+                </div>
+            </div>
+            <div class="command-box reveal">
+                <div class="cmd-icon">🏷️</div>
+                <div>
+                    <div class="cmd-text">"Apply smart labels to all uncategorized emails"</div>
+                    <div class="cmd-result">→ Applied labels to 56 emails across 8 categories. ✓</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── ARCHITECTURE ────────────────────────────────────── -->
+    <section id="architecture" class="section-pad">
+        <div class="section-header reveal">
+            <div class="section-tag">Architecture</div>
+            <h2>Modular, clean<br><em>&amp; extensible</em></h2>
+            <p class="section-sub">Three separate Streamlit processes. Each agent gets its own window and port. Zero
+                coupling.</p>
+        </div>
+
+        <div class="arch-diagram reveal">
+            <div class="arch-center">
+                <div class="arch-hub">
+                    🐙 Agent Hub Dashboard
+                    <small>agent_dashboard.py → ui/dashboard/ (7 modules) · port 8501</small>
+                </div>
+            </div>
+            <div class="arch-arrow">↓&nbsp;&nbsp;spawns sub-processes per agent&nbsp;&nbsp;↓</div>
+            <div class="arch-row">
+                <div class="arch-node">
+                    <div class="arch-node-icon">📧</div>
+                    <div class="arch-node-title">Gmail Agent UI</div>
+                    email_agent/ (6 modules)<br>port: dynamic
+                </div>
+                <div class="arch-node">
+                    <div class="arch-node-icon">🔧</div>
+                    <div class="arch-node-title">Generic Agent UI</div>
+                    generic_agent_ui.py<br>port: dynamic
+                </div>
+                <div class="arch-node">
+                    <div class="arch-node-icon">💾</div>
+                    <div class="arch-node-title">Agent Memory</div>
+                    6-layer .md files<br>per agent_id/
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── TECH STACK ──────────────────────────────────────── -->
+    <section id="tech" class="section-pad-sm">
+        <div class="section-header reveal">
+            <div class="section-tag">Tech Stack</div>
+            <h2>Built on <em>solid foundations</em></h2>
+        </div>
+        <div class="tech-grid reveal">
+            <div class="tech-pill"><span class="tech-logo">🐍</span> Python 3.13</div>
+            <div class="tech-pill"><span class="tech-logo">🎈</span> Streamlit</div>
+            <div class="tech-pill"><span class="tech-logo">🤖</span> GPT-4o mini</div>
+            <div class="tech-pill"><span class="tech-logo">📧</span> Gmail API</div>
+            <div class="tech-pill"><span class="tech-logo">🔑</span> OAuth 2.0</div>
+            <div class="tech-pill"><span class="tech-logo">🧪</span> Pytest</div>
+            <div class="tech-pill"><span class="tech-logo">📦</span> GitHub Models</div>
+            <div class="tech-pill"><span class="tech-logo">🦙</span> Gemma 3 4B</div>
+        </div>
+    </section>
+
+    <!-- ── ROADMAP ─────────────────────────────────────────── -->
+    <section id="roadmap" class="section-pad">
+        <div class="section-header reveal">
+            <div class="section-tag">Roadmap</div>
+            <h2>Where we're<br><em>headed next</em></h2>
+        </div>
+
+        <div class="roadmap-grid">
+            <div class="phase-card current reveal">
+                <div class="phase-header">
+                    <div class="phase-number">01</div>
+                    <div>
+                        <div class="phase-label">Phase 1 — Foundation</div>
+                        <div class="phase-status">✅ Complete</div>
+                    </div>
+                </div>
+                <ul class="phase-items">
+                    <li class="done"><span class="check-done">✓</span> Agent Hub dashboard</li>
+                    <li class="done"><span class="check-done">✓</span> Agent creation wizard</li>
+                    <li class="done"><span class="check-done">✓</span> Gmail agent + 40 actions</li>
+                    <li class="done"><span class="check-done">✓</span> LLM-powered orchestration</li>
+                    <li class="done"><span class="check-done">✓</span> Persistent 6-layer memory</li>
+                    <li class="done"><span class="check-done">✓</span> 10 Gmail automations</li>
+                    <li class="done"><span class="check-done">✓</span> 153 tests passing</li>
+                </ul>
+            </div>
+            <div class="phase-card reveal">
+                <div class="phase-header">
+                    <div class="phase-number">02</div>
+                    <div>
+                        <div class="phase-label">Phase 2 — More Services</div>
+                        <div class="phase-status">🔜 Up Next</div>
+                    </div>
+                </div>
+                <ul class="phase-items">
+                    <li><span class="check-todo">○</span> Google Drive agent</li>
+                    <li><span class="check-todo">○</span> Slack agent</li>
+                    <li><span class="check-todo">○</span> Calendar agent</li>
+                    <li><span class="check-todo">○</span> Agent-to-agent communication</li>
+                    <li><span class="check-todo">○</span> Real-time notifications</li>
+                </ul>
+            </div>
+            <div class="phase-card reveal">
+                <div class="phase-header">
+                    <div class="phase-number">03</div>
+                    <div>
+                        <div class="phase-label">Phase 3 — Platform</div>
+                        <div class="phase-status">💡 Future</div>
+                    </div>
+                </div>
+                <ul class="phase-items">
+                    <li><span class="check-todo">○</span> Agent marketplace</li>
+                    <li><span class="check-todo">○</span> Visual workflow editor</li>
+                    <li><span class="check-todo">○</span> Team collaboration</li>
+                    <li><span class="check-todo">○</span> Voice interface</li>
+                    <li><span class="check-todo">○</span> Mobile app</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── QUICK START ─────────────────────────────────────── -->
+    <section id="quickstart" class="section-pad">
+        <div class="section-header reveal">
+            <div class="section-tag">Quick Start</div>
+            <h2>Up and running<br><em>in 3 minutes</em></h2>
+            <p class="section-sub">Python 3.10+ required. Gmail OAuth credentials needed for the Gmail agent.</p>
+        </div>
+
+        <div class="qs-grid">
+            <div class="reveal">
+                <div class="qs-step-label">
+                    <div class="qs-num">1</div>
+                    <div class="qs-title">Clone &amp; install dependencies</div>
+                </div>
+                <div class="code-block">
+                    <div><span class="cb-comment"># Clone the repository</span></div>
+                    <div><span class="cb-cmd">git clone</span> https://github.com/you/octamind</div>
+                    <div><span class="cb-cmd">cd</span> octamind</div>
+                    <br>
+                    <div><span class="cb-comment"># Create virtual environment</span></div>
+                    <div><span class="cb-cmd">python -m venv</span> .venv</div>
+                    <div><span class="cb-cmd">source</span> .venv/bin/activate</div>
+                    <br>
+                    <div><span class="cb-comment"># Install all dependencies</span></div>
+                    <div><span class="cb-cmd">pip install -r</span> requirements.txt</div>
+                </div>
+            </div>
+
+            <div class="reveal">
+                <div class="qs-step-label">
+                    <div class="qs-num">2</div>
+                    <div class="qs-title">Configure credentials</div>
+                </div>
+                <div class="code-block">
+                    <div><span class="cb-comment"># Copy your Gmail OAuth file</span></div>
+                    <div><span class="cb-cmd">cp</span> ~/Downloads/credentials.json .</div>
+                    <br>
+                    <div><span class="cb-comment"># Set GitHub Models API token (for LLM)</span></div>
+                    <div><span class="cb-cmd">echo</span> <span class="cb-str">"GITHUB_TOKEN=ghp_..."</span> &gt; .env
+                    </div>
+                    <br>
+                    <div><span class="cb-comment"># Verify setup</span></div>
+                    <div><span class="cb-cmd">python -m pytest</span> tests/ <span class="cb-flag">-q</span></div>
+                    <div><span style="color:#68d391">153 passed in 30s ✓</span></div>
+                </div>
+            </div>
+
+            <div class="reveal">
+                <div class="qs-step-label">
+                    <div class="qs-num">3</div>
+                    <div class="qs-title">Launch the Agent Hub</div>
+                </div>
+                <div class="code-block">
+                    <div><span class="cb-comment"># Start everything</span></div>
+                    <div><span class="cb-cmd">python start.py</span></div>
+                    <br>
+                    <div style="color:#68d391">✓ Dashboard → http://localhost:8501</div>
+                    <div style="color:#68d391">✓ 3 agents loaded</div>
+                    <br>
+                    <div><span class="cb-comment"># Or launch just the hub</span></div>
+                    <div><span class="cb-cmd">python run_agent_hub.py</span></div>
+                </div>
+            </div>
+
+            <div class="reveal">
+                <div class="qs-step-label">
+                    <div class="qs-num">4</div>
+                    <div class="qs-title">Create your first agent</div>
+                </div>
+                <div class="code-block">
+                    <div><span class="cb-comment"># Or manage agents via Python</span></div>
+                    <div><span style="color:#c084fc">from</span> src.agent.core <span
+                            style="color:#c084fc">import</span> get_agent_manager</div>
+                    <br>
+                    <div>manager = get_agent_manager()</div>
+                    <div>agent = manager.create_agent(</div>
+                    <div> name=<span class="cb-str">"Email Butler"</span>,</div>
+                    <div> agent_type=<span class="cb-str">"gmail"</span>,</div>
+                    <div> role=<span class="cb-str">"Keep my inbox clean"</span></div>
+                    <div>)</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── CTA ────────────────────────────────────────────── -->
+    <section id="cta">
+        <div class="cta-card reveal">
+            <div class="badge" style="margin: 0 auto 28px;">
+                <div class="badge-dot"></div> Free &amp; Open Source
+            </div>
+            <h2>Start automating<br><em>your digital life today</em></h2>
+            <p>OctaMind is completely free and open source. No subscriptions, no usage limits on your own machine. Fork
+                it, extend it, own it.</p>
+            <div class="cta-buttons">
+                <a href="#quickstart" class="btn-primary">🚀 Get Started Free</a>
+                <a href="https://github.com" class="btn-secondary">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                        <path
+                            d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58l-.01-2.24c-3.34.72-4.04-1.41-4.04-1.41-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5 1 .11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 3-.4c1.02.01 2.04.14 3 .4 2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.49 5.92.43.37.81 1.1.81 2.22l-.01 3.29c0 .32.22.7.83.58C20.57 21.8 24 17.31 24 12c0-6.63-5.37-12-12-12z" />
+                    </svg>
+                    Star on GitHub
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── FOOTER ──────────────────────────────────────────── -->
+    <footer>
+        <div class="footer-top">
+            <div class="footer-brand">
+                <a href="#hero" class="nav-logo">
+                    <span class="logo-octopus">🐙</span> Octa<span>Mind</span>
+                </a>
+                <p>A modular, open-source AI agent platform. Automate your digital life with natural language.</p>
+            </div>
+
+            <div class="footer-links">
+                <h4>Project</h4>
+                <ul>
+                    <li><a href="https://github.com">GitHub Repository</a></li>
+                    <li><a href="https://github.com">Documentation</a></li>
+                    <li><a href="#roadmap">Roadmap</a></li>
+                    <li><a href="https://github.com">Changelog</a></li>
+                </ul>
+            </div>
+
+            <div class="footer-links">
+                <h4>Guides</h4>
+                <ul>
+                    <li><a href="#quickstart">Quick Start</a></li>
+                    <li><a href="https://github.com">Gmail Setup</a></li>
+                    <li><a href="https://github.com">Creating Agents</a></li>
+                    <li><a href="https://github.com">Memory System</a></li>
+                </ul>
+            </div>
+
+            <div class="footer-links">
+                <h4>Navigate</h4>
+                <ul>
+                    <li><a href="#features">Features</a></li>
+                    <li><a href="#agents">Agent Types</a></li>
+                    <li><a href="#architecture">Architecture</a></li>
+                    <li><a href="#tech">Tech Stack</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <span>© 2026 OctaMind. MIT License.</span>
+            <span>Built with <span class="heart">♥</span> and Python 🐍</span>
+            <a href="https://github.com">⭐ Star on GitHub</a>
+        </div>
+    </footer>
+
+    <script>
+        /* ── Mobile nav ─────────────────────────── */
+        function toggleNav() {
+            document.getElementById('navLinks').classList.toggle('open');
+        }
+        document.addEventListener('click', e => {
+            const nav = document.getElementById('navLinks');
+            const btn = document.getElementById('hamburger');
+            if (nav.classList.contains('open') && !nav.contains(e.target) && !btn.contains(e.target)) {
+                nav.classList.remove('open');
+            }
+        });
+
+        /* ── Scroll reveal ──────────────────────── */
+        const revealObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry, i) => {
+                if (entry.isIntersecting) {
+                    setTimeout(() => entry.target.classList.add('visible'), i * 80);
+                    revealObserver.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+        document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+        /* ── Navbar scroll tint ─────────────────── */
+        window.addEventListener('scroll', () => {
+            const nav = document.getElementById('navbar');
+            nav.style.background = window.scrollY > 50
+                ? 'rgba(10,14,26,0.95)'
+                : 'rgba(10,14,26,0.75)';
+        });
+
+        /* ── Smooth active link ─────────────────── */
+        const sections = document.querySelectorAll('section[id], div[id]');
+        const navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
+        const sectionObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    navLinks.forEach(a => {
+                        a.style.color = a.getAttribute('href') === `#${entry.target.id}` ? '#fff' : '';
+                    });
+                }
+            });
+        }, { threshold: 0.4 });
+        sections.forEach(s => sectionObserver.observe(s));
+    </script>
+
+</body>
+
+</html>
