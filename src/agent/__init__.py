@@ -20,7 +20,7 @@ from .core.process_manager import (
 from .memory.agent_memory import AgentMemory, get_agent_memory
 from .memory.memory_consolidator import MemoryConsolidator
 from .llm.llm_parser import GitHubModelsLLM, get_llm_client
-from .llm.model_downloader import download_gemma, HARD_CODED_HF_TOKEN
+from .llm.model_downloader import download_gemma, HF_TOKEN
 
 __all__ = [
     # core
@@ -39,5 +39,5 @@ __all__ = [
     "GitHubModelsLLM",
     "get_llm_client",
     "download_gemma",
-    "HARD_CODED_HF_TOKEN",
+    "HF_TOKEN",
 ]

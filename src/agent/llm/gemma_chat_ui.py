@@ -7,7 +7,7 @@ This module provides a Streamlit-based web interface for chatting with Gemma.
 import streamlit as st
 import torch
 import os
-from .model_downloader import HARD_CODED_HF_TOKEN
+from .model_downloader import HF_TOKEN
 from .gemma_runner import find_local_snapshot
 from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig
 
@@ -16,7 +16,7 @@ from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndByte
 def load_model_and_processor():
     """Load model and processor once and cache them."""
     token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv(
-        "HF_TOKEN") or HARD_CODED_HF_TOKEN
+        "HF_TOKEN") or HF_TOKEN
 
     MODEL_ID = "google/gemma-3-4b-it"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

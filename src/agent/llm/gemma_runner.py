@@ -6,7 +6,7 @@ This module provides functionality to run Gemma models for text generation.
 
 import os
 import torch
-from .model_downloader import HARD_CODED_HF_TOKEN
+from .model_downloader import HF_TOKEN
 from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig
 
 
@@ -76,7 +76,7 @@ def load_model_and_processor(model_id="google/gemma-3-4b-it", cache_dir=None):
         Tuple of (model, processor, device)
     """
     token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv(
-        "HF_TOKEN") or HARD_CODED_HF_TOKEN
+        "HF_TOKEN") or HF_TOKEN
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Using device:", device)
