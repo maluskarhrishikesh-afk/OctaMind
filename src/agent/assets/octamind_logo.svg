@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 220" width="200" height="220">
+  <defs>
+    <radialGradient id="bodyGrad" cx="50%" cy="40%" r="55%">
+      <stop offset="0%"  stop-color="#ff9ecf"/>
+      <stop offset="100%" stop-color="#c2185b"/>
+    </radialGradient>
+    <radialGradient id="headGrad" cx="45%" cy="35%" r="60%">
+      <stop offset="0%"  stop-color="#ffb3d9"/>
+      <stop offset="100%" stop-color="#e91e8c"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#c2185b" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- ── 8 tentacles (drawn behind body) ─────────────────────────── -->
+  <!-- Tentacle 1 – far left -->
+  <path d="M72,148 C50,160 30,150 20,175 C15,188 25,200 18,212"
+        fill="none" stroke="#e91e8c" stroke-width="9" stroke-linecap="round"
+        stroke-linejoin="round"/>
+  <!-- Tentacle 2 – left-centre-left -->
+  <path d="M82,155 C68,172 55,170 48,192 C44,205 52,212 46,220"
+        fill="none" stroke="#e91e8c" stroke-width="9" stroke-linecap="round"/>
+  <!-- Tentacle 3 – left-centre -->
+  <path d="M95,160 C88,180 80,185 78,205 C76,215 84,218 80,226"
+        fill="none" stroke="#e91e8c" stroke-width="9" stroke-linecap="round"/>
+  <!-- Tentacle 4 – centre-left -->
+  <path d="M108,162 C105,183 100,190 100,210 C100,220 108,222 106,230"
+        fill="none" stroke="#e91e8c" stroke-width="9" stroke-linecap="round"/>
+  <!-- Tentacle 5 – centre-right -->
+  <path d="M120,160 C122,181 128,188 128,208 C128,218 120,222 122,230"
+        fill="none" stroke="#e91e8c" stroke-width="9" stroke-linecap="round"/>
+  <!-- Tentacle 6 – right-centre -->
+  <path d="M132,155 C145,172 155,172 160,192 C164,205 156,212 162,220"
+        fill="none" stroke="#e91e8c" stroke-width="9" stroke-linecap="round"/>
+  <!-- Tentacle 7 – right-centre-right -->
+  <path d="M142,148 C162,162 176,155 185,178 C190,191 180,203 186,214"
+        fill="none" stroke="#e91e8c" stroke-width="9" stroke-linecap="round"/>
+  <!-- Tentacle 8 – far right -->
+  <path d="M150,140 C172,148 184,140 192,160 C197,172 186,182 190,195"
+        fill="none" stroke="#e91e8c" stroke-width="9" stroke-linecap="round"/>
+
+  <!-- ── Mantle / head ─────────────────────────────────────────────── -->
+  <ellipse cx="100" cy="80" rx="52" ry="60"
+           fill="url(#headGrad)" filter="url(#shadow)"/>
+
+  <!-- ── Body / skirt ─────────────────────────────────────────────── -->
+  <path d="M48,118 Q52,160 72,162 Q100,168 128,162 Q148,160 152,118"
+        fill="url(#bodyGrad)" filter="url(#shadow)"/>
+
+  <!-- ── Eyes ─────────────────────────────────────────────────────── -->
+  <!-- Left eye white -->
+  <ellipse cx="82" cy="80" rx="14" ry="15" fill="white" opacity="0.95"/>
+  <!-- Right eye white -->
+  <ellipse cx="118" cy="80" rx="14" ry="15" fill="white" opacity="0.95"/>
+  <!-- Left pupil -->
+  <circle cx="85" cy="82" r="8" fill="#1a0a14"/>
+  <!-- Right pupil -->
+  <circle cx="121" cy="82" r="8" fill="#1a0a14"/>
+  <!-- Left eye shine -->
+  <circle cx="88" cy="78" r="3" fill="white" opacity="0.8"/>
+  <!-- Right eye shine -->
+  <circle cx="124" cy="78" r="3" fill="white" opacity="0.8"/>
+
+  <!-- ── Cute smile ────────────────────────────────────────────────── -->
+  <path d="M88,104 Q100,116 112,104"
+        fill="none" stroke="#c2185b" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- ── Rosy cheeks ───────────────────────────────────────────────── -->
+  <ellipse cx="72" cy="97"  rx="10" ry="6" fill="#ff69b4" opacity="0.45"/>
+  <ellipse cx="128" cy="97" rx="10" ry="6" fill="#ff69b4" opacity="0.45"/>
+
+  <!-- ── Crown / octopus head bump ────────────────────────────────── -->
+  <ellipse cx="100" cy="30" rx="28" ry="20"
+           fill="url(#headGrad)" opacity="0.85"/>
+</svg>

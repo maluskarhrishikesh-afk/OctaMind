@@ -1,0 +1,452 @@
+[
+  {
+    "email": "newsletter@economictimesnews.com",
+    "name": "ET Markets Morning",
+    "interaction_count": 43,
+    "emails_sent": 0,
+    "emails_received": 43,
+    "last_interaction": "Thu, 12 Feb 2026 09:26:37 +0530 (IST)",
+    "is_vip": true
+  },
+  {
+    "email": "maluskarhrishikesh@yahoo.com",
+    "name": "Hrishikesh Maluskar",
+    "interaction_count": 31,
+    "emails_sent": 31,
+    "emails_received": 0,
+    "last_interaction": "Sun, 11 Dec 2016 08:21:14 +0000 (UTC)",
+    "is_vip": true
+  },
+  {
+    "email": "jobalerts-noreply@linkedin.com",
+    "name": "LinkedIn Job Alerts",
+    "interaction_count": 27,
+    "emails_sent": 0,
+    "emails_received": 27,
+    "last_interaction": "Thu, 12 Feb 2026 03:17:58 +0000 (UTC)",
+    "is_vip": true
+  },
+  {
+    "email": "mailer@jobleads.com",
+    "name": "JobLeads",
+    "interaction_count": 16,
+    "emails_sent": 0,
+    "emails_received": 16,
+    "last_interaction": "Thu, 12 Feb 2026 07:45:50 +0100",
+    "is_vip": true
+  },
+  {
+    "email": "noreply@glassdoor.com",
+    "name": "Glassdoor Jobs",
+    "interaction_count": 14,
+    "emails_sent": 0,
+    "emails_received": 14,
+    "last_interaction": "Thu, 12 Feb 2026 19:28:22 +0000 (UTC)",
+    "is_vip": true
+  },
+  {
+    "email": "info@connect.livemint",
+    "name": "Mint",
+    "interaction_count": 9,
+    "emails_sent": 0,
+    "emails_received": 9,
+    "last_interaction": "Thu, 12 Feb 2026 11:15:59 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "noreply@medium.com",
+    "name": "Medium Daily Digest",
+    "interaction_count": 9,
+    "emails_sent": 0,
+    "emails_received": 9,
+    "last_interaction": "Thu, 12 Feb 2026 01:50:00 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "alerts@jobsalert.shine",
+    "name": "Team Shine",
+    "interaction_count": 8,
+    "emails_sent": 0,
+    "emails_received": 8,
+    "last_interaction": "Thu, 12 Feb 2026 09:06:34 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "noreply@jobalertshub.com",
+    "name": "ONGC Recruitment",
+    "interaction_count": 6,
+    "emails_sent": 0,
+    "emails_received": 6,
+    "last_interaction": "Fri, 13 Feb 2026 09:54:35 +0530 (IST)",
+    "is_vip": false
+  },
+  {
+    "email": "service@intl.paypal",
+    "name": "service@intl.paypal.com",
+    "interaction_count": 5,
+    "emails_sent": 0,
+    "emails_received": 5,
+    "last_interaction": "Tue, 17 Feb 2026 08:58:46 -0800",
+    "is_vip": false
+  },
+  {
+    "email": "donotreply@paypal.com",
+    "name": "donotreply@paypal.com",
+    "interaction_count": 5,
+    "emails_sent": 0,
+    "emails_received": 5,
+    "last_interaction": "Tue, 17 Feb 2026 08:54:13 -0800",
+    "is_vip": false
+  },
+  {
+    "email": "service@iciciprulife.com",
+    "name": "ICICI Prudential Life Insurance",
+    "interaction_count": 5,
+    "emails_sent": 0,
+    "emails_received": 5,
+    "last_interaction": "Thu, 12 Feb 2026 20:40:45 +0530 (IST)",
+    "is_vip": false
+  },
+  {
+    "email": "licexpadvice@gmail.com",
+    "name": "Hrishiksh Maluskar",
+    "interaction_count": 4,
+    "emails_sent": 4,
+    "emails_received": 0,
+    "last_interaction": "Sat, 30 Nov 2024 22:52:05 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "newsletters-noreply@linkedin.com",
+    "name": "Andriy Burkov via LinkedIn",
+    "interaction_count": 4,
+    "emails_sent": 0,
+    "emails_received": 4,
+    "last_interaction": "Thu, 12 Feb 2026 22:44:46 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "groups-noreply@linkedin.com",
+    "name": "LinkedIn",
+    "interaction_count": 4,
+    "emails_sent": 0,
+    "emails_received": 4,
+    "last_interaction": "Thu, 12 Feb 2026 14:00:00 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "alerts@jobs.shine",
+    "name": "Palm HR Consultants",
+    "interaction_count": 4,
+    "emails_sent": 0,
+    "emails_received": 4,
+    "last_interaction": "Thu, 12 Feb 2026 12:40:15 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "support@sitepoint.com",
+    "name": "SitePoint",
+    "interaction_count": 4,
+    "emails_sent": 0,
+    "emails_received": 4,
+    "last_interaction": "Wed, 11 Feb 2026 20:45:06 +0000",
+    "is_vip": false
+  },
+  {
+    "email": "hrishikesh.maluskar@zohomail.in",
+    "name": "Hrishikesh Maluskar",
+    "interaction_count": 3,
+    "emails_sent": 3,
+    "emails_received": 0,
+    "last_interaction": "Thu, 22 Jan 2026 01:50:08 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "shrishti.chanda1@barclays.com",
+    "name": "shrishti.chanda1@barclays.com",
+    "interaction_count": 3,
+    "emails_sent": 3,
+    "emails_received": 0,
+    "last_interaction": "Fri, 22 Aug 2025 11:39:18 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "shobana@symphonihr.com",
+    "name": "Shobana",
+    "interaction_count": 3,
+    "emails_sent": 3,
+    "emails_received": 0,
+    "last_interaction": "Thu, 7 Aug 2025 15:28:51 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "interviewersupport@intervue.io",
+    "name": "interviewersupport@intervue.io",
+    "interaction_count": 3,
+    "emails_sent": 3,
+    "emails_received": 0,
+    "last_interaction": "Sat, 30 Nov 2024 14:34:23 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "sruti@intervue.io",
+    "name": "Sruti Prasanth",
+    "interaction_count": 3,
+    "emails_sent": 3,
+    "emails_received": 0,
+    "last_interaction": "Tue, 14 May 2024 22:04:55 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "\"thanthri",
+    "name": "\"thanthri",
+    "interaction_count": 3,
+    "emails_sent": 3,
+    "emails_received": 0,
+    "last_interaction": "Fri, 27 Jan 2017 15:23:43 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "gthanthr@teksystems.com",
+    "name": "Guruprasad",
+    "interaction_count": 3,
+    "emails_sent": 3,
+    "emails_received": 0,
+    "last_interaction": "Fri, 27 Jan 2017 15:23:43 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "info@gioconnect.in",
+    "name": "PG Certification",
+    "interaction_count": 3,
+    "emails_sent": 0,
+    "emails_received": 3,
+    "last_interaction": "Wed, 18 Feb 2026 10:06:20 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "anna.bauer@email.jobleads",
+    "name": "Anna Bauer | JobLeads",
+    "interaction_count": 3,
+    "emails_sent": 0,
+    "emails_received": 3,
+    "last_interaction": "13 Feb 2026 00:14:05 +0000",
+    "is_vip": false
+  },
+  {
+    "email": "hello@flyvidesh.com",
+    "name": "Team Videsh",
+    "interaction_count": 3,
+    "emails_sent": 0,
+    "emails_received": 3,
+    "last_interaction": "Thu, 12 Feb 2026 04:24:21 +0000",
+    "is_vip": false
+  },
+  {
+    "email": "digest@bowldigest.com",
+    "name": "Bowl Digest on Fishbowl",
+    "interaction_count": 3,
+    "emails_sent": 0,
+    "emails_received": 3,
+    "last_interaction": "Thu, 12 Feb 2026 03:00:59 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "linkedin@em.linkedin",
+    "name": "LinkedIn Premium",
+    "interaction_count": 3,
+    "emails_sent": 0,
+    "emails_received": 3,
+    "last_interaction": "Wed, 11 Feb 2026 17:15:27 -0800",
+    "is_vip": false
+  },
+  {
+    "email": "store-news@amazon.in",
+    "name": "Amazon.in",
+    "interaction_count": 3,
+    "emails_sent": 0,
+    "emails_received": 3,
+    "last_interaction": "Tue, 17 Feb 2026 10:39:55 +0000",
+    "is_vip": false
+  },
+  {
+    "email": "connect@daveharsh.com",
+    "name": "Harsh Dave",
+    "interaction_count": 3,
+    "emails_sent": 0,
+    "emails_received": 3,
+    "last_interaction": "Sun, 15 Feb 2026 04:30:16 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "cbaker@jobleads.com",
+    "name": "Claudia Baker",
+    "interaction_count": 3,
+    "emails_sent": 0,
+    "emails_received": 3,
+    "last_interaction": "Wed, 18 Feb 2026 02:28:34 +0100",
+    "is_vip": false
+  },
+  {
+    "email": "hrishikesh.maluskar@freedommortgage.com",
+    "name": "hrishikesh.maluskar@freedommortgage.com",
+    "interaction_count": 2,
+    "emails_sent": 2,
+    "emails_received": 0,
+    "last_interaction": "Tue, 21 Jan 2025 12:50:16 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "notifications@mail-intervue.com",
+    "name": "Intervue Team",
+    "interaction_count": 2,
+    "emails_sent": 1,
+    "emails_received": 1,
+    "last_interaction": "Wed, 18 Feb 2026 09:23:32 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "ahana.saha@intervue.io",
+    "name": "Ahana Saha",
+    "interaction_count": 2,
+    "emails_sent": 2,
+    "emails_received": 0,
+    "last_interaction": "Tue, 27 Feb 2024 18:32:43 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "shwetababar91@gmail.com",
+    "name": "shwetababar91@gmail.com",
+    "interaction_count": 2,
+    "emails_sent": 2,
+    "emails_received": 0,
+    "last_interaction": "Sun, 15 Aug 2021 21:43:30 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "jayanth.babu@avaamo.com",
+    "name": "jayanth.babu@avaamo.com",
+    "interaction_count": 2,
+    "emails_sent": 2,
+    "emails_received": 0,
+    "last_interaction": "Fri, 12 Apr 2019 00:03:36 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "manohar.jadhav@jpmchase.contactly",
+    "name": "manohar.jadhav@jpmchase.contactly",
+    "interaction_count": 2,
+    "emails_sent": 2,
+    "emails_received": 0,
+    "last_interaction": "Mon, 10 Sep 2018 10:53:27 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "amit.sharma.mum@sampoorna.com",
+    "name": "amit. sharma. mum@sampoorna. com",
+    "interaction_count": 2,
+    "emails_sent": 2,
+    "emails_received": 0,
+    "last_interaction": "Sat, 21 Apr 2018 07:54:28 +0000",
+    "is_vip": false
+  },
+  {
+    "email": "hello@skyflow.com",
+    "name": "Neha Jamwal",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Tue, 17 Feb 2026 21:05:48 -0800",
+    "is_vip": false
+  },
+  {
+    "email": "english-personalized-digest@quora.com",
+    "name": "Quora Digest",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Thu, 19 Feb 2026 16:02:13 +0000",
+    "is_vip": false
+  },
+  {
+    "email": "jobs-noreply@linkedin.com",
+    "name": "LinkedIn",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Thu, 19 Feb 2026 23:14:57 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "hello@medium.com",
+    "name": "Medium",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Thu, 12 Feb 2026 17:01:50 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "info@email.meetup",
+    "name": "AWS User Group Pune",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Thu, 19 Feb 2026 13:36:09 +0000 (UTC)",
+    "is_vip": false
+  },
+  {
+    "email": "mail@mail.mf",
+    "name": "HSBC Mutual Fund",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Tue, 17 Feb 2026 08:45:16 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "noreply@github.com",
+    "name": "GitHub",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Mon, 16 Feb 2026 02:58:23 -0800",
+    "is_vip": false
+  },
+  {
+    "email": "news-googleplay@google.com",
+    "name": "Google Play",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Fri, 13 Feb 2026 09:19:40 -0800",
+    "is_vip": false
+  },
+  {
+    "email": "info@email.jobleads",
+    "name": "JobLeads",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "17 Feb 2026 00:35:19 +0000",
+    "is_vip": false
+  },
+  {
+    "email": "noreply-cashier@mailer.zerodha",
+    "name": "Zerodha",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Thu, 12 Feb 2026 12:49:59 +0530",
+    "is_vip": false
+  },
+  {
+    "email": "website@huggingface.co",
+    "name": "huggingface",
+    "interaction_count": 2,
+    "emails_sent": 0,
+    "emails_received": 2,
+    "last_interaction": "Mon, 16 Feb 2026 11:03:56 +0000",
+    "is_vip": false
+  }
+]
