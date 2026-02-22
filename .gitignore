@@ -39,10 +39,10 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Credentials (keep secure!)
-credentials.json
-token.json
-drive_token.json
+# Credentials (keep secure!) — all stored under config/
+config/credentials.json
+config/token.json
+config/drive_token.json
 config/settings.json
 
 # Model Cache

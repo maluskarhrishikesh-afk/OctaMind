@@ -8,8 +8,8 @@
   },
 
   "google": {
-    "oauth_credentials_path": "credentials.json",
-    "gmail_token_path": "token.json",
-    "drive_token_path": "drive_token.json"
+    "oauth_credentials_path": "config/credentials.json",
+    "gmail_token_path": "config/token.json",
+    "drive_token_path": "config/drive_token.json"
   }
 }
