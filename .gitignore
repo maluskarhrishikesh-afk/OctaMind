@@ -42,6 +42,8 @@ Thumbs.db
 # Credentials (keep secure!)
 credentials.json
 token.json
+drive_token.json
+config/settings.json
 
 # Model Cache
 model_cache/
