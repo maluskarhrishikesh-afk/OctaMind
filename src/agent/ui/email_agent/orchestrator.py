@@ -243,27 +243,84 @@ Examples:
 """
 
 
+def _observation_from_result(result: Dict[str, Any], tool_name: str) -> str:
+    """Convert a tool result dict into a readable observation string for the ReAct loop."""
+    import json as _json
+
+    if result.get("status") == "error":
+        return f"Error: {result.get('message', 'Unknown error')}"
+
+    # Email list results — include IDs so the LLM can chain tool calls
+    emails = result.get("emails", [])
+    if emails:
+        lines = [f"Retrieved {len(emails)} email(s):"]
+        for i, e in enumerate(emails[:20], 1):
+            # key is 'sender' from list_emails, but fall back to 'from'
+            sender = e.get('sender') or e.get('from') or 'Unknown'
+            lines.append(
+                f"[{i}] ID: {e.get('id', '?')} | "
+                f"From: {sender} | "
+                f"Subject: {e.get('subject', '(no subject)')} | "
+                f"Date: {e.get('date', '?')}"
+            )
+            snippet = (e.get("snippet") or "")[:120]
+            if snippet:
+                lines.append(f"     Preview: {snippet}")
+        return "\n".join(lines)
+
+    # Simple count
+    if "count" in result and len(result) <= 4:
+        return f"Count: {result['count']} email(s)"
+
+    # Inbox stats
+    if "total_messages" in result:
+        return (
+            f"Inbox stats — Total: {result['total_messages']}, "
+            f"Unread: {result.get('unread_messages', '?')}, "
+            f"Threads: {result.get('total_threads', '?')}"
+        )
+
+    # Generic — serialise everything except large lists
+    compact = {
+        k: v for k, v in result.items()
+        if k not in ("status",) and not isinstance(v, list)
+    }
+    list_summaries = {
+        k: f"[{len(v)} items]"
+        for k, v in result.items()
+        if isinstance(v, list) and k != "emails"
+    }
+    compact.update(list_summaries)
+    return _json.dumps(compact, default=str)[:600]
+
+
 def execute_with_llm_orchestration(
     user_query: str,
     agent_id: str = None,
     max_operations: int = 100,
+    artifacts_out: dict = None,
 ) -> Dict[str, Any]:
     """
-    Execute email commands using LLM-orchestrated tool selection.
-    The LLM decides which tool to call based on natural language understanding.
+    Execute email commands using a Thought-Action-Observation (ReAct) loop.
+
+    ``artifacts_out`` — optional dict populated by the call with any produced
+    artifacts (reserved for future use; email agent does not produce file paths).
+
+    The LLM reasons freely across as many steps as needed:
+      Thought -> Action (tool call) -> Observation (result) -> Thought -> ...
+    until it produces a final_answer.  This handles multi-step tasks naturally,
+    e.g. "reply to the most recent email from John" will:
+      1. list emails from John  ->  observe ID
+      2. call reply_to_message  ->  observe success
+      3. write final_answer
 
     Args:
-        user_query:     Natural language query from user.
+        user_query:     Natural language task from the user.
         agent_id:       Agent ID for memory context.
-        max_operations: Maximum number of individual Gmail API operations allowed
-                        for this command.  Bulk fetches (max_results / batch_size)
-                        are silently clamped to this limit to prevent runaway commands.
-
-    Returns:
-        Result dictionary from tool execution.
+        max_operations: Safety cap on bulk API operations per tool call.
     """
     try:
-        # Get memory context if available
+        # ── Memory context ──────────────────────────────────────────────────
         memory_context = ""
         if agent_id and MEMORY_AVAILABLE:
             try:
@@ -272,23 +329,10 @@ def execute_with_llm_orchestration(
             except Exception:
                 pass
 
-        llm = get_llm_client()
-        tool_decision = llm.orchestrate_mcp_tool(
-            user_query, memory_context, tools_description=_GMAIL_TOOLS_DESCRIPTION
-        )
-
-        tool_name = tool_decision.get('tool')
-        params = tool_decision.get('params', {})
-        reasoning = tool_decision.get('reasoning', '')
-
-        logger.debug(
-            f"[LLM] Tool: {tool_name} | Params: {params} | max_ops: {max_operations}")
-
-        # ── max_operations guard ────────────────────────────────────────────
+        # ── Tool executor used by the ReAct loop ────────────────────────────
         _ops_capped_note = ""
 
         def _clamp(value, fallback: int = 10) -> int:
-            """Return min(value, max_operations). Coerces to int; uses fallback on error."""
             nonlocal _ops_capped_note
             try:
                 v = int(value)
@@ -297,352 +341,216 @@ def execute_with_llm_orchestration(
             effective = min(v, max_operations)
             if effective < v:
                 _ops_capped_note = (
-                    f"\n\n⚠️ *Results capped at {effective} (max operations limit). "
-                    f"You can raise this limit in ⚙️ Configure → General Settings.*"
+                    f"\n\n⚠️ *Results capped at {effective} (max operations limit).*"
                 )
             return effective
 
-        # ── Tool dispatch ───────────────────────────────────────────────────
-        if tool_name == 'get_todays_messages':
-            emails = get_todays_emails(
-                max_results=_clamp(params.get('max_results', 1000), 1000))
-            return {
-                'status': 'success', 'action': 'list_todays',
-                'emails': emails, 'count': len(emails),
-                'reasoning': reasoning + _ops_capped_note,
+        def _dispatch(tool_name: str, params: dict) -> str:
+            """Execute one Gmail tool and return a readable observation string."""
+            result: Dict[str, Any] = {
+                "status": "error", "message": f"Unknown tool: {tool_name}"
             }
 
-        elif tool_name == 'list_message':
-            emails = list_emails(
-                query=params.get('query', ''),
-                max_results=_clamp(params.get('max_results', 10), 10),
-            )
-            return {
-                'status': 'success', 'action': 'list',
-                'emails': emails, 'count': len(emails),
-                'reasoning': reasoning + _ops_capped_note,
-            }
+            if tool_name == "get_todays_messages":
+                emails = get_todays_emails(
+                    max_results=_clamp(params.get("max_results", 1000), 1000))
+                result = {"status": "success", "emails": emails, "count": len(emails)}
 
-        elif tool_name == 'send_message':
-            result = send_email(
-                to=params.get('to', ''),
-                subject=params.get('subject', '(No Subject)'),
-                message=params.get('message_text', ''),
-            )
-            result['action'] = 'send'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "list_message":
+                emails = list_emails(
+                    query=params.get("query", ""),
+                    max_results=_clamp(params.get("max_results", 10), 10))
+                result = {"status": "success", "emails": emails, "count": len(emails)}
 
-        elif tool_name == 'count_messages':
-            query = params.get('query', '')
-            emails = list_emails(query=query, max_results=_clamp(1000, 1000))
-            return {
-                'status': 'success', 'action': 'count_filtered',
-                'count': len(emails), 'query': query,
-                'reasoning': reasoning + _ops_capped_note,
-            }
+            elif tool_name == "count_messages":
+                emails = list_emails(
+                    query=params.get("query", ""),
+                    max_results=_clamp(1000, 1000))
+                result = {"status": "success", "count": len(emails),
+                          "query": params.get("query", "")}
 
-        elif tool_name == 'extract_action_items':
-            result = extract_action_items(params.get('message_id', ''))
-            result['action'] = 'action_items'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "send_message":
+                result = send_email(
+                    to=params.get("to", ""),
+                    subject=params.get("subject", "(No Subject)"),
+                    message=params.get("message_text", ""),
+                )
 
-        elif tool_name == 'get_all_pending_actions':
-            result = get_all_pending_actions(
-                _clamp(params.get('max_emails', 20), 20))
-            result['action'] = 'pending_actions'
-            result['reasoning'] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "extract_action_items":
+                result = extract_action_items(params.get("message_id", ""))
 
-        elif tool_name == 'generate_reply_suggestions':
-            result = generate_reply_suggestions(
-                params.get('message_id', ''), params.get('tone', 'all'))
-            result['action'] = 'reply_suggestions'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "get_all_pending_actions":
+                result = get_all_pending_actions(
+                    _clamp(params.get("max_emails", 20), 20))
 
-        elif tool_name == 'quick_reply':
-            result = quick_reply(
-                params.get('message_id', ''),
-                params.get('reply_type', 'acknowledged'),
-            )
-            result['action'] = 'quick_reply'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "generate_reply_suggestions":
+                result = generate_reply_suggestions(
+                    params.get("message_id", ""), params.get("tone", "all"))
 
-        elif tool_name == 'create_draft':
-            result = create_draft(
-                params.get('to', ''), params.get('subject', ''), params.get('body', ''))
-            result['action'] = 'create_draft'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "quick_reply":
+                result = quick_reply(
+                    params.get("message_id", ""),
+                    params.get("reply_type", "acknowledged"))
 
-        elif tool_name == 'list_drafts':
-            result = list_drafts(_clamp(params.get('max_results', 10), 10))
-            result['action'] = 'list_drafts'
-            result['reasoning'] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "create_draft":
+                result = create_draft(
+                    params.get("to", ""), params.get("subject", ""),
+                    params.get("body", ""))
 
-        elif tool_name == 'send_draft':
-            result = send_draft(params.get('draft_id', ''))
-            result['action'] = 'send_draft'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "list_drafts":
+                result = list_drafts(_clamp(params.get("max_results", 10), 10))
 
-        elif tool_name == 'delete_draft':
-            result = delete_draft(params.get('draft_id', ''))
-            result['action'] = 'delete_draft'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "send_draft":
+                result = send_draft(params.get("draft_id", ""))
 
-        elif tool_name == 'list_attachments':
-            result = list_attachments(params.get('message_id', ''))
-            result['action'] = 'list_attachments'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "delete_draft":
+                result = delete_draft(params.get("draft_id", ""))
 
-        elif tool_name == 'download_attachment':
-            result = download_attachment(
-                params.get('message_id', ''),
-                params.get('attachment_id', ''),
-                params.get('filename', 'attachment'),
-                params.get('save_path'),
-            )
-            result['action'] = 'download_attachment'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "list_attachments":
+                result = list_attachments(params.get("message_id", ""))
 
-        elif tool_name == 'search_emails_with_attachments':
-            result = search_emails_with_attachments(
-                params.get('file_type', 'all'),
-                _clamp(params.get('max_results', 10), 10),
-            )
-            result['action'] = 'emails_with_attachments'
-            result['reasoning'] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "download_attachment":
+                result = download_attachment(
+                    params.get("message_id", ""),
+                    params.get("attachment_id", ""),
+                    params.get("filename", "attachment"),
+                    params.get("save_path"),
+                )
 
-        elif tool_name == 'auto_categorize_email':
-            result = auto_categorize_email(params.get('message_id', ''))
-            result['action'] = 'categorize'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "search_emails_with_attachments":
+                result = search_emails_with_attachments(
+                    params.get("file_type", "all"),
+                    _clamp(params.get("max_results", 10), 10))
 
-        elif tool_name == 'apply_smart_labels':
-            result = apply_smart_labels(
-                _clamp(params.get('batch_size', 20), 20))
-            result['action'] = 'smart_labels'
-            result['reasoning'] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "auto_categorize_email":
+                result = auto_categorize_email(params.get("message_id", ""))
 
-        elif tool_name == 'extract_calendar_events':
-            result = extract_calendar_events(params.get('message_id', ''))
-            result['action'] = 'calendar_events'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "apply_smart_labels":
+                result = apply_smart_labels(
+                    _clamp(params.get("batch_size", 20), 20))
 
-        elif tool_name == 'suggest_calendar_entry':
-            result = suggest_calendar_entry(params.get('message_id', ''))
-            result['action'] = 'calendar_suggestion'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "extract_calendar_events":
+                result = extract_calendar_events(params.get("message_id", ""))
 
-        elif tool_name == 'mark_for_followup':
-            result = mark_for_followup(
-                params.get('message_id', ''),
-                params.get('days', 3),
-                params.get('note', ''),
-            )
-            result['action'] = 'mark_followup'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "suggest_calendar_entry":
+                result = suggest_calendar_entry(params.get("message_id", ""))
 
-        elif tool_name == 'get_pending_followups':
-            result = get_pending_followups()
-            result['action'] = 'pending_followups'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "mark_for_followup":
+                result = mark_for_followup(
+                    params.get("message_id", ""),
+                    params.get("days", 3),
+                    params.get("note", ""))
 
-        elif tool_name == 'check_unanswered_emails':
-            result = check_unanswered_emails(params.get('older_than_days', 3))
-            result['action'] = 'unanswered_emails'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "get_pending_followups":
+                result = get_pending_followups()
 
-        elif tool_name == 'schedule_email':
-            result = schedule_email(
-                params.get('to', ''),
-                params.get('subject', ''),
-                params.get('body', ''),
-                params.get('send_time', ''),
-            )
-            result['action'] = 'schedule_email'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "check_unanswered_emails":
+                result = check_unanswered_emails(
+                    params.get("older_than_days", 3))
 
-        elif tool_name == 'list_scheduled_emails':
-            result = list_scheduled_emails()
-            result['action'] = 'list_scheduled'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "schedule_email":
+                result = schedule_email(
+                    params.get("to", ""), params.get("subject", ""),
+                    params.get("body", ""), params.get("send_time", ""))
 
-        elif tool_name == 'cancel_scheduled_email':
-            result = cancel_scheduled_email(params.get('scheduled_id', ''))
-            result['action'] = 'cancel_scheduled'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "list_scheduled_emails":
+                result = list_scheduled_emails()
 
-        elif tool_name == 'get_frequent_contacts':
-            result = get_frequent_contacts(_clamp(params.get('limit', 10), 10))
-            result['action'] = 'frequent_contacts'
-            result['reasoning'] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "cancel_scheduled_email":
+                result = cancel_scheduled_email(
+                    params.get("scheduled_id", ""))
 
-        elif tool_name == 'get_contact_summary':
-            result = get_contact_summary(params.get('email_address', ''))
-            result['action'] = 'contact_summary'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "get_frequent_contacts":
+                result = get_frequent_contacts(
+                    _clamp(params.get("limit", 10), 10))
 
-        elif tool_name == 'detect_urgent_emails':
-            result = detect_urgent_emails(
-                _clamp(params.get('max_results', 20), 20))
-            result['action'] = 'urgent_emails'
-            result['reasoning'] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "get_contact_summary":
+                result = get_contact_summary(params.get("email_address", ""))
 
-        elif tool_name == 'auto_prioritize':
-            result = auto_prioritize(params.get('message_id', ''))
-            result['action'] = 'prioritize'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "detect_urgent_emails":
+                result = detect_urgent_emails(
+                    _clamp(params.get("max_results", 20), 20))
 
-        elif tool_name == 'detect_newsletters':
-            result = detect_newsletters(
-                _clamp(params.get('max_results', 30), 30))
-            result['action'] = 'newsletters'
-            result['reasoning'] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "auto_prioritize":
+                result = auto_prioritize(params.get("message_id", ""))
 
-        elif tool_name == 'extract_unsubscribe_link':
-            result = extract_unsubscribe_link(params.get('message_id', ''))
-            result['action'] = 'unsubscribe'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "detect_newsletters":
+                result = detect_newsletters(
+                    _clamp(params.get("max_results", 30), 30))
 
-        elif tool_name == 'get_email_stats':
-            result = get_email_stats(params.get('days', 30))
-            result['action'] = 'email_stats'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "extract_unsubscribe_link":
+                result = extract_unsubscribe_link(params.get("message_id", ""))
 
-        elif tool_name == 'get_productivity_insights':
-            result = get_productivity_insights()
-            result['action'] = 'productivity'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "get_email_stats":
+                result = get_email_stats(params.get("days", 30))
 
-        # ── Phase 4 tools ────────────────────────────────────────────────────
-        elif tool_name == 'mark_action_complete':
-            result = mark_action_complete(params.get('task_id', ''))
-            result['action'] = 'action_complete'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "get_productivity_insights":
+                result = get_productivity_insights()
 
-        elif tool_name == 'get_saved_tasks':
-            result = get_saved_tasks(params.get('status_filter', 'pending'))
-            result['action'] = 'saved_tasks'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "mark_action_complete":
+                result = mark_action_complete(params.get("task_id", ""))
 
-        elif tool_name == 'create_category_rules':
-            result = create_category_rules(
-                int(params.get('min_occurrences', 3)))
-            result['action'] = 'category_rules'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "get_saved_tasks":
+                result = get_saved_tasks(
+                    params.get("status_filter", "pending"))
 
-        elif tool_name == 'export_to_calendar':
-            result = export_to_calendar(
-                params.get('event_data', {}),
-                bool(params.get('save_ics', True)),
-            )
-            result['action'] = 'export_calendar'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "create_category_rules":
+                result = create_category_rules(
+                    int(params.get("min_occurrences", 3)))
 
-        elif tool_name == 'send_followup_reminder':
-            result = send_followup_reminder(params.get('message_id', ''))
-            result['action'] = 'followup_reminder'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "export_to_calendar":
+                result = export_to_calendar(
+                    params.get("event_data", {}),
+                    bool(params.get("save_ics", True)))
 
-        elif tool_name == 'mark_followup_done':
-            result = mark_followup_done(params.get('message_id', ''))
-            result['action'] = 'followup_done'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "send_followup_reminder":
+                result = send_followup_reminder(params.get("message_id", ""))
 
-        elif tool_name == 'dismiss_followup':
-            result = dismiss_followup(params.get('message_id', ''))
-            result['action'] = 'followup_dismiss'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "mark_followup_done":
+                result = mark_followup_done(params.get("message_id", ""))
 
-        elif tool_name == 'update_scheduled_email':
-            result = update_scheduled_email(
-                params.get('scheduled_id', ''),
-                params.get('send_time', ''),
-            )
-            result['action'] = 'update_scheduled'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "dismiss_followup":
+                result = dismiss_followup(params.get("message_id", ""))
 
-        elif tool_name == 'suggest_vip_contacts':
-            result = suggest_vip_contacts()
-            result['action'] = 'vip_contacts'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "update_scheduled_email":
+                result = update_scheduled_email(
+                    params.get("scheduled_id", ""),
+                    params.get("send_time", ""))
 
-        elif tool_name == 'export_contacts':
-            result = export_contacts(
-                params.get('format', 'csv'),
-                int(params.get('limit', 100)),
-            )
-            result['action'] = 'export_contacts'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "suggest_vip_contacts":
+                result = suggest_vip_contacts()
 
-        elif tool_name == 'calculate_response_time':
-            result = calculate_response_time(params.get('message_id', ''))
-            result['action'] = 'response_time'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "export_contacts":
+                result = export_contacts(
+                    params.get("format", "csv"),
+                    int(params.get("limit", 100)))
 
-        elif tool_name == 'visualize_patterns':
-            result = visualize_patterns(int(params.get('days', 30)))
-            result['action'] = 'visualize'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "calculate_response_time":
+                result = calculate_response_time(params.get("message_id", ""))
 
-        elif tool_name == 'generate_weekly_report':
-            result = generate_weekly_report()
-            result['action'] = 'weekly_report'
-            result['reasoning'] = reasoning
-            return result
+            elif tool_name == "visualize_patterns":
+                result = visualize_patterns(int(params.get("days", 30)))
 
-        elif tool_name is None or tool_name == '':
-            return {
-                'status': 'error',
-                'message': f"Could not determine appropriate action. {reasoning}",
-            }
+            elif tool_name == "generate_weekly_report":
+                result = generate_weekly_report()
 
-        else:
-            return {'status': 'error', 'message': f"Unknown tool: {tool_name}"}
+            return _observation_from_result(result, tool_name)
+
+        # ── Run the ReAct loop ───────────────────────────────────────────────
+        llm = get_llm_client()
+        final_answer = llm.reason_and_act(
+            user_query,
+            _GMAIL_TOOLS_DESCRIPTION,
+            _dispatch,
+            memory_context,
+        )
+        return {"status": "success", "action": "react_response",
+                "message": final_answer}
 
     except Exception as e:
-        logger.error(f"Error in LLM orchestration: {str(e)}")
+        logger.error(f"Error in ReAct orchestration: {e}")
         return {
-            'status': 'error',
-            'message': 'LLM orchestration failed. Please try rephrasing your request.',
+            "status": "error",
+            "message": "I had trouble completing that request. Please try rephrasing.",
         }
+

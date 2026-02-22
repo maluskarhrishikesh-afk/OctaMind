@@ -65,7 +65,8 @@ def resolve(handle: str) -> Optional[Path]:
         logger.warning("FileBridge: unknown handle %s", handle)
         return None
     if not path.exists():
-        logger.warning("FileBridge: file gone for handle %s (%s)", handle, path)
+        logger.warning(
+            "FileBridge: file gone for handle %s (%s)", handle, path)
         return None
     return path
 
@@ -82,7 +83,8 @@ def cleanup_handle(handle: str) -> None:
                 remaining = list(path.parent.iterdir())
                 if not remaining:
                     path.parent.rmdir()
-                    logger.debug("FileBridge: removed empty dir %s", path.parent)
+                    logger.debug(
+                        "FileBridge: removed empty dir %s", path.parent)
         except Exception as exc:
             logger.warning("FileBridge: could not delete %s: %s", path, exc)
 

@@ -5,6 +5,436 @@
 
 ---
 
+## 2026-02-22
+**Event:** react_response: Can you list latest 2 emails?
+**Insight:** User ran 'react_response' command: 'Can you list latest 2 emails?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Can you tell me various commands that you can execute?
+**Insight:** Conversational exchange: user said 'Can you tell me various commands that you can execute?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: Can you list all the emails that I received today?
+**Insight:** User ran 'react_response' command: 'Can you list all the emails that I received today?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: How much is the rate limit?
+**Insight:** User ran 'react_response' command: 'How much is the rate limit?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: Can you list all the emails that I received today?
+**Insight:** User ran 'react_response' command: 'Can you list all the emails that I received today?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: list all the emails that I received today
+**Insight:** User ran 'react_response' command: 'list all the emails that I received today' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: Can you list all the emails received today?
+**Insight:** User ran 'react_response' command: 'Can you list all the emails received today?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: can you list all the emails listed today?
+**Insight:** User ran 'react_response' command: 'can you list all the emails listed today?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: Can you list all the emails received today?
+**Insight:** User ran 'react_response' command: 'Can you list all the emails received today?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Do you remember all the things that we have done so far during the past 4-5 days?
+**Insight:** Conversational exchange: user said 'Do you remember all the things that we have done so far during the past 4-5 days'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Can you tell me something about your personality?
+**Insight:** Conversational exchange: user said 'Can you tell me something about your personality?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Can you count how many files I have in google drive?
+**Insight:** Conversational exchange: user said 'Can you count how many files I have in google drive?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Can you tell me something about T20 cricket world cup?
+**Insight:** Conversational exchange: user said 'Can you tell me something about T20 cricket world cup?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Can you list what commands we processed today?
+**Insight:** Conversational exchange: user said 'Can you list what commands we processed today?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: Can you count how many mails I received today and send the count to hrishikesh.maluskar@zohomail.in? Also include the spam email count if any. Thanks!!!
+**Insight:** User ran 'react_response' command: 'Can you count how many mails I received today and send the count to hrishikesh.m' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Do you remember what we did yesterday?
+**Insight:** Conversational exchange: user said 'Do you remember what we did yesterday?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: Can you send a test email to hrishikesh.maluskar@zohomail.in?
+**Insight:** User ran 'react_response' command: 'Can you send a test email to hrishikesh.maluskar@zohomail.in?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** react_response: Can you tell me how many emails I received today?
+**Insight:** User ran 'react_response' command: 'Can you tell me how many emails I received today?' → success (0 emails)
+**Importance:** High
+**Context:** success (0 emails)
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Hello, how are you?
+**Insight:** Conversational exchange: user said 'Hello, how are you?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Any email specific commands?
+**Insight:** Conversational exchange: user said 'Any email specific commands?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Do you remember what we did previous week?
+**Insight:** Conversational exchange: user said 'Do you remember what we did previous week?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Do you remember what we did 2 days back?
+**Insight:** Conversational exchange: user said 'Do you remember what we did 2 days back?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: What did we do in the past week?
+**Insight:** Conversational exchange: user said 'What did we do in the past week?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Did i ask you to perform any commands?
+**Insight:** Conversational exchange: user said 'Did i ask you to perform any commands?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Do you remember what we did 2 days ago?
+**Insight:** Conversational exchange: user said 'Do you remember what we did 2 days ago?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Hello, how are you doing today?
+**Insight:** Conversational exchange: user said 'Hello, how are you doing today?'
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Did i ask you to perform any email commands?
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: What did we discuss 2 days ago?
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Do you remember me?
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Yes
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Can you tell me a good joke?
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Hello
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Hello
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-22
+**Event:** conversation: Hello
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: Hi
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: Hello
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: Hello
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: Hi
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: Hi
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: Hello
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: Hello
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: hi
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
+## 2026-02-21
+**Event:** conversation: Hello
+**Insight:** User performed conversation
+**Importance:** Low
+**Context:** success - Natural conversation
+
+---
+
+
+
 ## 2026-02-21
 **Event:** conversation: Hi
 **Insight:** User performed conversation

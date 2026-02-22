@@ -11,7 +11,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(
 
 from src.agent.ui.email_agent.app import main  # noqa: E402
 from src.agent.ui.email_agent.orchestrator import execute_with_llm_orchestration  # noqa: E402
-from src.agent.ui.email_agent.formatters import format_email_result  # noqa: E402
 
 if __name__ == "__main__":
     main()

@@ -34,31 +34,23 @@ def handle_conversation(
 
     Returns a response string if the message is conversational, or None if it
     should be treated as an email command.
+
+    Routing is done by the LLM itself (classify_intent) rather than brittle
+    keyword matching, so natural phrasings like "how many emails did I get
+    today?" are correctly identified as email commands.
     """
-    msg = message.strip().lower()
-
-    # If message contains email-specific actions, let the LLM orchestrator handle it
-    has_action_word = any(keyword in msg for keyword in [
-        'count', 'list', 'show', 'send', 'delete', 'summarize', 'digest',
-        'fetch', 'get', 'retrieve', 'find', 'read', 'check', 'view', 'display',
-        'draft', 'attachment', 'schedule', 'followup', 'follow-up', 'follow up',
-        'categorize', 'category', 'label', 'calendar', 'meeting', 'event',
-        'priority', 'urgent', 'reply', 'analytics', 'stats', 'statistics',
-        'contact', 'unsubscribe', 'newsletter', 'action item', 'task',
-        'remind', 'unanswered', 'pending', 'insight', 'download', 'attach',
-        'vip', 'export', 'complete', 'mark done', 'filter', 'rule', 'ics',
-        'report', 'weekly', 'patterns', 'chart', 'visualize', 'response time',
-        'reschedule', 'dismiss', 'reminder',
-        'frequent', 'most often', 'top sender', 'top contact',
-    ])
-    has_email_word = any(keyword in msg for keyword in [
-        'email', 'inbox', 'message', 'unread', 'gmail',
-        'mail', 'sent', 'received', 'draft', 'folder',
-        'contact', 'contacts', 'csv', 'json', 'sender', 'senders',
-    ])
-
-    if has_action_word and has_email_word:
-        return None  # Let command parser handle it
+    # ── LLM-based intent routing ───────────────────────────────────────────
+    # The LLM understands natural language and won't miss synonyms or
+    # paraphrases the way a fixed keyword list does.
+    try:
+        llm = get_llm_client()
+        intent = llm.classify_intent(message)  # uses default email context
+        logger.debug(f"[Router] intent={intent!r} for message={message[:60]!r}")
+        if intent == "COMMAND":
+            return None  # hand off to execute_with_llm_orchestration()
+    except Exception as e:
+        logger.error(f"Intent classification failed, defaulting to COMMAND: {e}")
+        return None  # safe default: try the email orchestrator
 
     # For conversational messages, use LLM
     try:

@@ -22,8 +22,17 @@ from googleapiclient.discovery import build
 # Full Drive scope — read + write
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-CREDENTIALS_PATH = "credentials.json"
-TOKEN_PATH = "drive_token.json"
+def _resolve_drive_paths():
+    """Resolve credential file paths — config/credentials.json first, then defaults."""
+    try:
+        from src.agent.llm.provider_registry import get_google_credential_path
+        oauth = get_google_credential_path("oauth_credentials_path") or "credentials.json"
+        token = get_google_credential_path("drive_token_path") or "drive_token.json"
+        return oauth, token
+    except Exception:
+        return "credentials.json", "drive_token.json"
+
+CREDENTIALS_PATH, TOKEN_PATH = _resolve_drive_paths()
 
 
 def get_drive_service():

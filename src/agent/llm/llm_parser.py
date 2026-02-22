@@ -1,17 +1,12 @@
 """
-LLM Integration for Email Agent using GitHub Models
+LLM Integration for OctaMind agents.
 
-This module provides LLM-orchestrated tool calling for intelligent email operations.
+Provider is configured via config/providers.json.
+Switch models by changing 'active' — no code changes needed.
 """
 
-import os
 import logging
 from typing import Dict, Any
-from dotenv import load_dotenv
-from openai import OpenAI
-
-# Load environment variables
-load_dotenv()
 
 # Setup logger
 logger = logging.getLogger("email_agent.llm_parser")
@@ -19,21 +14,25 @@ logger.setLevel(logging.DEBUG)
 
 
 class GitHubModelsLLM:
-    """LLM client using GitHub Models API"""
+    """
+    OctaMind LLM client.
+
+    Supports any provider registered in config/providers.json:
+      - openai_compatible  (GitHub Models, OpenAI, Ollama, LM Studio, llama.cpp, vLLM, …)
+      - anthropic          (Claude 3.5 Sonnet / Haiku)
+      - local_hf           (Gemma 3 4B — default; any cached HuggingFace model)
+
+    Switch the active provider by changing ``active`` in config/providers.json
+    or calling ``src.agent.llm.provider_registry.set_active_provider(name)``.
+    """
 
     def __init__(self):
-        """Initialize GitHub Models client"""
-        self.token = os.getenv("GITHUB_TOKEN")
-        if not self.token:
-            raise ValueError("GITHUB_TOKEN not found in environment variables")
-
-        self.client = OpenAI(
-            base_url="https://models.inference.ai.azure.com",
-            api_key=self.token
+        from src.agent.llm.provider_registry import build_client
+        self.client, self.model, self.provider_type = build_client()
+        logger.info(
+            "LLM client initialised — provider_type=%s  model=%s",
+            self.provider_type, self.model,
         )
-
-        # Use GPT-4o mini - fast and intelligent
-        self.model = "gpt-4o-mini"
 
     def chat(
         self,
@@ -152,8 +151,238 @@ Guidelines:
         except Exception as e:
             # Log error
             logger.error(f"LLM chat error: {str(e)}")
-            # Fallback response
+            err_str = str(e)
+            if "429" in err_str or "RateLimitReached" in err_str or "rate limit" in err_str.lower():
+                import re as _re
+                wait_match = _re.search(r"wait (\d+) seconds", err_str)
+                wait_msg = f" Please wait {int(wait_match.group(1)) // 60} minutes before retrying." if wait_match and int(wait_match.group(1)) > 60 else " Please try again shortly."
+                return f"⏳ **API rate limit reached.**{wait_msg}"
             return f"I'm having trouble processing that right now. As {agent_name}, I'm here to help - could you try rephrasing?"
+
+    def classify_intent(self, user_message: str, agent_context: str = None) -> str:
+        """
+        Classify whether a user message is a tool command or casual
+        conversation.  Deliberately uses a tiny prompt and max_tokens=5 to
+        minimise latency and cost.
+
+        Parameters
+        ----------
+        user_message : str
+            The raw user input to classify.
+        agent_context : str, optional
+            One-sentence description of what counts as a COMMAND for this agent.
+            Defaults to an email-agent description when omitted.
+
+        Returns
+        -------
+        "COMMAND"  — message needs tool execution
+        "CHAT"     — message is casual conversation / memory recall / greeting
+        """
+        if agent_context is None:
+            agent_context = (
+                "reading, counting, sending, deleting, searching, scheduling, "
+                "or otherwise interacting with the user's email inbox, drafts, "
+                "contacts, labels, or attachments"
+            )
+        system_prompt = (
+            "You are a router for an AI agent.\n"
+            f"Decide if the user message is a COMMAND that requires {agent_context},\n"
+            "OR a CASUAL CONVERSATION (greetings, memory questions, general chat,\n"
+            "questions about what was discussed before, jokes, etc.).\n"
+            "Reply with EXACTLY one word: COMMAND or CHAT.  No punctuation."
+        )
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.0,
+                max_tokens=5,
+                timeout=10,
+            )
+            result = response.choices[0].message.content.strip().upper()
+            # Guard against unexpected model output
+            if "COMMAND" in result:
+                return "COMMAND"
+            return "CHAT"
+        except Exception as e:
+            logger.error(f"Intent classification error: {e}")
+            # On failure, fall back to treating as COMMAND so nothing is silently dropped
+            return "COMMAND"
+
+    def reason_and_act(
+        self,
+        user_query: str,
+        tools_description: str,
+        tool_executor,
+        memory_context: str = "",
+        max_iterations: int = 6,
+    ) -> str:
+        """
+        Thought-Action-Observation loop (ReAct pattern).
+
+        The LLM reasons freely, calls tools, observes results, and repeats
+        until it has enough information to write a final answer.  This means
+        multi-step tasks ("reply to the most recent email from John") work
+        correctly: the LLM lists emails first, gets the ID from the
+        observation, then calls reply — all in one coherent reasoning chain.
+
+        Parameters
+        ----------
+        user_query      : Natural language task from the user.
+        tools_description: Full tools list (same string passed to orchestrate_mcp_tool).
+        tool_executor   : callable(tool_name: str, params: dict) -> str
+                          Runs the actual tool and returns a readable observation.
+        memory_context  : Memory context string (optional).
+        max_iterations  : Hard cap on reasoning steps to prevent infinite loops.
+
+        Returns
+        -------
+        str  Final answer string in markdown, ready for display.
+        """
+        import json as _json
+
+        system_prompt = (
+            "You are an intelligent AI agent. You solve tasks step by step by "
+            "reasoning and calling tools.\n\n"
+            "RESPONSE FORMAT — always respond with a JSON object, never plain text:\n\n"
+            "To call a tool:\n"
+            '{"thought": "what I\'m reasoning about", '
+            '"action": "tool_name", "params": {"key": "value"}}\n\n'
+            "When you have enough information to answer the user:\n"
+            '{"thought": "I now have everything needed", '
+            '"final_answer": "your complete, helpful, markdown-formatted response"}\n\n'
+            "RULES:\n"
+            "- Use final_answer as soon as you have the information needed — "
+            "do not make unnecessary tool calls.\n"
+            "- If a tool returns an error, try a different approach or explain "
+            "the issue in final_answer.\n"
+            "- Never call the same tool twice with identical params.\n"
+            "- When listing emails, always include IDs in your final_answer so "
+            "the user can reference them.\n"
+            "- Write final_answer in friendly markdown — use bold, bullet lists, "
+            "and emojis where appropriate.\n\n"
+            "Available tools:\n"
+            + tools_description
+        )
+
+        messages = [{"role": "system", "content": system_prompt}]
+
+        user_content = f"Task: {user_query}"
+        if memory_context:
+            user_content = f"Memory Context:\n{memory_context}\n\nTask: {user_query}"
+        messages.append({"role": "user", "content": user_content})
+
+        for iteration in range(max_iterations):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=3000,
+                    timeout=45,
+                )
+                raw = response.choices[0].message.content.strip()
+
+                # Strip markdown code fences if present
+                if raw.startswith("```"):
+                    parts = raw.split("```")
+                    raw = parts[1] if len(parts) > 1 else raw
+                    if raw.startswith("json"):
+                        raw = raw[4:]
+                    raw = raw.strip()
+
+                parsed = _json.loads(raw)
+
+            except _json.JSONDecodeError:
+                # LLM produced non-JSON — treat the raw text as the final answer
+                logger.warning("[ReAct] Non-JSON response, using as final answer")
+                return raw
+            except Exception as e:
+                logger.error(f"[ReAct] LLM call error on iteration {iteration}: {e}")
+                err_str = str(e)
+                if "429" in err_str or "RateLimitReached" in err_str or "rate limit" in err_str.lower():
+                    # Extract wait time if present
+                    import re as _re
+                    wait_match = _re.search(r"wait (\d+) seconds", err_str)
+                    wait_msg = f" Please wait {int(wait_match.group(1)) // 60} minutes before retrying." if wait_match and int(wait_match.group(1)) > 60 else " Please try again shortly."
+                    return f"⏳ **API rate limit reached.**{wait_msg}"
+                break
+
+            # ── Final answer ─────────────────────────────────────────────────
+            if "final_answer" in parsed:
+                logger.debug(
+                    f"[ReAct] Final answer after {iteration + 1} iteration(s)")
+                return parsed["final_answer"]
+
+            # ── Tool call ────────────────────────────────────────────────────
+            tool_name = parsed.get("action", "")
+            params = parsed.get("params", {})
+            thought = parsed.get("thought", "")
+
+            logger.debug(
+                f"[ReAct] iter={iteration + 1} | thought={thought[:80]!r} | "
+                f"action={tool_name!r} | params={params}"
+            )
+
+            if not tool_name:
+                logger.warning("[ReAct] No action in response, stopping loop")
+                break
+
+            try:
+                observation = tool_executor(tool_name, params)
+            except Exception as exc:
+                observation = f"Tool execution error: {exc}"
+
+            logger.debug(f"[ReAct] Observation: {observation[:300]!r}")
+
+            # Feed the thought+action and observation back into the conversation
+            messages.append({"role": "assistant", "content": raw})
+            messages.append({
+                "role": "user",
+                "content": f"Observation from {tool_name}:\n{observation}",
+            })
+
+        # Exhausted iterations or loop broken — ask LLM for a best-effort answer
+        try:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You have reached the maximum reasoning steps. "
+                    "Provide the best final_answer you can with what you have observed so far. "
+                    'Respond with {"thought": "...", "final_answer": "..."}'
+                ),
+            })
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=3000,
+                timeout=30,
+            )
+            raw = response.choices[0].message.content.strip()
+            if raw.startswith("```"):
+                parts = raw.split("```")
+                raw = parts[1][4:].strip() if len(parts) > 1 else raw
+            try:
+                parsed = _json.loads(raw)
+                return parsed.get("final_answer", raw)
+            except _json.JSONDecodeError:
+                # LLM returned plain text — use it as-is
+                return raw
+        except Exception as exc:
+            err_str = str(exc)
+            if "429" in err_str or "RateLimitReached" in err_str or "rate limit" in err_str.lower():
+                import re as _re
+                wait_match = _re.search(r"wait (\d+) seconds", err_str)
+                wait_msg = f" Please wait {int(wait_match.group(1)) // 60} minutes before retrying." if wait_match and int(wait_match.group(1)) > 60 else " Please try again shortly."
+                return f"⏳ **API rate limit reached.**{wait_msg}"
+            return (
+                "I wasn't able to fully complete that task. "
+                "Please try rephrasing or break it into smaller steps."
+            )
 
     def orchestrate_mcp_tool(
         self,
@@ -221,12 +450,18 @@ Guidelines:
             return {"tool": None, "params": {}, "reasoning": "Error during tool selection"}
 
 
-# Singleton instance
+# Singleton instance — reset to None by set_active_provider() when the provider changes
 _llm_client = None
 
 
 def get_llm_client() -> GitHubModelsLLM:
-    """Get or create LLM client singleton"""
+    """
+    Return the shared LLM client.
+
+    The client is built once per process and cached.  Calling
+    ``provider_registry.set_active_provider(name)`` resets ``_llm_client``
+    so the next call here rebuilds with the new provider.
+    """
     global _llm_client
     if _llm_client is None:
         _llm_client = GitHubModelsLLM()

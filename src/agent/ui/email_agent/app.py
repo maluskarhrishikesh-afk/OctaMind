@@ -5,10 +5,9 @@ Sets up the logger, imports the modular sub-components, and runs the
 Streamlit rendering loop.
 """
 from __future__ import annotations
-from .formatters import format_email_result
 from .orchestrator import execute_with_llm_orchestration
 from .conversation import handle_conversation
-from .helpers import _logo_b64, _logo_icon, _start_browser_watchdog
+from .helpers import _logo_b64, _logo_icon, _logo_path, _logo_pinkraven, _start_browser_watchdog
 from src.email import get_inbox_count
 import streamlit as st
 from ..dashboard.styles import inject_agent_css
@@ -24,7 +23,7 @@ from datetime import datetime
 logger = logging.getLogger("email_agent")
 logger.setLevel(logging.DEBUG)
 
-_log_file = Path(__file__).parent.parent.parent.parent / "email_agent.log"
+_log_file = Path(__file__).parent.parent.parent.parent.parent / "email_agent.log"
 _file_handler = logging.FileHandler(_log_file, encoding="utf-8", mode="a")
 _file_handler.setLevel(logging.DEBUG)
 _console_handler = logging.StreamHandler()
@@ -138,6 +137,50 @@ try:
     AGENT_MANAGER_AVAILABLE = True
 except Exception:
     AGENT_MANAGER_AVAILABLE = False
+
+
+def _compose_email_response(result: dict, action: str, original_command: str) -> str:
+    """Pass raw Email result directly to LLM for friendly composition."""
+    import json as _json
+    from src.agent.llm.llm_parser import get_llm_client
+
+    if action == "react_response":
+        return result.get("message", "Done.")  # Already LLM-composed by ReAct loop
+
+    composition_prompt = f"""The user asked: "{original_command}"
+
+A Gmail operation was executed. Here is the raw result:
+
+{_json.dumps(result, indent=2, default=str)}
+
+Compose a response following these formatting rules:
+- Write in a friendly, conversational tone like a helpful assistant
+- Use **bold** for important names, subjects, senders, and counts
+- Use bullet points or numbered lists to present multiple emails
+- Use tables (markdown) when listing emails with sender, subject, date columns
+- Use relevant emojis to make the response visually engaging (e.g. 📬 inbox, ✉️ emails, 📤 sent, 🗑️ deleted, 📎 attachments, ✅ success)
+- Add a brief summary sentence at the start so the user knows what happened
+- For email lists, always show: sender name/address, subject line, and date
+- Include message IDs only when the user might need them to act on specific emails
+- Do NOT show raw JSON keys or technical internals"""
+
+    llm = get_llm_client()
+    try:
+        response = llm.client.chat.completions.create(
+            model=llm.model,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant. Compose clear, friendly markdown responses from raw tool results."},
+                {"role": "user", "content": composition_prompt},
+            ],
+            temperature=0.4,
+            max_tokens=3000,
+            timeout=40,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as exc:
+        logger.warning("Email response composition failed: %s", exc)
+        return f"✅ Email operation `{action}` completed."
+
 
 # ── Streamlit ─────────────────────────────────────────────────────────────────
 
@@ -381,9 +424,11 @@ def main() -> None:  # noqa: C901 (complexity — intentional for a Streamlit ap
     chat_container = st.container()
     with chat_container:
         for message in st.session_state.chat_messages:
-            _chat_avatar = _logo_icon(
-            ) if message["role"] == "assistant" else "🧑‍💻"
-            with st.chat_message(message["role"], avatar=_chat_avatar):
+            if message["role"] == "assistant":
+                _ctx = st.chat_message("assistant")
+            else:
+                _ctx = st.chat_message("user")
+            with _ctx:
                 st.markdown(message["content"])
 
     if _do_clear:
@@ -488,9 +533,9 @@ def main() -> None:  # noqa: C901 (complexity — intentional for a Streamlit ap
                         )
                     else:
                         action = result.get("action", "unknown")
-                        formatted_result = format_email_result(result, action)
+                        final_response = _compose_email_response(result, action, user_command)
                         st.session_state.chat_messages.append(
-                            {"role": "assistant", "content": formatted_result}
+                            {"role": "assistant", "content": final_response}
                         )
 
                         if MEMORY_AVAILABLE:
@@ -503,6 +548,7 @@ def main() -> None:  # noqa: C901 (complexity — intentional for a Streamlit ap
                                         "count", 0), "status": "success"},
                                     metadata={"reasoning": result.get(
                                         "reasoning", "")},
+                                    importance="High",
                                 )
                                 st.session_state.interaction_count += 1
                                 consolidator = memory.get_consolidator()

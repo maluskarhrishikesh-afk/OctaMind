@@ -245,44 +245,102 @@ def main() -> None:
         with cols[idx % 2]:
             show_agent_card(agent)
 
-    # ── Multi-Agent Hub button (visible when 2+ agents are running) ───────────
+    # ── Multi-Agent Hub — always-visible system agent card ───────────────────
+    st.markdown("---")
     try:
-        from src.agent.core.process_manager import get_all_agent_statuses, start_agent, get_agent_status
-        all_statuses = get_all_agent_statuses()
-        running_agents = [s for s in all_statuses if s.get("running") and s.get("id") != "__multi_agent__"]
-        if len(running_agents) >= 2:
-            st.markdown("---")
-            ma_status = get_agent_status("__multi_agent__")
-            if ma_status and ma_status.get("running"):
-                ma_url = ma_status.get("url", "")
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.markdown(
-                        "<div style='color:#c4b5fd;font-size:0.95rem;padding:8px 0;'>"
-                        "⚡ <b>Multi-Agent Hub</b> is running — send cross-agent commands!</div>",
-                        unsafe_allow_html=True,
-                    )
-                with col_b:
-                    if ma_url:
-                        st.link_button("Open ⚡", url=ma_url, type="primary", use_container_width=True)
-            else:
-                col_a, col_b = st.columns([3, 1])
-                with col_a:
-                    st.markdown(
-                        "<div style='color:#c4b5fd;font-size:0.95rem;padding:8px 0;'>"
-                        "⚡ <b>Multi-Agent</b> — combine Drive + Email in one command!</div>",
-                        unsafe_allow_html=True,
-                    )
-                with col_b:
-                    if st.button("Launch ⚡", type="primary", use_container_width=True):
-                        try:
-                            info = start_agent("__multi_agent__", "Multi-Agent Hub", "multi_agent")
-                            ma_url = info.get("url", "")
-                            if ma_url:
-                                st.link_button("Open ⚡", url=ma_url)
-                            st.rerun()
-                        except Exception as _e:
-                            st.error(f"Could not start Multi-Agent Hub: {_e}")
+        from src.agent.core.process_manager import start_agent, stop_agent
+        ma_status = get_agent_status("__multi_agent__")
+        is_ma_running = ma_status is not None
+
+        bg = ("linear-gradient(135deg, #1a1a2e 0%, #1e0a3c 100%)"
+              if is_ma_running
+              else "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)")
+        glow = ("0 0 24px rgba(124,58,237,0.5)" if is_ma_running
+                else "0 4px 16px rgba(0,0,0,0.25)")
+        status_badge = "🟢 Running" if is_ma_running else "⚫ Stopped"
+        status_color = "#28a745" if is_ma_running else "#a855f7"
+
+        st.markdown(
+            f"""
+            <div style="background:{bg};padding:22px;border-radius:14px;
+                        border:1.5px solid rgba(124,58,237,0.5);
+                        margin-bottom:16px;box-shadow:{glow};
+                        position:relative;overflow:hidden;">
+              <div style="position:absolute;top:0;right:0;width:120px;height:120px;
+                          background:radial-gradient(circle,rgba(124,58,237,0.15) 0%,transparent 70%);
+                          border-radius:50%;"></div>
+              <div style="position:relative;z-index:1;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                  <div style="font-size:1.7rem;font-weight:800;
+                              background:linear-gradient(135deg,#a78bfa 0%,#7c3aed 100%);
+                              -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                              background-clip:text;">
+                    ⚡ Multi-Agent Hub
+                  </div>
+                  <div style="background:{status_color};color:white;padding:5px 14px;
+                              border-radius:20px;font-size:0.8rem;font-weight:600;
+                              box-shadow:0 2px 8px rgba(0,0,0,0.3);">
+                    {status_badge}
+                  </div>
+                </div>
+                <div style="color:#c4b5fd;font-size:0.92rem;line-height:1.6;margin-bottom:10px;">
+                  Orchestrate Drive + Email in a single command — auto-planned, step-by-step execution.
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <span style="background:rgba(124,58,237,0.2);color:#a78bfa;
+                               padding:3px 10px;border-radius:12px;font-size:0.78rem;font-weight:600;">
+                    🧠 Collective Consciousness
+                  </span>
+                  <span style="background:rgba(124,58,237,0.2);color:#a78bfa;
+                               padding:3px 10px;border-radius:12px;font-size:0.78rem;font-weight:600;">
+                    ⚡ Cross-Agent Workflows
+                  </span>
+                  <span style="background:rgba(124,58,237,0.2);color:#a78bfa;
+                               padding:3px 10px;border-radius:12px;font-size:0.78rem;font-weight:600;">
+                    🔀 Auto-Routing
+                  </span>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if is_ma_running:
+            ma_url = ma_status.get("url", "")
+            st.markdown(
+                f"""
+                <div style="background:rgba(40,167,69,0.08);border:1px solid rgba(40,167,69,0.3);
+                            padding:10px 16px;border-radius:10px;margin-bottom:12px;">
+                  <span style="color:#28a745;font-weight:600;">
+                    ✅ Running on port {ma_status.get('port', '?')}
+                  </span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            col_a, col_b = st.columns(2)
+            with col_a:
+                if ma_url:
+                    st.link_button("🚀 Open Multi-Agent Chat", url=ma_url,
+                                   type="primary", use_container_width=True)
+            with col_b:
+                if st.button("⏹️ Stop Hub", key="stop_multi_agent",
+                             use_container_width=True):
+                    with st.spinner("Stopping Multi-Agent Hub…"):
+                        stop_agent("__multi_agent__")
+                    st.rerun()
+        else:
+            if st.button("▶️ Start Multi-Agent Hub", key="start_multi_agent",
+                         type="primary", use_container_width=True):
+                with st.spinner("🚀 Launching Multi-Agent Hub…"):
+                    try:
+                        info = start_agent(
+                            "__multi_agent__", "Multi-Agent Hub", "multi_agent")
+                        st.success(f"✅ Started on port {info['port']}")
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(f"Could not start Multi-Agent Hub: {_e}")
     except Exception:
         pass  # Dashboard still works even if process_manager is unavailable
 

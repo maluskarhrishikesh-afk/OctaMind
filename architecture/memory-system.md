@@ -2,7 +2,7 @@
 
 **Complete Implementation Guide & Reference**
 
-*Last Updated: February 20, 2026*
+*Last Updated: February 22, 2026*
 
 ---
 
@@ -19,6 +19,7 @@
 9. [Testing](#testing)
 10. [LLM Context Management](#llm-context-management)
 11. [On-Demand Episodic Recall](#on-demand-episodic-recall)
+12. [Recall System Improvements (Feb 2026)](#recall-system-improvements)
 
 ---
 
@@ -50,19 +51,19 @@ The Cognitive Memory Architecture implements a **6-layer memory system** inspire
 
 | File                 | What it stores                                                        | Written by                                                       | Grows how fast                  |                        Sent to LLM?                         |                                  Cleanup                                   |
 | -------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------- | :---------------------------------------------------------: | :------------------------------------------------------------------------: |
-| `working_memory.md`  | The last 10 things the agent did or was asked                         | Every interaction                                                | Fast — auto-trimmed to 10 items |                    ✅ Last 5 interactions                    |                           Auto-trimmed in-place                            |
+| `working_memory.md`  | The last 10 things the agent did or was asked                         | Every interaction                                                | Fast — auto-trimmed to 10 items |                    ✅ Last 10 interactions                   |                           Auto-trimmed in-place                            |
 | `episodic_memory.md` | Time-stamped events: what happened and why it matters                 | Every interaction (via `add_interaction`) + consolidation themes | Moderate                        | ❌ Not sent by default — loaded on-demand for recall queries | Items older than 90 days → `archive/` (⚠️ file rewrite not yet implemented) |
 | `semantic_memory.md` | Learned facts about the user — preferences, patterns, recurring needs | Consolidation engine                                             | Slow                            |                   ✅ Last 3 000 chars only                   |                     Never archived (caps protect LLM)                      |
-| `personality.md`     | Who the agent is: tone, communication style, goals                    | Manual / agent setup                                             | Barely at all                   |                     ✅ Last 1 500 chars                      |                               Never changes                                |
-| `habits.md`          | Confirmed behavioural patterns (needs 3+ repetitions to form)         | Consolidation engine                                             | Slow                            |                     ✅ Last 1 500 chars                      |                     Never archived (caps protect LLM)                      |
-| `consciousness.md`   | Big-picture understanding of the user (like a manager's mental model) | Consolidation engine (every 2–4 weeks)                           | Very slow                       |                     ✅ Last 1 000 chars                      |                               Never archived                               |
+| `personality.md`     | Who the agent is: tone, communication style, goals                    | Manual / agent setup                                             | Barely at all                   |                   ✅ Full file (no cap)                      |                               Never changes                                |
+| `habits.md`          | Confirmed behavioural patterns (needs 3+ repetitions to form)         | Consolidation engine                                             | Slow                            |                     ✅ Last 3 000 chars                      |                     Never archived (caps protect LLM)                      |
+| `consciousness.md`   | Big-picture understanding of the user (like a manager's mental model) | Consolidation engine (every 2–4 weeks)                           | Very slow                       |                   ✅ Full file (no cap)                      |                               Never archived                               |
 
 ### Rule of thumb
 
 - **User sends a message** → `working_memory.md` gains one entry (oldest dropped if > 10).
 - **20 interactions or 24 hours pass** → consolidation runs and may update `episodic_memory.md`, `semantic_memory.md`, `habits.md`, `consciousness.md`.
 - **Event is 90 days old** → that specific event should move from `episodic_memory.md` to `archive/`. ⚠️ The decay rules are calculated but the actual file rewrite is not yet implemented (see §10).
-- **Every LLM call** → only the last 5 interactions from working memory + character-capped snippets of the other four files are sent. The full file is never dumped to the LLM.
+- **Every LLM call** → the last 10 interactions from working memory are sent. `personality.md` and `consciousness.md` are sent in full (no cap). `habits.md` is capped at 3 000 chars. `semantic_memory.md` is capped at 3 000 chars. `episodic_memory.md` is excluded by default (loaded on-demand for recall queries).
 - **User asks "do you remember X?"** → `recall_for_llm()` runs before the LLM call, searches episodic/working/semantic on demand, and injects only the matching entries into the prompt for that single turn.
 
 ### What gets summarised vs archived
@@ -542,11 +543,11 @@ class MemoryConsolidator:
          │                                               │
          ↓                                               ↓
     Load ALL Layers                          Format as String
-    ├─ Personality   (last 1500 chars)        ┌──────────────┐
-    ├─ Consciousness (last 1000 chars)        │ # Agent      │
-    ├─ Working Memory (last 5 items)          │ Memory       │
-    ├─ Semantic Memory (last 3000 chars)      │ Context      │
-    ├─ Habits        (last 1500 chars)        │              │
+    ├─ Personality   (full file, no cap)         ┌──────────────┐
+    ├─ Consciousness (full file, no cap)         │ # Agent      │
+    ├─ Working Memory (last 10 items)            │ Memory       │
+    ├─ Semantic Memory (last 3000 chars)         │ Context      │
+    ├─ Habits        (last 3000 chars)           │              │
     └─ Episodic: NOT included by default      │ ## Person... │
        (use recall_for_llm() instead)         │ ## Consci... │
                                              │ ## Working..│
@@ -1038,11 +1039,11 @@ Called from `handle_conversation()` in `email_agent_ui.py` and `_handle_conversa
 
 ```
 get_full_context_for_llm()
-    ├─ personality.md          → last 1 500 chars  (~375 tokens)
-    ├─ consciousness.md        → last 1 000 chars  (~250 tokens)
-    ├─ working_memory.md       → last 5 interactions (~500 tokens)
+    ├─ personality.md          → full file (no cap)               ← uncapped ✅
+    ├─ consciousness.md        → full file (no cap)               ← uncapped ✅
+    ├─ working_memory.md       → last 10 interactions (~1 000 tokens)
     ├─ semantic_memory.md      → last 3 000 chars  (~750 tokens)  ← capped ✅
-    ├─ habits.md               → last 1 500 chars  (~375 tokens)  ← capped ✅
+    ├─ habits.md               → last 3 000 chars  (~750 tokens)  ← capped ✅
     └─ episodic_memory.md      → NOT included (include_episodic=False by default)
 ```
 
@@ -1068,11 +1069,11 @@ Measured on the existing `8aef0053` agent (Feb 2026):
 
 | File                 | Size on disk | Sent to LLM? | How much?                     | Cap      |
 | -------------------- | ------------ | ------------ | ----------------------------- | -------- |
-| `personality.md`     | ~0.5 KB      | ✅            | Last 1 500 chars              | 1 500 ch |
-| `consciousness.md`   | ~0.5 KB      | ✅            | Last 1 000 chars              | 1 000 ch |
-| `working_memory.md`  | ~3.5 KB      | ✅            | Last 5 interactions (~0.6 KB) | 5 items  |
+| `personality.md`     | ~0.5 KB      | ✅            | Full file (no cap)            | —        |
+| `consciousness.md`   | ~0.5 KB      | ✅            | Full file (no cap)            | —        |
+| `working_memory.md`  | ~3.5 KB      | ✅            | Last 10 interactions (~1 KB)  | 10 items |
 | `semantic_memory.md` | ~0.4 KB      | ✅            | Last 3 000 chars              | 3 000 ch |
-| `habits.md`          | ~0.4 KB      | ✅            | Last 1 500 chars              | 1 500 ch |
+| `habits.md`          | ~0.4 KB      | ✅            | Last 3 000 chars              | 3 000 ch |
 | `episodic_memory.md` | ~2.4 KB      | ❌            | Not sent                      | —        |
 
 **Current total context payload ≈ ~2 250 tokens max** — capped regardless of how large files grow.
@@ -1114,10 +1115,11 @@ The real risks are:
 `get_full_context_for_llm()` now uses `_tail()` to cap each section before injection:
 
 ```python
-_LLM_PERSONALITY_CAP  = 1 500 chars  (~375 tokens)
-_LLM_CONSCIOUSNESS_CAP = 1 000 chars  (~250 tokens)
-_LLM_SEMANTIC_CAP     = 3 000 chars  (~750 tokens)
-_LLM_HABITS_CAP       = 1 500 chars  (~375 tokens)
+# personality.md   → no cap (sent in full)
+# consciousness.md → no cap (sent in full)
+_LLM_SEMANTIC_CAP     = 3_000   # chars (~750 tokens)
+_LLM_HABITS_CAP       = 3_000   # chars (~750 tokens)
+_LLM_WORKING_MEM_CAP  = 10      # interactions
 ```
 
 The `_tail()` helper keeps the **most recent** content (bottom of file, since new entries are appended) and prepends `...[earlier content trimmed]...` when truncation occurs. Files on disk are never modified — only the slice sent to the LLM is shortened.
@@ -1258,7 +1260,7 @@ The LLM receives these instructions in its system prompt:
 ### Memory System Guidelines
 
 **6 Layers Explained**:
-1. **Working Memory** - Current context, last 5-10 interactions
+1. **Working Memory** - Current context, last 10 interactions
 2. **Episodic Memory** - Time-stamped events with importance levels
 3. **Semantic Memory** - Distilled user knowledge and preferences
 4. **Personality** - Your stable behavioral traits
@@ -1452,15 +1454,15 @@ Adjustable via `agent_memory.py::decay_days` property.
 ### LLM Token Usage
 
 **Memory context size (maximum, all sections capped)**:
-- Personality: ~375 tokens (1 500 char cap)
-- Consciousness: ~250 tokens (1 000 char cap)
-- Working Memory: ~500 tokens (last 5 interactions)
+- Personality: variable (full file, typically ~100–500 tokens)
+- Consciousness: variable (full file, typically ~100–400 tokens)
+- Working Memory: ~1 000 tokens (last 10 interactions)
 - Semantic Memory: ~750 tokens (3 000 char cap)
-- Habits: ~375 tokens (1 500 char cap)
+- Habits: ~750 tokens (3 000 char cap)
 - On-demand recall (recall queries only): ~200–500 tokens extra
 
-**Normal turn**: ~2 250 tokens max (hard ceiling regardless of file growth)  
-**Recall turn**: ~2 250 + recalled episodic snippets (~2 500–2 750 tokens)
+**Normal turn**: ~3 000–4 000 tokens typical (richer context than previous 2 250 cap)  
+**Recall turn**: above + recalled episodic snippets (~3 500–4 500 tokens)
 
 ---
 
@@ -1496,11 +1498,48 @@ LLM called with augmented context (this turn only)
 
 The following words/phrases in the user message trigger a recall search:
 
-`remember`, `recall`, `did we`, `have we`, `last time`, `earlier`, `before`,
-`previous`, `when did`, `what was`, `told you`, `mentioned`, `said`,
-`talked about`, `discussed`, `do you know`, `you know that`
+```
+# Original signals:
+remember, recall, did we, have we, last time, earlier, before,
+previous, when did, what was, told you, mentioned, said,
+talked about, discussed, do you know, you know that
+
+# Added Feb 2026 — cover natural-language history queries:
+did i, have i, ask you, asked you, any command, what did i,
+do you remember, past week, this week, past month, this month,
+ago, back, yesterday, recently, last few, history, previously,
+any time, ever ask, ever told, commanded, instructed
+```
 
 If none of these appear, `recall_for_llm()` returns `""` immediately and adds zero overhead.
+
+### Recall Stop Words
+
+Before running the keyword search, temporal and filler words are stripped from the query so they don't poison the match:
+
+```
+past, week, month, day, days, ago, last, recently, back,
+yesterday, today, now, perform, ask, asked, any, command,
+commands, please, can, you, me, i, did, have, what, when,
+how, ever, time, times, all, some, was, were, want, will
+```
+
+This means *"did I ask you to perform any commands past week?"* correctly extracts `[]` (empty keywords), which then triggers the temporal window fallback rather than a keyword-only search that would return nothing.
+
+### Temporal Resolution
+
+When the query contains a time expression, `recall_for_llm()` resolves it to a concrete date window before scanning episodic memory:
+
+| Expression | Resolved to |
+|---|---|
+| `"yesterday"` | Single target date: yesterday |
+| `"2 days ago"`, `"3 days ago"`, … | Single target date: N days back |
+| `"past week"`, `"this week"` | Window: today − 7 days |
+| `"last week"` | Window: today − 14 days to today − 7 days |
+| `"past month"`, `"this month"` | Window: today − 30 days |
+| `"last month"` | Window: today − 60 days to today − 30 days |
+
+All episodic entries whose embedded ISO timestamp falls within the window are returned, regardless of keyword overlap.
 
 ### Output Format
 
@@ -1541,6 +1580,66 @@ At the current scale (a few hundred entries per agent), keyword search is the ri
 
 ---
 
+## Recall System Improvements
+
+*Section added: February 22, 2026*
+
+This section summarises the concrete fixes made to align the running implementation with the design spec above.
+
+### Why These Fixes Were Needed
+
+The memory system design was correct on paper but the implementation had several gaps:
+
+1. LLM context was **too narrow** (5 interactions, truncated personality)
+2. Episodic recall used **too few trigger phrases** — natural queries like "did I ask you?" were ignored
+3. **Temporal noise words** like `past`, `week`, `ago` poisoned keyword searches, making them return nothing
+4. **Episodic insights** were hardcoded placeholders, making search useless
+5. Email commands were stored with **Medium** importance, risking decay
+
+### Fix Summary
+
+| # | Problem | Fix | File |
+|---|---|---|---|
+| 1 | Working memory sent 5 interactions | Changed to 10 | `agent_memory.py` |
+| 2 | Personality capped at 1 500 chars | Removed cap — sent full | `agent_memory.py` |
+| 3 | Consciousness capped at 1 000 chars | Removed cap — sent full | `agent_memory.py` |
+| 4 | Habits capped at 1 500 chars | Raised to 3 000 chars | `agent_memory.py` |
+| 5 | Only 16 recall signal phrases | Expanded to 38+ phrases | `agent_memory.py` |
+| 6 | No temporal stop words | Added ~20 stop words | `agent_memory.py` |
+| 7 | No temporal date resolution | Added window resolution | `agent_memory.py` |
+| 8 | Episodic fallback gated on empty terms | Always fires if no events matched | `agent_memory.py` |
+| 9 | Episodic insight hardcoded to `"User performed {action}"` | Dynamic meaningful string | `agent_memory.py` |
+| 10 | Email commands stored as Medium importance | Changed to High | `agent_memory.py` |
+
+### Key Code Locations
+
+```python
+# src/agent/memory/agent_memory.py
+
+_RECALL_SIGNALS = frozenset({...})   # 38+ trigger phrases
+_RECALL_STOP_WORDS = frozenset({...}) # temporal/filler noise words
+
+class AgentMemory:
+    def get_full_context_for_llm(self) -> str:
+        # personality.md → full (no cap)
+        # consciousness.md → full (no cap)
+        # working_memory.md → last 10 interactions
+        # habits.md → last 3 000 chars
+        # semantic_memory.md → last 3 000 chars
+
+    def recall_for_llm(self, query: str, ...) -> str:
+        # 1. Check _RECALL_SIGNALS — bail early if no match
+        # 2. Strip _RECALL_STOP_WORDS from query terms
+        # 3. Resolve temporal expressions → target_dates or window
+        # 4. Scan episodic entries — keyword + date window match
+        # 5. Fallback: return last 5 episodic entries if nothing matched
+        # 6. Scan working memory interactions — keyword match
+        # 7. Scan semantic memory sections — keyword match
+        # 8. Assemble and return recall block
+```
+
+---
+
 ## Conclusion
 
 The Cognitive Memory Architecture provides agents with:
@@ -1549,14 +1648,16 @@ The Cognitive Memory Architecture provides agents with:
 ✅ **Automatic learning** - Patterns extracted without manual intervention  
 ✅ **Persistent state** - Survives restarts and long gaps  
 ✅ **Memory-aware responses** - LLM draws from all relevant layers  
-✅ **Bounded context** - Character caps prevent unbounded token growth  
+✅ **Bounded context** - Smart character caps prevent unbounded token growth  
 ✅ **On-demand recall** - Episodic memory searched when the user references the past  
+✅ **Natural language recall** - 38+ signal phrases + temporal resolution ("past week", "2 days ago")  
+✅ **Meaningful episodic insights** - Searchable descriptions instead of generic placeholders  
 ❌ **Decay file rewrite** - Not yet implemented (entries classified but file not updated)
 
 ---
 
-**Document Version**: 1.1  
-**Last Updated**: February 20, 2026  
+**Document Version**: 1.2  
+**Last Updated**: February 22, 2026  
 **Authors**: AI Development Team  
 **Status**: Production
 

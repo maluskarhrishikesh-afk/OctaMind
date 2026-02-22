@@ -197,6 +197,34 @@ def cleanup_stale() -> None:
     _save_state(live)
 
 
+def get_all_agent_statuses() -> list:
+    """
+    Return a list of status dicts for every agent currently in running state.
+    Each dict has keys: id, pid, port, url, running.
+    Stale entries (dead PIDs) are cleaned up automatically.
+    """
+    state = _load_state()
+    results = []
+    stale = []
+    for agent_id, info in state.items():
+        alive = _is_pid_alive(info["pid"])
+        if alive:
+            results.append({
+                "id": agent_id,
+                "pid": info["pid"],
+                "port": info["port"],
+                "url": f"http://localhost:{info['port']}",
+                "running": True,
+            })
+        else:
+            stale.append(agent_id)
+    if stale:
+        for aid in stale:
+            del state[aid]
+        _save_state(state)
+    return results
+
+
 def remove_agent_from_state(agent_id: str) -> None:
     """Remove agent from tracking state without killing the process.
     Called by the agent UI itself when it self-terminates on browser close.

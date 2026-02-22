@@ -14,113 +14,116 @@
 
 ---
 
-## Interaction at 2026-02-21T18:59:58.644894
+## Interaction at 2026-02-22T23:59:01.453553
 
-**Timestamp:** 2026-02-21T18:59:58.644894
-**Command:** Hi
-**Action:** conversation
+**Timestamp:** 2026-02-22T23:59:01.453553
+**Command:** Can you list latest 2 emails?
+**Action:** react_response
 **Status:** success
-**Result:** success - Natural conversation
-**Metadata:** response_preview: Hello again! 😊 How can I assist you today?
+**Result:** success (0 emails)
+**Metadata:** reasoning: 
 
 ---
 
-## Interaction at 2026-02-21T18:56:14.952853
+## Interaction at 2026-02-22T23:33:05.988804
 
-**Timestamp:** 2026-02-21T18:56:14.952853
-**Command:** Hi
+**Timestamp:** 2026-02-22T23:33:05.988804
+**Command:** Can you tell me various commands that you can execute?
 **Action:** conversation
 **Status:** success
 **Result:** success - Natural conversation
-**Metadata:** response_preview: Hello again! 😊 How can I assist you today?
+**Metadata:** response_preview: Sure! Here are some commands I can execute for you:
+
+1. **Email Management**:
+   - List all emails r
 
 ---
 
-## Interaction at 2026-02-21T15:31:22.261575
+## Interaction at 2026-02-22T23:25:35.659342
 
-**Timestamp:** 2026-02-21T15:31:22.261575
-**Command:** DO you know me?
-**Action:** conversation
+**Timestamp:** 2026-02-22T23:25:35.659342
+**Command:** Can you list all the emails that I received today?
+**Action:** react_response
 **Status:** success
-**Result:** success - Natural conversation
-**Metadata:** response_preview: I remember some details from our previous conversations, but I'm always learning more about you over
+**Result:** success (0 emails)
+**Metadata:** reasoning: 
 
 ---
 
-## Interaction at 2026-02-21T15:30:58.324399
+## Interaction at 2026-02-22T21:40:01.268817
 
-**Timestamp:** 2026-02-21T15:30:58.324399
-**Command:** Hello, how are you doing and how is the weather today?
-**Action:** conversation
+**Timestamp:** 2026-02-22T21:40:01.268817
+**Command:** How much is the rate limit?
+**Action:** react_response
 **Status:** success
-**Result:** success - Natural conversation
-**Metadata:** response_preview: Hello! I'm doing well, thank you for asking! 😊 As for the weather, I don't have real-time data acces
+**Result:** success (0 emails)
+**Metadata:** reasoning: 
 
 ---
 
-## Interaction at 2026-02-20T23:40:57.159711
+## Interaction at 2026-02-22T21:39:32.541041
 
-**Timestamp:** 2026-02-20T23:40:57.159711
-**Command:** When were you created?
-**Action:** conversation
+**Timestamp:** 2026-02-22T21:39:32.541041
+**Command:** Can you list all the emails that I received today?
+**Action:** react_response
 **Status:** success
-**Result:** success - Natural conversation
-**Metadata:** response_preview: I don't have a specific creation date like a traditional being, but I exist to assist you from the m
+**Result:** success (0 emails)
+**Metadata:** reasoning: 
 
 ---
 
-## Interaction at 2026-02-20T23:40:39.585469
+## Interaction at 2026-02-22T18:24:36.237998
 
-**Timestamp:** 2026-02-20T23:40:39.585469
-**Command:** For how many days have you been alive?
-**Action:** conversation
+**Timestamp:** 2026-02-22T18:24:36.237998
+**Command:** list all the emails that I received today
+**Action:** react_response
 **Status:** success
-**Result:** success - Natural conversation
-**Metadata:** response_preview: I don't have a specific age like a living being, but I've been here to assist you since our interact
+**Result:** success (0 emails)
+**Metadata:** reasoning: 
 
 ---
 
-## Interaction at 2026-02-20T22:58:30.551331
+## Interaction at 2026-02-22T18:10:03.828468
 
-**Timestamp:** 2026-02-20T22:58:30.551331
-**Command:** Do you remember what we discussed 1 or 2 days back?
-**Action:** conversation
+**Timestamp:** 2026-02-22T18:10:03.828468
+**Command:** Can you list all the emails received today?
+**Action:** react_response
 **Status:** success
-**Result:** success - Natural conversation
-**Metadata:** response_preview: Yes, I recall we talked about email productivity insights and also had some friendly exchanges. You 
+**Result:** success (0 emails)
+**Metadata:** reasoning: 
 
 ---
 
-## Interaction at 2026-02-20T22:58:00.159946
+## Interaction at 2026-02-22T18:00:12.362988
 
-**Timestamp:** 2026-02-20T22:58:00.159946
-**Command:** Do you remember our previous conversations?
-**Action:** conversation
+**Timestamp:** 2026-02-22T18:00:12.362988
+**Command:** can you list all the emails listed today?
+**Action:** react_response
 **Status:** success
-**Result:** success - Natural conversation
-**Metadata:** response_preview: Yes, I remember our previous conversations! Recently, we've had some friendly chats, and you asked f
+**Result:** success (0 emails)
+**Metadata:** reasoning: 
 
 ---
 
-## Interaction at 2026-02-20T22:57:32.410888
+## Interaction at 2026-02-22T17:37:29.877293
 
-**Timestamp:** 2026-02-20T22:57:32.410888
-**Command:** Hello
-**Action:** conversation
+**Timestamp:** 2026-02-22T17:37:29.877293
+**Command:** Can you list all the emails received today?
+**Action:** react_response
 **Status:** success
-**Result:** success - Natural conversation
-**Metadata:** response_preview: Hi there! 😊 How can I assist you today?
+**Result:** success (0 emails)
+**Metadata:** reasoning: 
 
 ---
 
-## Interaction at 2026-02-20T22:51:29.719698
+## Interaction at 2026-02-22T16:00:29.883212
 
-**Timestamp:** 2026-02-20T22:51:29.719698
-**Command:** Hi
+**Timestamp:** 2026-02-22T16:00:29.883212
+**Command:** Do you remember all the things that we have done so far during the past 4-5 days?
 **Action:** conversation
 **Status:** success
 **Result:** success - Natural conversation
-**Metadata:** response_preview: Hello again! How can I assist you today? 😊
+**Metadata:** response_preview: I have a good memory of our recent interactions, including the tasks we've worked on and the topics 
 
 ---
 

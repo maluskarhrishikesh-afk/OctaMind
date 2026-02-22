@@ -289,26 +289,75 @@ def inject_agent_css(
     st.markdown(
         f"""
         <style>
-        /* ── Chat bubbles ────────────────────────────────────────────────── */
+        /* ═══════════════════════════════════════════════════════════
+           ChatGPT-style chat — no avatars, left/right bubbles
+           Streamlit 1.40+ uses stChatMessageAvatarUser / stChatMessageAvatarAssistant
+           ═══════════════════════════════════════════════════════════ */
+
+        /* 1. Hide ALL avatar icons (Streamlit 1.40+ testids) */
+        [data-testid="stChatMessageAvatarUser"],
+        [data-testid="stChatMessageAvatarAssistant"],
+        [data-testid="stChatMessageAvatarCustom"] {{
+            display: none !important;
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }}
+
+        /* 2. Reset the outer chat-message wrapper */
         [data-testid="stChatMessage"] {{
-            border-radius: 18px !important;
-            padding: 14px 18px !important;
-            margin-bottom: 10px !important;
-            border: 1px solid rgba(255,255,255,0.05) !important;
-            transition: box-shadow 0.2s ease;
+            gap: 0 !important;
+            padding: 4px 0 !important;
+            background: transparent !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            margin-bottom: 6px !important;
+            align-items: flex-end !important;
         }}
-        [data-testid="stChatMessage"]:hover {{
-            box-shadow: 0 4px 20px rgba(0,0,0,0.25) !important;
+
+        /* 3. USER messages — right-aligned pill
+              Streamlit sets background=true on the styled container for "user"/"human"
+              which maps to the .stChatMessage class with a specific emotion cache variant.
+              We detect it via :has() against the avatar testid. */
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"]) {{
+            justify-content: flex-end !important;
+            flex-direction: row-reverse !important;
         }}
-        [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {{
-            background: rgba({accent_rgb},0.07) !important;
-            border-color: rgba({accent_rgb},0.2) !important;
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+          [data-testid="stChatMessageContent"] {{
+            max-width: 68% !important;
+            background: rgba({accent_rgb}, 0.15) !important;
+            border: 1px solid rgba({accent_rgb}, 0.30) !important;
+            border-radius: 18px 18px 4px 18px !important;
+            padding: 10px 16px !important;
+            margin-left: auto !important;
+            margin-right: 0 !important;
         }}
-        [data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {{
-            background: rgba(255,255,255,0.03) !important;
-            border-color: rgba(255,255,255,0.08) !important;
+        /* Right-align text inside user bubble */
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+          [data-testid="stMarkdownContainer"],
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarUser"])
+          [data-testid="stMarkdownContainer"] p {{
+            text-align: right !important;
         }}
-        /* ── Chat message text (ensure readable on dark backgrounds) ─────── */
+
+        /* 4. ASSISTANT messages — subtle dark bubble, left edge */
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"]) {{
+            justify-content: flex-start !important;
+        }}
+        [data-testid="stChatMessage"]:has([data-testid="stChatMessageAvatarAssistant"])
+          [data-testid="stChatMessageContent"] {{
+            max-width: 85% !important;
+            background: rgba(255, 255, 255, 0.05) !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border-radius: 18px 18px 18px 4px !important;
+            padding: 10px 16px !important;
+            margin-right: auto !important;
+        }}
+
+        /* 5. Text colours — readable on dark background */
         [data-testid="stChatMessage"] p,
         [data-testid="stChatMessage"] li,
         [data-testid="stChatMessage"] span,
@@ -321,22 +370,6 @@ def inject_agent_css(
             background: rgba(255,255,255,0.08) !important;
             border-radius: 4px !important;
             padding: 1px 4px !important;
-        }}
-        /* ── Avatars ─────────────────────────────────────────────────────── */
-        [data-testid="chatAvatarIcon-user"] {{
-            background: linear-gradient(135deg, {accent_hex} 0%, {accent_hex}99 100%) !important;
-            border-radius: 50% !important;
-            box-shadow: 0 2px 10px rgba({accent_rgb},0.4) !important;
-            font-size: 1.1rem !important;
-        }}
-        [data-testid="chatAvatarIcon-assistant"] {{
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%) !important;
-            border-radius: 50% !important;
-            box-shadow: 0 0 0 2px rgba({accent_rgb},0.45), 0 3px 12px rgba(0,0,0,0.5) !important;
-            overflow: hidden !important;
-        }}
-        [data-testid="chatAvatarIcon-assistant"] img {{
-            border-radius: 50% !important;
         }}
         /* ── Circular clear / icon button ────────────────────────────────── */
         div[data-testid="stColumns"] button[kind="secondary"] {{

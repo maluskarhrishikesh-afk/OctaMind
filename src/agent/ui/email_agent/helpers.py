@@ -20,6 +20,18 @@ def _logo_b64() -> str:
     return "data:image/png;base64," + _base64.b64encode(data).decode()
 
 
+def _logo_path() -> str:
+    """Return the absolute file path for octopus.png for use as st.chat_message avatar."""
+    img_path = Path(__file__).parent.parent.parent / "assets" / "octopus.png"
+    return str(img_path) if img_path.exists() else "🐙"
+
+
+def _logo_pinkraven() -> str:
+    """Return the absolute file path for pinkRaven.png for user chat avatar."""
+    img_path = Path(__file__).parent.parent.parent / "assets" / "pinkRaven.png"
+    return str(img_path) if img_path.exists() else "🐦"
+
+
 def _logo_icon():
     """Return a PIL Image of octopus.png for page_icon, or emoji fallback."""
     try:

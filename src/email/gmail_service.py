@@ -20,9 +20,13 @@ Usage:
 
 import base64
 import logging
+import mimetypes
+import os
 from typing import Dict, List
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders as _email_encoders
 
 # Import authentication module
 from .gmail_auth import get_gmail_service
@@ -99,6 +103,85 @@ class GmailServiceClient:
                 'status': 'error',
                 'message': 'Error while sending the email',
                 'error': str(e)
+            }
+
+    def send_email_with_attachment(
+        self,
+        to: str,
+        subject: str,
+        message: str,
+        attachment_path: str,
+    ) -> Dict:
+        """
+        Send an email with a local file attached.
+
+        Args:
+            to:              Recipient email address.
+            subject:         Email subject.
+            message:         Plain-text email body.
+            attachment_path: Absolute path to the local file to attach.
+                             Also accepts the result dict from download_file
+                             (will extract 'local_path' automatically).
+
+        Returns:
+            Dictionary containing messageId, threadId, and status.
+        """
+        # Accept a result dict from download_file
+        if isinstance(attachment_path, dict):
+            attachment_path = attachment_path.get("local_path", "")
+
+        try:
+            msg = MIMEMultipart()
+            msg["to"] = to
+            msg["from"] = self.user_id
+            msg["subject"] = subject
+            msg.attach(MIMEText(message, "plain"))
+
+            if attachment_path and os.path.isfile(attachment_path):
+                mime_type, _ = mimetypes.guess_type(attachment_path)
+                if mime_type is None:
+                    mime_type = "application/octet-stream"
+                main_type, sub_type = mime_type.split("/", 1)
+
+                with open(attachment_path, "rb") as f:
+                    part = MIMEBase(main_type, sub_type)
+                    part.set_payload(f.read())
+
+                _email_encoders.encode_base64(part)
+                filename = os.path.basename(attachment_path)
+                part.add_header(
+                    "Content-Disposition", "attachment", filename=filename
+                )
+                msg.attach(part)
+            elif attachment_path:
+                # File path provided but file not found — fail loudly so the
+                # workflow shows ❌ instead of silently sending without attachment.
+                return {
+                    "status": "error",
+                    "message": f"Attachment file not found: {attachment_path}",
+                    "error": f"File does not exist at path: {attachment_path}",
+                }
+
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
+            sent = self.gmail_service.users().messages().send(
+                userId=self.user_id,
+                body={"raw": raw},
+            ).execute()
+
+            fname = os.path.basename(attachment_path) if attachment_path else "(none)"
+            return {
+                "status": "success",
+                "messageId": sent["id"],
+                "threadId": sent["threadId"],
+                "message": f"Email with attachment '{fname}' sent successfully",
+                "attachment": fname,
+            }
+
+        except Exception as exc:
+            return {
+                "status": "error",
+                "message": "Error sending email with attachment",
+                "error": str(exc),
             }
 
     def list_emails(self, query: str = '', max_results: int = 10) -> List[Dict]:
@@ -603,6 +686,27 @@ def send_email(to: str, subject: str, message: str) -> Dict:
         Result dictionary with status and message details
     """
     return _get_client().send_email(to, subject, message)
+
+
+def send_email_with_attachment(
+    to: str,
+    subject: str,
+    message: str,
+    attachment_path: str,
+) -> Dict:
+    """
+    Send an email with a local file attached (module-level convenience function).
+
+    Args:
+        to:              Recipient email address.
+        subject:         Email subject.
+        message:         Email body.
+        attachment_path: Path to the local file to attach (or download_file result dict).
+
+    Returns:
+        Result dictionary with status and message details.
+    """
+    return _get_client().send_email_with_attachment(to, subject, message, attachment_path)
 
 
 def list_emails(query: str = '', max_results: int = 10) -> List[Dict]:

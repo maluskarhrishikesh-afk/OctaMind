@@ -1,0 +1,95 @@
+{
+  "_comment": "OctaMind LLM Provider Configuration. Change 'active' to switch providers at runtime.",
+
+  "active": "github_models",
+
+  "providers": {
+
+    "gemma3_local": {
+      "type": "local_hf",
+      "label": "Gemma 3 4B (local — default)",
+      "model_id": "google/gemma-3-4b-it",
+      "model_cache": "model_cache",
+      "device": "auto",
+      "max_new_tokens": 3000
+    },
+
+    "github_models": {
+      "type": "openai_compatible",
+      "label": "GitHub Models (GPT-4o-mini)",
+      "base_url": "https://models.inference.ai.azure.com",
+      "model": "gpt-4o-mini",
+      "api_key_env": "GITHUB_TOKEN",
+      "api_key_credential": "GITHUB_TOKEN"
+    },
+
+    "openai": {
+      "type": "openai_compatible",
+      "label": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "api_key_env": "OPENAI_API_KEY",
+      "api_key_credential": "OPENAI_API_KEY"
+    },
+
+    "openai_gpt4o": {
+      "type": "openai_compatible",
+      "label": "OpenAI GPT-4o",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4o",
+      "api_key_env": "OPENAI_API_KEY",
+      "api_key_credential": "OPENAI_API_KEY"
+    },
+
+    "anthropic": {
+      "type": "anthropic",
+      "label": "Anthropic Claude 3.5 Sonnet",
+      "model": "claude-3-5-sonnet-20241022",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "api_key_credential": "ANTHROPIC_API_KEY"
+    },
+
+    "anthropic_haiku": {
+      "type": "anthropic",
+      "label": "Anthropic Claude 3.5 Haiku (fast)",
+      "model": "claude-3-5-haiku-20241022",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "api_key_credential": "ANTHROPIC_API_KEY"
+    },
+
+    "ollama": {
+      "type": "openai_compatible",
+      "label": "Ollama (local server — default model: gemma3:4b)",
+      "base_url": "http://localhost:11434/v1",
+      "model": "gemma3:4b",
+      "api_key": "ollama",
+      "_note": "Run: ollama run gemma3:4b"
+    },
+
+    "ollama_llama3": {
+      "type": "openai_compatible",
+      "label": "Ollama — Llama 3.1 8B",
+      "base_url": "http://localhost:11434/v1",
+      "model": "llama3.1:8b",
+      "api_key": "ollama"
+    },
+
+    "lmstudio": {
+      "type": "openai_compatible",
+      "label": "LM Studio (local server)",
+      "base_url": "http://localhost:1234/v1",
+      "model": "local-model",
+      "api_key": "lm-studio",
+      "_note": "Load any model in LM Studio and start its local server"
+    },
+
+    "custom": {
+      "type": "openai_compatible",
+      "label": "Custom OpenAI-compatible endpoint",
+      "base_url": "http://localhost:8080/v1",
+      "model": "my-model",
+      "api_key": "none",
+      "_note": "Works with llama.cpp server, vLLM, text-generation-webui, etc."
+    }
+  }
+}

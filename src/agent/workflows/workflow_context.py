@@ -18,7 +18,7 @@ logger = logging.getLogger("workflows")
 
 @dataclass
 class WorkflowStep:
-    """A single planned action within a workflow."""
+    """A single planned action within a workflow (legacy: tool+params style)."""
     step_num: int
     agent: str          # "drive" or "email"
     tool: str           # exact tool function name e.g. "search_files"
@@ -29,10 +29,42 @@ class WorkflowStep:
 
 @dataclass
 class WorkflowPlan:
-    """Full execution plan produced by the master orchestrator."""
+    """Full execution plan produced by the master orchestrator (legacy)."""
     command: str
     agents_needed: List[str]
     steps: List[WorkflowStep]
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+# ---------------------------------------------------------------------------
+# New natural-language step types (used by NL orchestrator)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NLWorkflowStep:
+    """
+    A natural-language instruction for a single agent.
+
+    The orchestrator knows *which* agent to call and *what* to ask it —
+    but not *which tools* the agent uses internally.  The agent runs its
+    own ReAct loop with its own full tool list.
+
+    ``instruction`` may contain ``{output_key}`` or ``{output_key.field}``
+    tokens that are resolved from WorkflowContext before the agent is called.
+    """
+    step_num: int
+    agent: str          # registry key, e.g. "drive", "email"
+    instruction: str    # natural language task for this agent
+    output_key: str     # key to store the agent's result under in WorkflowContext
+    description: str    # human-readable label for UI display
+
+
+@dataclass
+class NLWorkflowPlan:
+    """Full execution plan produced by the NL orchestrator."""
+    command: str
+    agents_needed: List[str]
+    steps: List[NLWorkflowStep]
     created_at: datetime = field(default_factory=datetime.now)
 
 

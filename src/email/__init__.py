@@ -10,6 +10,7 @@ This module provides Gmail integration functionality including:
 from .gmail_service import (
     GmailServiceClient,
     send_email,
+    send_email_with_attachment,
     list_emails,
     get_inbox_count,
     get_todays_emails,
@@ -66,6 +67,7 @@ from .gmail_service import (
 __all__ = [
     'GmailServiceClient',
     'send_email',
+    'send_email_with_attachment',
     'list_emails',
     'get_inbox_count',
     'get_todays_emails',

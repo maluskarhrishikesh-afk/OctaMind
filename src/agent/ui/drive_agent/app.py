@@ -12,8 +12,7 @@ from pathlib import Path
 import streamlit as st
 
 from .conversation import handle_conversation
-from .formatters import format_drive_result
-from .helpers import _logo_b64, _logo_icon, _start_browser_watchdog
+from .helpers import _logo_b64, _logo_icon, _logo_path, _logo_pinkraven, _start_browser_watchdog
 from .orchestrator import execute_with_llm_orchestration
 from ..dashboard.styles import inject_agent_css
 
@@ -21,7 +20,7 @@ from ..dashboard.styles import inject_agent_css
 logger = logging.getLogger("drive_agent")
 logger.setLevel(logging.DEBUG)
 
-_log_file = Path(__file__).parent.parent.parent.parent / "drive_agent.log"
+_log_file = Path(__file__).parent.parent.parent.parent.parent / "drive_agent.log"
 _file_handler = logging.FileHandler(_log_file, encoding="utf-8", mode="a")
 _file_handler.setLevel(logging.DEBUG)
 _console_handler = logging.StreamHandler()
@@ -104,6 +103,49 @@ try:
     AGENT_MANAGER_AVAILABLE = True
 except Exception:
     AGENT_MANAGER_AVAILABLE = False
+
+
+def _compose_drive_response(result: dict, action: str, original_command: str) -> str:
+    """Pass raw Drive result directly to LLM for friendly composition."""
+    import json as _json
+    from src.agent.llm.llm_parser import get_llm_client
+
+    if action == "react_response":
+        return result.get("message", "Done.")  # Already LLM-composed by ReAct loop
+
+    composition_prompt = f"""The user asked: \"{original_command}\"
+
+A Google Drive operation was executed. Here is the raw result:
+
+{_json.dumps(result, indent=2, default=str)}
+
+Compose a response following these formatting rules:
+- Write in a friendly, conversational tone like a helpful assistant
+- Use **bold** for important names, counts, and key values
+- Use bullet points or numbered lists to present multiple items (e.g. list of files)
+- Use tables (markdown) when listing structured data like files with names, sizes, types
+- Use relevant emojis to make the response visually engaging (e.g. 📁 folders, 📄 files, 📊 spreadsheets, 💾 downloads, ☁️ uploads, 🔗 links)
+- Add a brief summary sentence at the start so the user knows what happened
+- If there are many files, show the most important ones and mention the total count
+- Include file IDs only when the user might need to reference them for follow-up actions
+- Do NOT show raw JSON keys or technical internals"""
+
+    llm = get_llm_client()
+    try:
+        response = llm.client.chat.completions.create(
+            model=llm.model,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant. Compose clear, friendly markdown responses from raw tool results."},
+                {"role": "user", "content": composition_prompt},
+            ],
+            temperature=0.4,
+            max_tokens=3000,
+            timeout=40,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as exc:
+        logger.warning("Drive response composition failed: %s", exc)
+        return f"✅ Drive operation `{action}` completed."
 
 
 def main() -> None:
@@ -291,9 +333,11 @@ def main() -> None:
     chat_container = st.container()
     with chat_container:
         for message in st.session_state.chat_messages:
-            _chat_avatar = _logo_icon(
-            ) if message["role"] == "assistant" else "🧑‍💻"
-            with st.chat_message(message["role"], avatar=_chat_avatar):
+            if message["role"] == "assistant":
+                _ctx = st.chat_message("assistant")
+            else:
+                _ctx = st.chat_message("user")
+            with _ctx:
                 st.markdown(message["content"])
 
     if _do_clear:
@@ -396,9 +440,9 @@ def main() -> None:
                         )
                     else:
                         action = result.get("action", "unknown")
-                        formatted_result = format_drive_result(result, action)
+                        final_response = _compose_drive_response(result, action, user_command)
                         st.session_state.chat_messages.append(
-                            {"role": "assistant", "content": formatted_result}
+                            {"role": "assistant", "content": final_response}
                         )
 
                         if MEMORY_AVAILABLE:

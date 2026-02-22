@@ -31,8 +31,17 @@ SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly'
 ]
 
-CREDENTIALS_PATH = 'credentials.json'
-TOKEN_PATH = 'token.json'
+def _resolve_google_paths():
+    """Resolve credential file paths — config/credentials.json first, then defaults."""
+    try:
+        from src.agent.llm.provider_registry import get_google_credential_path
+        oauth = get_google_credential_path("oauth_credentials_path") or "credentials.json"
+        token = get_google_credential_path("gmail_token_path") or "token.json"
+        return oauth, token
+    except Exception:
+        return "credentials.json", "token.json"
+
+CREDENTIALS_PATH, TOKEN_PATH = _resolve_google_paths()
 SERVICE_ACCOUNT_PATH = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 CREDENTIALS_CONFIG = os.getenv('GOOGLE_CREDENTIALS_CONFIG')
 

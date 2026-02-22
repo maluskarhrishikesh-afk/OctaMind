@@ -33,6 +33,18 @@ def _logo_b64() -> str:
         return ""
 
 
+def _logo_path() -> str:
+    """Return the absolute file path for octopus.png for use as st.chat_message avatar."""
+    img_path = Path(__file__).parent.parent.parent / "assets" / "octopus.png"
+    return str(img_path) if img_path.exists() else "🐙"
+
+
+def _logo_pinkraven() -> str:
+    """Return the absolute file path for pinkRaven.png for user chat avatar."""
+    img_path = Path(__file__).parent.parent.parent / "assets" / "pinkRaven.png"
+    return str(img_path) if img_path.exists() else "🐦"
+
+
 def _logo_icon():
     """Return PIL Image of octopus.png, or emoji fallback."""
     try:

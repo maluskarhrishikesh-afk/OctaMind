@@ -1,151 +1,358 @@
 """
-MasterOrchestrator — LLM-based planning + sequential step execution for
-multi-agent workflows.
+MasterOrchestrator — natural-language planning + sub-agent delegation.
 
-Flow:
-    1. plan_workflow(command)  → LLM produces a list of WorkflowSteps (JSON)
-    2. run_workflow(command, agent_ids) → execute steps, collect results, cleanup
+Architecture (scalable to N agents):
+    1. plan_nl_workflow(command)
+         → LLM sees only per-agent capability summaries (~10 tokens/agent),
+           not individual tool signatures.
+         → Produces NLWorkflowPlan: a list of {agent, natural-language instruction}.
 
-The LLM receives a combined Drive+Email tools description and returns a JSON
-array of steps, each specifying which agent/tool to call and with what params.
+    2. run_workflow(command, agent_ids)
+         → For each NLWorkflowStep, calls the agent's own
+           execute_with_llm_orchestration(instruction).
+         → Each sub-agent runs its own ReAct loop with its own full tool list,
+           its own memory, and its own context window.
+         → The orchestrator only tracks: working_memory + collective_consciousness.
+
+Scaling:
+    Adding a new agent = one line in agent_registry.py.
+    Orchestrator context stays constant regardless of agent count or tool count.
 """
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import re
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 from src.agent.llm.llm_parser import get_llm_client
-from src.agent.workflows.workflow_context import WorkflowContext, WorkflowPlan, WorkflowStep
-from src.agent.workflows.step_runner import run_step
+from src.agent.workflows.workflow_context import WorkflowContext, NLWorkflowPlan, NLWorkflowStep
+from src.agent.workflows.agent_registry import get_capabilities_text, get_executor, registered_agents
+from src.agent.workflows.nl_step_runner import run_nl_step
 from src.agent.workflows import file_bridge as _file_bridge
 
 logger = logging.getLogger("workflows")
 
+
 # ---------------------------------------------------------------------------
-# Combined tools description for the planning LLM prompt
+# Multi-Agent ReAct loop
 # ---------------------------------------------------------------------------
-_PLANNING_TOOLS = """
-DRIVE AGENT tools (agent: "drive"):
-- search_files(query: str, max_results: int=20) — search Drive by name/content
-- list_files(max_results: int=20, query: str='', folder_id: str='root') — list files
-- get_file_info(file_id: str) — get file metadata
-- download_file(file_id: str, destination: str=None) — download file to disk
-- upload_file(local_path: str, name: str=None, folder_id: str=None) — upload file
-- create_folder(name: str, parent_id: str=None) — create folder
-- move_file(file_id: str, destination_folder_id: str) — move file
-- copy_file(file_id: str, name: str=None, folder_id: str=None) — copy file
-- trash_file(file_id: str) — delete file
-- share_file(file_id: str, email: str, role: str='reader') — share with someone
-- summarize_file(file_id: str) — AI summary of a file
-- get_storage_quota() — storage usage
-- storage_breakdown() — breakdown by file type
-- list_large_files(min_size_mb: float=50) — large files
-- generate_drive_report() — full Drive health report
 
-EMAIL AGENT tools (agent: "email"):
-- send_email(to: str, subject: str, body: str, attachments: list=None) — send email
-- list_emails(query: str='', max_results: int=10) — list/search emails
-- get_todays_emails(max_results: int=10) — today's emails
-- get_inbox_count() — inbox message count
-- extract_action_items(message_id: str) — extract tasks from email
-- get_all_pending_actions(max_emails: int=20) — all pending tasks
-- generate_reply_suggestions(message_id: str) — AI reply suggestions
-- create_draft(to: str, subject: str, body: str) — save draft
-- list_attachments(message_id: str) — list email attachments
-- download_attachment(message_id: str, attachment_id: str, save_path: str=None) — download attachment
-- get_email_stats() — email statistics
-- detect_urgent_emails(max_results: int=10) — find urgent emails
-- export_contacts() — export frequent contacts
+_MAX_REACT_ITERATIONS = 8
 
-PARAMETER REFERENCES:
-You may reference the output of a previous step using "{output_key}" syntax.
-For example, if step 1 stores its result as output_key "found_file",
-step 2 can use {"file_id": "{found_file}"} to pass that value forward.
-The system resolves these references automatically at runtime.
-"""
 
-_PLANNING_SYSTEM_PROMPT = """You are a workflow planner for a multi-agent AI system.
+def _react_system_prompt() -> str:
+    caps = get_capabilities_text()
+    return f"""You are a multi-agent workflow orchestrator. Satisfy the user's request by coordinating specialized agents.
 
-Given a user command that requires BOTH a Google Drive agent AND a Gmail agent,
-produce a step-by-step execution plan as a JSON array.
+Available agents:
+{caps}
 
-Each step must follow this schema:
-{
-  "step_num": <integer, starting at 1>,
-  "agent": "<drive|email>",
-  "tool": "<tool_name>",
-  "params": { <param_name>: <value_or_reference> },
-  "output_key": "<snake_case_key_to_store_result>",
-  "description": "<one sentence explaining what this step does>"
-}
+Each turn output exactly one JSON object — no markdown code fences:
+{{
+  "thought": "<reasoning: what has been done so far, what is still needed>",
+  "action": "delegate_to_agent" | "final_answer",
+  "params": {{
+    "agent": "<agent_name>",              // delegate_to_agent only
+    "instruction": "<NL task for agent>", // delegate_to_agent only
+    "message": "<final response to user>"  // final_answer only
+  }}
+}}
 
 Rules:
-- Use "{output_key}" syntax to reference previous step outputs in params.
-- Keep steps minimal — only include what is necessary.
-- Use realistic param values inferred from the user command.
-- Return ONLY the JSON array, no extra text.
+- Read each observation carefully before deciding the next step.
+- If a step fails, decide whether to retry with a different approach, skip it, or report the error.
+- Observations include the exact downloaded file paths — copy them literally into the next instruction.
+- Write the final_answer message in friendly, markdown-formatted style (bold, bullets, emojis).
+- Call final_answer ONLY when the user's full request is correctly and completely satisfied.
+- Base final_answer strictly on what the observations report — never hallucinate results.
+"""
 
-Available tools:
-""" + _PLANNING_TOOLS
+
+def react_workflow(
+    command: str,
+    agent_ids: Dict[str, str],
+    ctx: WorkflowContext,
+) -> Tuple[List[Dict[str, Any]], str]:
+    """
+    Run the multi-agent ReAct loop.
+
+    Each iteration the orchestrator LLM sees the original command plus all
+    prior observations, then picks one of two actions:
+      - delegate_to_agent(agent, instruction): call a sub-agent's ReAct loop
+      - final_answer(message)              : emit the final user-facing response
+
+    The loop adapts dynamically — it can retry failed steps, reorder tasks, or
+    decide it's done early.  Sub-agents still run their own full ReAct loops.
+
+    Returns:
+        (steps_results, final_answer_text)
+    """
+    llm = get_llm_client()
+    messages: List[Dict[str, str]] = [
+        {"role": "system", "content": _react_system_prompt()},
+        {"role": "user",   "content": f"User request: {command}"},
+    ]
+
+    steps_results: List[Dict[str, Any]] = []
+    step_counter = 0
+    final_answer_text: Optional[str] = None
+
+    for iteration in range(_MAX_REACT_ITERATIONS):
+        logger.info("ReAct iteration %d/%d", iteration + 1, _MAX_REACT_ITERATIONS)
+
+        # ── LLM reasoning turn ────────────────────────────────────────────
+        try:
+            response = llm.client.chat.completions.create(
+                model=llm.model,
+                messages=messages,
+                temperature=0.2,
+                max_tokens=800,
+                timeout=40,
+            )
+            raw = _strip_code_fences(response.choices[0].message.content.strip())
+        except Exception as exc:
+            logger.error("ReAct LLM call failed at iteration %d: %s", iteration + 1, exc)
+            break
+
+        messages.append({"role": "assistant", "content": raw})
+
+        # Parse JSON — tolerate minor wrapping
+        try:
+            turn = json.loads(raw)
+        except json.JSONDecodeError:
+            m = re.search(r'\{.*\}', raw, re.DOTALL)
+            try:
+                turn = json.loads(m.group(0)) if m else {}
+            except Exception:
+                turn = {}
+
+        thought = turn.get("thought", "")
+        action  = turn.get("action",  "")
+        params  = turn.get("params",  {})
+
+        logger.info(
+            "ReAct [iter %d] action=%s  thought=%.120s",
+            iteration + 1, action, thought,
+        )
+
+        # ── final_answer ──────────────────────────────────────────────────
+        if action == "final_answer":
+            final_answer_text = params.get("message", "✅ Workflow complete.")
+            logger.info("ReAct final_answer after %d iteration(s)", iteration + 1)
+            break
+
+        # ── delegate_to_agent ─────────────────────────────────────────────
+        elif action == "delegate_to_agent":
+            agent_name  = params.get("agent", "").strip()
+            instruction = params.get("instruction", "").strip()
+
+            if not agent_name or not instruction:
+                obs = "Error: delegate_to_agent requires non-empty 'agent' and 'instruction'."
+                messages.append({"role": "user", "content": f"Observation: {obs}"})
+                continue
+
+            step_counter += 1
+            t0 = time.time()
+            executor = get_executor(agent_name)
+
+            if executor is None:
+                obs = (
+                    f"Error: No agent named '{agent_name}' is registered. "
+                    f"Available agents: {registered_agents()}"
+                )
+                steps_results.append({
+                    "step": step_counter, "agent": agent_name,
+                    "tool": instruction[:60], "instruction": instruction,
+                    "status": "error", "result": None, "error": obs,
+                    "elapsed": time.time() - t0,
+                })
+                messages.append({"role": "user", "content": f"Observation: {obs}"})
+                continue
+
+            artifacts_out: Dict[str, Any] = {}
+            try:
+                raw_result = executor(
+                    user_query=instruction,
+                    agent_id=agent_ids.get(agent_name),
+                    artifacts_out=artifacts_out,
+                )
+
+                if isinstance(raw_result, dict):
+                    text        = raw_result.get("message", str(raw_result))
+                    exec_status = raw_result.get("status", "success")
+                else:
+                    text        = str(raw_result)
+                    exec_status = "success"
+
+                # Rich observation — LLM copies the file path literally into the
+                # next instruction (no token substitution needed in ReAct mode)
+                obs_parts = [
+                    f"Agent '{agent_name}' completed successfully.",
+                    text[:800],
+                ]
+                if artifacts_out.get("file_path"):
+                    obs_parts.append(
+                        f"Downloaded file local path: {artifacts_out['file_path']}"
+                    )
+                observation = "\n".join(obs_parts)
+
+                steps_results.append({
+                    "step": step_counter, "agent": agent_name,
+                    "tool": instruction[:60], "instruction": instruction,
+                    "status": exec_status,
+                    "result": {"message": text[:500], "artifacts": artifacts_out},
+                    "error": None, "elapsed": time.time() - t0,
+                })
+
+            except Exception as exc:
+                logger.exception(
+                    "ReAct delegate error [%s] iter %d: %s", agent_name, iteration + 1, exc
+                )
+                observation = f"Agent '{agent_name}' raised an error: {exc}"
+                steps_results.append({
+                    "step": step_counter, "agent": agent_name,
+                    "tool": instruction[:60], "instruction": instruction,
+                    "status": "error", "result": None,
+                    "error": str(exc), "elapsed": time.time() - t0,
+                })
+
+            messages.append({"role": "user", "content": f"Observation: {observation}"})
+
+        # ── unknown action ────────────────────────────────────────────────
+        else:
+            obs = (
+                f"Error: Unknown action '{action}'. "
+                "You must respond with 'delegate_to_agent' or 'final_answer'."
+            )
+            messages.append({"role": "user", "content": f"Observation: {obs}"})
+
+    # Max iterations exhausted without final_answer
+    if final_answer_text is None:
+        logger.warning(
+            "ReAct loop hit max iterations (%d) without final_answer", _MAX_REACT_ITERATIONS
+        )
+        summary = _summarize_results(steps_results) if steps_results else "No steps were executed."
+        final_answer_text = f"⚠️ Workflow reached its iteration limit.\n\n{summary}"
+
+    return steps_results, final_answer_text
+
+
+# ---------------------------------------------------------------------------
+# Planning prompt — compact: ~10 tokens/agent regardless of tool count
+# Dynamically built from agent_registry so new agents auto-appear here.
+# ---------------------------------------------------------------------------
+
+def _build_planning_prompt() -> str:
+    caps = get_capabilities_text()
+    return f"""You are a workflow orchestrator for a multi-agent AI system.
+
+Given a user command, produce a minimal step-by-step plan as a JSON array.
+Each step contains a NATURAL LANGUAGE instruction for exactly one agent.
+
+Available agents:
+{caps}
+
+SPECIAL CONTEXT VALUES always available in instructions:
+- {{__user_email__}} — the authenticated user's own Gmail address.
+  Use it when the user says "email me", "send it to me", "email myself", etc.
+
+Each step schema:
+{{
+  "step_num": <int, starting at 1>,
+  "agent": "<agent_name>",
+  "instruction": "<natural language task for this agent — be specific>",
+  "output_key": "<snake_case key to store the result>",
+  "description": "<one-line UI label>"
+}}
+
+Rules:
+- Write instructions the way you would write them to a capable human assistant.
+- For file handoff between agents: tell the first agent to download and report
+  the local path, then use {{output_key.file_path}} in the second agent's instruction.
+  Example step 2 instruction: "Attach the file at {{downloaded_file.file_path}} and
+  send it to bob@example.com with subject \\"Requested file\\"."
+- Keep the plan minimal — only generate steps that are directly needed.
+- Return ONLY the JSON array, no surrounding text or code fences.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _get_user_email() -> Optional[str]:
+    """Return the authenticated Gmail user's email address, or None on failure."""
+    try:
+        from src.email.gmail_auth import get_gmail_service
+        svc = get_gmail_service()
+        profile = svc.users().getProfile(userId="me").execute()
+        return profile.get("emailAddress")
+    except Exception as exc:
+        logger.warning("Could not fetch user email: %s", exc)
+        return None
+
+
+def _strip_code_fences(raw: str) -> str:
+    """Remove markdown code fences from an LLM response."""
+    if "```" in raw:
+        parts = raw.split("```", 2)
+        raw = parts[1] if len(parts) >= 2 else parts[0]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    return raw.strip()
 
 
 # ---------------------------------------------------------------------------
 # Planning
 # ---------------------------------------------------------------------------
 
-def plan_workflow(command: str) -> Optional[WorkflowPlan]:
+def plan_nl_workflow(command: str) -> Optional[NLWorkflowPlan]:
     """
-    Ask the LLM to produce a WorkflowPlan for *command*.
+    Ask the LLM to produce a NLWorkflowPlan for *command*.
 
-    Returns a WorkflowPlan on success, or None if planning fails.
+    Context cost: ~10 tokens/agent (capability summaries only, not tool schemas).
+    Supports any number of registered agents without touching this function.
     """
     llm = get_llm_client()
-    logger.info("Planning workflow for: %s", command)
+    system_prompt = _build_planning_prompt()
+    logger.info("NL planning workflow for: %s", command)
 
     try:
         response = llm.client.chat.completions.create(
             model=llm.model,
             messages=[
-                {"role": "system", "content": _PLANNING_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"User command: {command}"},
             ],
             temperature=0.2,
-            max_tokens=800,
+            max_tokens=1500,
             timeout=40,
         )
-        raw = response.choices[0].message.content.strip()
-        # Strip code fences if any
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
-
+        raw = _strip_code_fences(response.choices[0].message.content.strip())
         steps_data: List[Dict[str, Any]] = json.loads(raw)
         if not isinstance(steps_data, list):
             raise ValueError("LLM returned non-list plan")
 
         steps = [
-            WorkflowStep(
+            NLWorkflowStep(
                 step_num=s.get("step_num", idx + 1),
                 agent=s["agent"],
-                tool=s["tool"],
-                params=s.get("params", {}),
+                instruction=s["instruction"],
                 output_key=s.get("output_key", f"step{idx + 1}_result"),
                 description=s.get("description", ""),
             )
             for idx, s in enumerate(steps_data)
         ]
 
-        plan = WorkflowPlan(command=command, agents_needed=[], steps=steps)
-        # Derive agents_needed from steps
-        plan.agents_needed = sorted({s.agent for s in steps})
-        logger.info("Planned %d steps: %s", len(steps), [s.tool for s in steps])
+        agents_needed = sorted({s.agent for s in steps})
+        plan = NLWorkflowPlan(command=command, agents_needed=agents_needed, steps=steps)
+        logger.info("NL plan: %d steps for agents: %s", len(steps), agents_needed)
         return plan
 
     except Exception as exc:
-        logger.exception("Workflow planning failed: %s", exc)
+        logger.exception("NL workflow planning failed: %s", exc)
         return None
 
 
@@ -157,10 +364,11 @@ def _summarize_results(steps_results: List[Dict[str, Any]]) -> str:
     """Build a human-readable summary of completed steps."""
     lines = []
     for r in steps_results:
+        label = r.get("description") or r.get("tool") or r.get("instruction", "")[:60]
         if r["status"] == "success":
-            lines.append(f"✅ Step {r['step']}: [{r['agent']}] {r['tool']} — completed")
+            lines.append(f"✅ Step {r['step']}: [{r['agent']}] {label} — completed")
         else:
-            lines.append(f"❌ Step {r['step']}: {r.get('tool', '?')} — {r.get('error', 'failed')}")
+            lines.append(f"❌ Step {r['step']}: {label} — {r.get('error', 'failed')}")
     return "\n".join(lines)
 
 
@@ -169,75 +377,51 @@ def run_workflow(
     agent_ids: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
-    Plan and execute a multi-agent workflow.
+    Plan and execute a multi-agent workflow using natural-language sub-agent delegation.
+
+    The orchestrator:
+      1. Plans using compact agent capability descriptions (~10 tokens/agent).
+      2. Calls each sub-agent's execute_with_llm_orchestration() with a natural-
+         language instruction. Each sub-agent runs its own ReAct loop.
+      3. Resolves {output_key.field} cross-step references (e.g. file paths).
+      4. Returns the same result dict format as before for UI compatibility.
 
     Args:
         command:    The natural language command from the user.
-        agent_ids:  Optional mapping of agent type → agent_id strings
-                    (e.g. {"drive": "abc123", "email": "xyz789"}).
-                    Not used for direct tool calls yet but logged for tracing.
+        agent_ids:  Optional mapping of agent type → agent_id string for memory.
 
     Returns:
-        {
-          "status":   "success" | "partial" | "error",
-          "summary":  str,
-          "steps":    list of per-step result dicts,
-          "elapsed":  float (seconds),
-          "plan":     WorkflowPlan | None,
-        }
+        {"status", "summary", "steps", "elapsed", "plan"}
     """
-    ctx = WorkflowContext()
+    ctx = WorkflowContext(command=command)
     agent_ids = agent_ids or {}
 
-    # Step 1 — plan
-    plan = plan_workflow(command)
-    if plan is None:
-        return {
-            "status": "error",
-            "summary": "Could not create a workflow plan for this command.",
-            "steps": [],
-            "elapsed": ctx.elapsed_seconds(),
-            "plan": None,
-        }
+    # Pre-populate authenticated user email
+    user_email = _get_user_email()
+    if user_email:
+        ctx.set("__user_email__", user_email)
+        logger.info("Workflow context: __user_email__ = %s", user_email)
+    else:
+        logger.warning("Could not resolve user email — 'email me' commands may fail")
 
-    # Step 2 — execute steps sequentially
-    steps_results: List[Dict[str, Any]] = []
-    failed = False
+    # ── ReAct loop ────────────────────────────────────────────────────────
+    steps_results, final_answer_text = react_workflow(command, agent_ids, ctx)
 
-    for step in plan.steps:
-        logger.info("Executing step %d/%d: %s.%s", step.step_num, len(plan.steps), step.agent, step.tool)
-        result = run_step(step, ctx)
-        steps_results.append(result)
-
-        if result["status"] == "error":
-            logger.warning("Step %d failed — stopping workflow", step.step_num)
-            failed = True
-            break  # abort on first failure
-
-    # Step 3 — cleanup temp files
+    # Cleanup
     _file_bridge.cleanup_all()
     ctx.cleanup()
 
-    # Step 4 — build response
+    # Build response
     success_count = sum(1 for r in steps_results if r["status"] == "success")
-    total = len(plan.steps)
-
-    if failed and success_count == 0:
-        status = "error"
-    elif failed:
-        status = "partial"
-    else:
-        status = "success"
-
-    summary = _summarize_results(steps_results)
-    elapsed = ctx.elapsed_seconds()
+    total         = len(steps_results)
+    failed        = any(r["status"] == "error" for r in steps_results)
+    status        = "error" if (failed and success_count == 0) else ("partial" if failed else "success")
+    summary       = _summarize_results(steps_results) if steps_results else final_answer_text
+    elapsed       = ctx.elapsed_seconds()
 
     logger.info(
-        "Workflow complete: %s (%d/%d steps in %.1fs)",
-        status,
-        success_count,
-        total,
-        elapsed,
+        "ReAct workflow complete: %s (%d/%d steps in %.1fs)",
+        status, success_count, total, elapsed,
     )
 
     return {
@@ -245,5 +429,6 @@ def run_workflow(
         "summary": summary,
         "steps": steps_results,
         "elapsed": elapsed,
-        "plan": plan,
+        "plan": None,          # ReAct is dynamic — no upfront plan object
+        "final_answer": final_answer_text,  # LLM-composed; rendered directly by app
     }

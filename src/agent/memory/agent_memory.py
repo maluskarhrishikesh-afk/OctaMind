@@ -357,10 +357,15 @@ New user - building understanding over time.
 
         self.working_memory_path.write_text(new_content, encoding='utf-8')
 
-        # Also add to episodic memory (with importance scoring)
+        # Also add to episodic memory (with importance scoring and meaningful insight)
+        # Build a richer insight string so recall queries are more useful
+        if action == "conversation":
+            insight_str = f"Conversational exchange: user said '{command[:80]}'"
+        else:
+            insight_str = f"User ran '{action}' command: '{command[:80]}' → {result_str}"
         self.add_episodic_event(
             event=f"{action}: {command}",
-            insight=f"User performed {action}",
+            insight=insight_str,
             importance=importance,
             context=result_str
         )
@@ -559,10 +564,9 @@ New user - building understanding over time.
     # ============ Full Memory Context (for LLM) ============
 
     # Character caps for LLM context — keeps token usage predictable
-    _LLM_PERSONALITY_CAP = 1500   # ~375 tokens  — stable, rarely changes
-    _LLM_CONSCIOUSNESS_CAP = 1000  # ~250 tokens  — high-level summary only
+    # Personality and consciousness are sent in full (small, infrequently updated files)
     _LLM_SEMANTIC_CAP = 3000      # ~750 tokens  — most-recent sections only
-    _LLM_HABITS_CAP = 1500        # ~375 tokens  — most-recent habits only
+    _LLM_HABITS_CAP = 3000        # ~750 tokens  — user habits keep changing
 
     @staticmethod
     def _tail(text: str, max_chars: int) -> str:
@@ -589,12 +593,13 @@ New user - building understanding over time.
 
         Returns formatted string kept under ~2 000 tokens total.
         """
-        recent_interactions = self.get_recent_interactions(5)
+        # Working memory: last 10 interactions (per design spec)
+        recent_interactions = self.get_recent_interactions(10)
 
-        personality = self._tail(
-            self.get_personality(), self._LLM_PERSONALITY_CAP)
-        consciousness = self._tail(
-            self.get_consciousness(), self._LLM_CONSCIOUSNESS_CAP)
+        # Personality and consciousness sent in full — they are small,
+        # infrequently updated files that define the agent's identity.
+        personality = self.get_personality()
+        consciousness = self.get_consciousness()
         semantic = self._tail(self.get_semantic_memory(),
                               self._LLM_SEMANTIC_CAP)
         habits = self._tail(self.get_habits(), self._LLM_HABITS_CAP)
@@ -608,7 +613,7 @@ New user - building understanding over time.
 ## Consciousness (Meta Understanding)
 {consciousness}
 
-## Working Memory (Last 5 interactions)
+## Working Memory (Last 10 interactions)
 """
         for i, interaction in enumerate(recent_interactions, 1):
             timestamp = interaction.get('timestamp', 'Unknown')
@@ -740,17 +745,32 @@ New user - building understanding over time.
     # injected into the LLM context for that single turn — exactly how a human
     # pauses to search their memory before answering.
     _RECALL_SIGNALS = {
-        "remember", "recall", "did we", "have we", "last time", "earlier",
-        "before", "previous", "when did", "what was", "told you", "mentioned",
-        "said", "talked about", "discussed", "do you know", "you know that",
+        # Explicit recall
+        "remember", "recall", "did we", "have we", "did i", "have i",
+        "last time", "earlier", "before", "previous", "when did", "what was",
+        "told you", "mentioned", "said", "talked about", "discussed",
+        "do you know", "you know that", "what did i", "what have i",
+        "what have we", "what did we", "any command", "any email",
+        "ask you", "asked you", "you perform",
+        # Temporal expressions (e.g. "2 days ago", "last week", "yesterday")
+        "ago", "back", "yesterday", "last week", "last month",
+        "past week", "past month", "this week", "this month",
+        "days ago", "weeks ago", "months ago", "day ago", "week ago", "month ago",
     }
 
     # Words to strip when extracting the actual search topic from the query.
+    # Also includes temporal noise words that should not be used as keyword
+    # search terms against episodic memory text (they never match).
     _RECALL_STOP_WORDS = {
         "can", "you", "recall", "what", "we", "did", "earlier", "before",
         "do", "know", "have", "the", "a", "an", "about", "tell", "me",
         "remember", "i", "my", "your", "that", "this", "and", "or", "is",
         "was", "are", "were", "when", "how", "why", "which", "who",
+        # Temporal noise words — these are used for date resolution above
+        # but should NOT be passed as keyword search terms
+        "past", "week", "weeks", "month", "months", "day", "days",
+        "year", "today", "yesterday", "recent", "recently", "ago", "back",
+        "last", "previous", "any", "perform", "performed", "ask", "asked",
     }
 
     def recall_for_llm(self, query: str, max_episodic: int = 5, max_working: int = 3) -> str:
@@ -777,11 +797,42 @@ New user - building understanding over time.
         str  Formatted multi-section string, or "" if the query is not a recall
              query or nothing relevant was found.
         """
+        import re as _re
         query_lower = query.lower()
 
         # Only run if this looks like a recall-seeking query
         if not any(signal in query_lower for signal in self._RECALL_SIGNALS):
             return ""
+
+        # ── Date-based temporal recall ────────────────────────────────────────
+        # Resolve expressions like "2 days ago", "last week", "yesterday",
+        # "1 month ago" into a date string so we can search episodic entries by
+        # their date header (## YYYY-MM-DD).
+        target_dates: list[str] = []
+        _today = datetime.now().date()
+
+        _days_ago = _re.search(r'(\d+)\s*day[s]?\s*(?:ago|back)', query_lower)
+        _weeks_ago = _re.search(r'(\d+)\s*week[s]?\s*(?:ago|back)', query_lower)
+        _months_ago = _re.search(r'(\d+)\s*month[s]?\s*(?:ago|back)', query_lower)
+
+        if 'yesterday' in query_lower:
+            target_dates.append((_today - timedelta(days=1)).isoformat())
+        # "last week" OR "past week" OR "this week" → scan 7-day window
+        if 'last week' in query_lower or 'past week' in query_lower or 'this week' in query_lower:
+            target_dates += [(_today - timedelta(days=d)).isoformat() for d in range(0, 8)]
+        # "last month" OR "past month" OR "this month" → scan 31-day window
+        if 'last month' in query_lower or 'past month' in query_lower or 'this month' in query_lower:
+            target_dates += [(_today - timedelta(days=d)).isoformat() for d in range(0, 32)]
+        if _days_ago:
+            n = int(_days_ago.group(1))
+            # Include the target day ± 1 to be tolerant of timezone drift
+            target_dates += [(_today - timedelta(days=n + d)).isoformat() for d in range(-1, 2)]
+        if _weeks_ago:
+            n = int(_weeks_ago.group(1))
+            target_dates += [(_today - timedelta(days=n * 7 + d)).isoformat() for d in range(8)]
+        if _months_ago:
+            n = int(_months_ago.group(1))
+            target_dates += [(_today - timedelta(days=n * 30 + d)).isoformat() for d in range(7)]
 
         # Extract meaningful search terms from the query
         terms = [
@@ -792,6 +843,8 @@ New user - building understanding over time.
         sections: list[str] = []
 
         # --- 1. Working memory (recent interactions) ---
+        # When no meaningful keyword terms remain after stripping noise, return
+        # all recent interactions so the LLM has a factual activity log.
         if terms:
             seen_ts: set[str] = set()
             hits: list[dict] = []
@@ -801,34 +854,60 @@ New user - building understanding over time.
                     if ts not in seen_ts:
                         seen_ts.add(ts)
                         hits.append(h)
-            if hits:
-                lines = ["### Recalled from Recent Interactions:"]
-                for h in hits[:max_working]:
-                    lines.append(
-                        f"- [{h.get('timestamp', '?')}] "
-                        f"{h.get('command', '?')} → {h.get('result', '?')}"
-                    )
-                sections.append('\n'.join(lines))
+            if not hits:
+                # keyword search found nothing — fall back to all recent
+                hits = self.get_recent_interactions(max_working * 3)
+        else:
+            hits = self.get_recent_interactions(max_working * 3)
 
-        # --- 2. Episodic memory ---
+        if hits:
+            lines = ["### Recalled from Recent Interactions:"]
+            for h in hits[:max_working * 3]:
+                lines.append(
+                    f"- [{h.get('timestamp', '?')}] "
+                    f"{h.get('command', '?')} → {h.get('result', '?')}"
+                )
+            sections.append('\n'.join(lines))
+
+        # --- 2. Episodic memory (keyword + date-based) ---
+        seen_events: list[dict] = []
+        seen_keys: set[str] = set()
+
+        def _add_event(e: dict) -> None:
+            key = e.get('event', '') + e.get('date', '')
+            if key not in seen_keys:
+                seen_keys.add(key)
+                seen_events.append(e)
+
+        # 2a. Date-based search — match entries whose date header falls on
+        #     the resolved target date(s) (e.g. "2 days ago" → 2026-02-20)
+        if target_dates:
+            all_events = self._parse_episodic_memory_markdown()
+            for e in all_events:
+                if e.get('date', '') in target_dates:
+                    _add_event(e)
+
+        # 2b. Keyword-based search across event/insight/context text
         if terms:
-            seen_events: list[dict] = []
-            seen_keys: set[str] = set()
             for term in terms:
                 for e in self.search_episodic_memory(term):
-                    key = e.get('event', '') + e.get('date', '')
-                    if key not in seen_keys:
-                        seen_keys.add(key)
-                        seen_events.append(e)
-        else:
+                    _add_event(e)
+
+        # 2c. Fallback: most recent events when nothing else matched.
+        # This fires when:
+        #   - no target_dates were resolved AND
+        #   - keyword search returned nothing (terms is empty after stripping
+        #     temporal noise words, OR terms only matched 0 events)
+        if not seen_events:
             seen_events = self.get_recent_events(max_episodic)
 
         if seen_events:
             lines = ["### Recalled from Episodic Memory (past events):"]
             for e in seen_events[:max_episodic]:
                 ctx = f" | context: {e['context']}" if e.get('context') else ""
+                insight = f" | insight: {e['insight']}" if e.get('insight') else ""
                 lines.append(
-                    f"- [{e.get('date', '?')}] {e.get('event', '?')}{ctx}"
+                    f"- [{e.get('date', '?')}] {e.get('event', '?')}{ctx}{insight}"
                 )
             sections.append('\n'.join(lines))
 

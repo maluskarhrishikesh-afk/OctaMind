@@ -18,13 +18,13 @@ from pathlib import Path
 import streamlit as st
 
 from ..dashboard.styles import inject_agent_css
-from .helpers import _logo_b64, _logo_icon, _start_browser_watchdog, get_running_agents
+from .helpers import _logo_b64, _logo_icon, _logo_path, _logo_pinkraven, _start_browser_watchdog, get_running_agents
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logger = logging.getLogger("multi_agent")
 logger.setLevel(logging.DEBUG)
 
-_log_file = Path(__file__).parent.parent.parent.parent / "multi_agent.log"
+_log_file = Path(__file__).parent.parent.parent.parent.parent / "multi_agent.log"
 _file_handler = logging.FileHandler(_log_file, encoding="utf-8", mode="a")
 _file_handler.setLevel(logging.DEBUG)
 _console_handler = logging.StreamHandler()
@@ -41,10 +41,77 @@ sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..")
 ))
 
-# ── Lazy workflow imports ────────────────────────────────────────────────────
+# ── Lazy workflow imports ───────────────────────────────────────────
+
+
 def _import_workflows():
     from src.agent.workflows import detect_agents_needed, run_workflow
     return detect_agents_needed, run_workflow
+
+
+def _chat_response(message: str, agent_name: str, agent_id: str = None) -> str:
+    """
+    Handle conversational (non-workflow) messages via the LLM.
+    Used when the command doesn't involve multiple agents.
+    """
+    try:
+        from src.agent.llm.llm_parser import get_llm_client
+        from src.agent.memory.agent_memory import get_agent_memory
+        from src.agent.memory.collective_memory import get_collective_context
+
+        # Collective consciousness — pull memory from ALL registered agents
+        memory_context = ""
+        try:
+            memory_context = get_collective_context()
+        except Exception as mem_err:
+            logger.debug("Collective memory load skipped: %s", mem_err)
+
+        # Layer on per-message recall from own memory
+        if agent_id:
+            try:
+                own_memory = get_agent_memory(agent_id)
+                recalled = own_memory.recall_for_llm(message)
+                if recalled:
+                    memory_context += f"\n\n{recalled}"
+            except Exception as mem_err:
+                logger.debug("Recall skipped: %s", mem_err)
+
+        conversation_history = []
+        if "chat_messages" in st.session_state:
+            for m in st.session_state.chat_messages[-10:]:
+                conversation_history.append(
+                    {"role": m["role"], "content": m["content"]})
+
+        llm = get_llm_client()
+        response = llm.chat(
+            user_message=message,
+            agent_name=agent_name,
+            agent_type="Multi-Agent Hub (Drive + Email)",
+            memory_context=memory_context,
+            conversation_history=conversation_history,
+        )
+
+        # Record interaction to memory
+        if agent_id and response:
+            try:
+                memory = get_agent_memory(agent_id)
+                memory.add_interaction(
+                    command=message,
+                    action="conversation",
+                    result={"status": "success", "response": response[:200]},
+                    importance="Medium",
+                )
+            except Exception as mem_err:
+                logger.debug("Memory record skipped: %s", mem_err)
+
+        return response
+    except Exception as exc:
+        logger.warning("LLM chat fallback failed: %s", exc)
+        return (
+            "I'm your Multi-Agent Hub — I can run commands that combine both your "
+            "Drive Agent and Email Agent. Try something like: "
+            "*'Download the Q3 report and email it to alice@example.com'*."
+        )
 
 
 # ── Usage Guide dialog ───────────────────────────────────────────────────────
@@ -93,6 +160,9 @@ sentence. OctaMind automatically plans which agents to use and in what order.
 
 # ── Formatting helpers ───────────────────────────────────────────────────────
 
+import json as _json
+
+
 def _format_step_badge(agent: str) -> str:
     if agent == "drive":
         return "📁 Drive"
@@ -102,18 +172,79 @@ def _format_step_badge(agent: str) -> str:
 
 
 def _render_step_result(step_result: dict) -> str:
-    """Build a markdown string for one step result."""
+    """Build a compact status line shown during live workflow execution."""
     status_icon = "✅" if step_result["status"] == "success" else "❌"
     agent = step_result.get("agent", "?")
     tool = step_result.get("tool", "?")
     label = _format_step_badge(agent)
-    lines = [f"{status_icon} **{label}** — `{tool}`"]
+    line = f"{status_icon} **{label}** — `{tool}`"
     if step_result["status"] == "error":
-        lines.append(f"   ⚠️ {step_result.get('error', 'Unknown error')}")
-    return "\n".join(lines)
+        line += f"\n   ⚠️ {step_result.get('error', 'Unknown error')}"
+    return line
 
 
-def _render_workflow_output(run_result: dict) -> str:
+def _compose_final_response(run_result: dict, original_command: str) -> str:
+    """
+    Pass raw step results directly to the LLM and let it compose a friendly,
+    conversational final response. No pre-processing — the LLM sees everything.
+    """
+    from src.agent.llm.llm_parser import get_llm_client
+
+    steps = run_result.get("steps", [])
+
+    steps_payload = [
+        {
+            "agent": sr.get("agent"),
+            # Use the human-readable instruction/description for the compose LLM
+            "task": sr.get("instruction") or sr.get("tool", "?"),
+            "status": sr.get("status"),
+            # Flatten nested result dicts (new NL runner returns {"message":..., "artifacts":...})
+            "result": (
+                sr.get("result", {}).get("message")
+                if isinstance(sr.get("result"), dict)
+                else sr.get("result")
+            ),
+            "error": sr.get("error"),
+        }
+        for sr in steps
+    ]
+
+    composition_prompt = f"""The user asked: "{original_command}"
+
+A multi-agent workflow was executed. Here are the raw results from each step:
+
+{_json.dumps(steps_payload, indent=2, default=str)}
+
+Compose a response following these formatting rules:
+- Write in a friendly, conversational tone like a helpful assistant
+- Use **bold** for important names, counts, and key values
+- Use bullet points or numbered lists to present multiple items
+- Use tables (markdown) when comparing or listing structured data (e.g. files, emails)
+- Use relevant emojis to make the response visually engaging (e.g. 📁 for files, ✉️ for emails, ✅ for success)
+- Add a brief summary sentence at the start so the user knows what happened
+- If there are many items, show the most important ones and mention the total count
+- Do NOT show raw field names, JSON keys, or technical IDs unless they are needed for the user to act on them
+- Do NOT mention tool names or agent internals"""
+
+    llm = get_llm_client()
+    try:
+        response = llm.client.chat.completions.create(
+            model=llm.model,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant. Compose clear, friendly markdown responses from raw tool results."},
+                {"role": "user", "content": composition_prompt},
+            ],
+            temperature=0.4,
+            max_tokens=3000,
+            timeout=40,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as exc:
+        logger.warning("Final response composition failed: %s", exc)
+        return "✅ Workflow completed. " + ("Steps: " + ", ".join(s.get("tool", "?") for s in steps) if steps else "No steps recorded.")
+
+
+def _render_workflow_output(run_result: dict, original_command: str = "") -> str:
     """Build the full assistant message for a completed workflow."""
     status = run_result.get("status", "error")
     plan = run_result.get("plan")
@@ -122,10 +253,16 @@ def _render_workflow_output(run_result: dict) -> str:
 
     parts = []
 
+    # ReAct mode: orchestrator already composed the final answer — use it directly
+    # (avoids a second LLM call just for formatting)
+    if run_result.get("final_answer") and status in ("success", "partial"):
+        return run_result["final_answer"]
+
     if status == "success":
-        parts.append("✅ **Workflow completed successfully!**")
+        return _compose_final_response(run_result, original_command)
     elif status == "partial":
-        parts.append("⚠️ **Workflow partially completed** — one or more steps failed.")
+        parts.append(
+            "⚠️ **Workflow partially completed** — one or more steps failed.")
     else:
         parts.append("❌ **Workflow failed.**")
 
@@ -137,7 +274,8 @@ def _render_workflow_output(run_result: dict) -> str:
         parts.append(_render_step_result(r))
 
     if status == "error" and not steps:
-        parts.append("\nCould not create a plan for this command. Try rephrasing it.")
+        parts.append(
+            "\nCould not create a plan for this command. Try rephrasing it.")
 
     return "\n".join(parts)
 
@@ -175,6 +313,12 @@ def main() -> None:
 
     if "pending_command" not in st.session_state:
         st.session_state.pending_command = None
+
+    if "interaction_count" not in st.session_state:
+        st.session_state.interaction_count = 0
+
+    if "agent_id" not in st.session_state:
+        st.session_state.agent_id = agent_id
 
     # ── Header ────────────────────────────────────────────────────────────────
     st.markdown(
@@ -235,7 +379,8 @@ def main() -> None:
                 atype = a.get("type") or a.get("agent_type", "agent")
                 aname = a.get("name", atype.title())
                 aurl = a.get("url", "")
-                icon = "📁" if "drive" in atype.lower() else ("✉️" if "email" in atype.lower() else "🤖")
+                icon = "📁" if "drive" in atype.lower() else (
+                    "✉️" if "email" in atype.lower() else "🤖")
                 link = f'<a href="{aurl}" target="_blank" style="color:#c4b5fd;">{aname}</a>' if aurl else aname
                 st.markdown(
                     f"<div style='font-size:0.82rem;color:#a8dadc;padding:3px 0;'>"
@@ -250,7 +395,11 @@ def main() -> None:
 
     # ── Chat history ──────────────────────────────────────────────────────────
     for msg in st.session_state.chat_messages:
-        with st.chat_message(msg["role"]):
+        if msg["role"] == "assistant":
+            _chat_ctx = st.chat_message("assistant")
+        else:
+            _chat_ctx = st.chat_message("user")
+        with _chat_ctx:
             st.markdown(msg["content"])
 
     # ── Chat input ────────────────────────────────────────────────────────────
@@ -270,26 +419,68 @@ def main() -> None:
         st.session_state.pending_command = None
 
         # Add user message to history
-        st.session_state.chat_messages.append({"role": "user", "content": command})
+        st.session_state.chat_messages.append(
+            {"role": "user", "content": command})
 
         detect_agents_needed, run_workflow = _import_workflows()
+        agents_needed = detect_agents_needed(command)
 
         with st.chat_message("user"):
             st.markdown(command)
 
         with st.chat_message("assistant"):
-            # Show routing info first
-            agents_needed = detect_agents_needed(command)
-            if agents_needed:
-                agent_labels = " + ".join(
-                    ("📁 Drive" if a == "drive" else "✉️ Email") for a in agents_needed
-                )
-                st.markdown(f"🔀 **Routing:** {agent_labels}")
+            # ── Conversational fallback — no agents involved (NEITHER) ───────
+            if agents_needed is None:
+                with st.spinner("Thinking…"):
+                    reply = _chat_response(command, agent_name, agent_id)
+                st.markdown(reply)
+                st.session_state.chat_messages.append(
+                    {"role": "assistant", "content": reply})
+                st.session_state.is_processing = False
+                st.rerun()
+
+            # ── Single-agent shortcut — bypass the workflow planner ───────────
+            if len(agents_needed) == 1:
+                single_agent = agents_needed[0]
+                icon = "📁" if single_agent == "drive" else "✉️"
+                label = "Drive" if single_agent == "drive" else "Email"
+                st.markdown(f"{icon} **Routing to {label} Agent…**")
+                with st.spinner(f"Running {label} Agent…"):
+                    try:
+                        if single_agent == "drive":
+                            from src.agent.ui.drive_agent.orchestrator import execute_with_llm_orchestration as _drive_exec
+                            result = _drive_exec(command, agent_id=None)
+                        else:
+                            from src.agent.ui.email_agent.orchestrator import execute_with_llm_orchestration as _email_exec
+                            result = _email_exec(command, agent_id=None)
+                        action = result.get("action", "react_response")
+                        if action == "react_response":
+                            reply = result.get("message", str(result))
+                        else:
+                            if single_agent == "drive":
+                                from src.agent.ui.drive_agent.app import _compose_drive_response
+                                reply = _compose_drive_response(result, action, command)
+                            else:
+                                from src.agent.ui.email_agent.app import _compose_email_response
+                                reply = _compose_email_response(result, action, command)
+                    except Exception as exc:
+                        logger.exception("Single-agent shortcut error: %s", exc)
+                        reply = f"❌ Something went wrong: {exc}"
+                st.markdown(reply)
+                st.session_state.chat_messages.append(
+                    {"role": "assistant", "content": reply})
+                st.session_state.is_processing = False
+                st.rerun()
+
+            # ── Multi-agent workflow path (both Drive + Email needed) ─────────
+            agent_labels = " + ".join(
+                ("📁 Drive" if a == "drive" else "✉️ Email") for a in agents_needed
+            )
+            st.markdown(f"🔀 **Routing:** {agent_labels}")
 
             # Execute with live step display
             result_placeholder = st.empty()
             step_lines: list[str] = []
-
             with st.status("⚡ Executing workflow…", expanded=True) as status_box:
                 try:
                     # Run the workflow (blocking — each step runs in sequence)
@@ -303,11 +494,14 @@ def main() -> None:
 
                     wf_status = run_result.get("status", "error")
                     if wf_status == "success":
-                        status_box.update(label="✅ Workflow complete", state="complete")
+                        status_box.update(
+                            label="✅ Workflow complete", state="complete")
                     elif wf_status == "partial":
-                        status_box.update(label="⚠️ Workflow partial", state="error")
+                        status_box.update(
+                            label="⚠️ Workflow partial", state="error")
                     else:
-                        status_box.update(label="❌ Workflow failed", state="error")
+                        status_box.update(
+                            label="❌ Workflow failed", state="error")
 
                 except Exception as exc:
                     logger.exception("Workflow execution error: %s", exc)
@@ -318,12 +512,31 @@ def main() -> None:
                         "plan": None,
                         "summary": str(exc),
                     }
-                    status_box.update(label="❌ Unexpected error", state="error")
+                    status_box.update(
+                        label="❌ Unexpected error", state="error")
                     st.error(str(exc))
 
             # Render final assistant output
-            final_text = _render_workflow_output(run_result)
+            final_text = _render_workflow_output(run_result, command)
             result_placeholder.markdown(final_text)
+
+        # Record workflow result to memory
+        try:
+            from src.agent.memory.agent_memory import get_agent_memory
+            _mem = get_agent_memory(agent_id)
+            _mem.add_interaction(
+                command=command,
+                action="multi_agent_workflow",
+                result={
+                    "status": run_result.get("status", "error"),
+                    "agents": agents_needed,
+                    "steps": len(run_result.get("steps", [])),
+                },
+                importance="High",
+            )
+            st.session_state.interaction_count += 1
+        except Exception as _mem_err:
+            logger.debug("Workflow memory record skipped: %s", _mem_err)
 
         st.session_state.chat_messages.append({
             "role": "assistant",

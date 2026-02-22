@@ -23,11 +23,32 @@ def _port_in_use(port: int) -> bool:
         return s.connect_ex(('localhost', port)) == 0
 
 
+def _truncate_logs(root: str) -> None:
+    """Truncate all *.log files in the project root so each run starts fresh."""
+    import glob
+    log_names = ["drive_agent.log", "email_agent.log", "multi_agent.log"]
+    for name in log_names:
+        path = os.path.join(root, name)
+        try:
+            open(path, 'w').close()  # truncate (or create empty)
+        except OSError:
+            pass
+    # Also truncate any stray logs in src/
+    for path in glob.glob(os.path.join(root, "src", "*.log")):
+        try:
+            open(path, 'w').close()
+        except OSError:
+            pass
+
+
 def main():
     root = _project_root()
     venv_python = os.path.join(root, '.venv', 'Scripts', 'python.exe')
     if not os.path.exists(venv_python):
         venv_python = sys.executable  # Fallback to current Python
+
+    _truncate_logs(root)
+    print("Log files cleared.")
 
     if _port_in_use(8501):
         print("OctaMind is already running — opening browser...")

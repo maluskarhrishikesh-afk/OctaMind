@@ -92,7 +92,8 @@ class TestFileBridge:
 class TestRouter:
     def test_drive_and_email_returns_both(self):
         from src.agent.workflows.router import detect_agents_needed
-        result = detect_agents_needed("download the report and email it to alice")
+        result = detect_agents_needed(
+            "download the report and email it to alice")
         assert result == ["drive", "email"]
 
     def test_only_drive_keywords(self):
@@ -112,7 +113,8 @@ class TestRouter:
 
     def test_gmail_keyword(self):
         from src.agent.workflows.router import detect_agents_needed
-        result = detect_agents_needed("download the spreadsheet and send it via gmail")
+        result = detect_agents_needed(
+            "download the spreadsheet and send it via gmail")
         assert result == ["drive", "email"]
 
     def test_gdrive_keyword(self):
@@ -253,7 +255,8 @@ class TestStepRunnerErrors:
         from src.agent.workflows.workflow_context import WorkflowContext, WorkflowStep
         from src.agent.workflows.step_runner import run_step
         ctx = WorkflowContext()
-        step = WorkflowStep(1, "fax_machine", "send_fax", {}, "result", "Send fax")
+        step = WorkflowStep(1, "fax_machine", "send_fax",
+                            {}, "result", "Send fax")
         result = run_step(step, ctx)
         assert result["status"] == "error"
         assert "fax_machine" in result["error"]
@@ -262,7 +265,8 @@ class TestStepRunnerErrors:
         from src.agent.workflows.workflow_context import WorkflowContext, WorkflowStep
         from src.agent.workflows.step_runner import run_step, _get_drive_registry
         ctx = WorkflowContext()
-        step = WorkflowStep(1, "drive", "nonexistent_tool_xyz", {}, "result", "No such tool")
+        step = WorkflowStep(1, "drive", "nonexistent_tool_xyz",
+                            {}, "result", "No such tool")
         result = run_step(step, ctx)
         assert result["status"] == "error"
         assert "nonexistent_tool_xyz" in result["error"]
@@ -273,7 +277,8 @@ class TestStepRunnerErrors:
         import src.agent.workflows.step_runner as sr
 
         ctx = WorkflowContext()
-        step = WorkflowStep(1, "drive", "get_storage_quota", {}, "quota_result", "Check quota")
+        step = WorkflowStep(1, "drive", "get_storage_quota",
+                            {}, "quota_result", "Check quota")
 
         mock_tool = MagicMock(return_value={"used": 5, "total": 15})
         original = sr._DRIVE_REGISTRY
@@ -326,7 +331,8 @@ class TestMasterOrchestratorPlan:
             },
         ])
         mock_llm, mock_client = self._mock_llm()
-        mock_client.chat.completions.create.return_value = self._fake_completion(steps_json)
+        mock_client.chat.completions.create.return_value = self._fake_completion(
+            steps_json)
 
         with patch("src.agent.workflows.master_orchestrator.get_llm_client", return_value=mock_llm):
             plan = plan_workflow("find report and email to alice")
@@ -345,7 +351,8 @@ class TestMasterOrchestratorPlan:
              "params": {}, "output_key": "quota", "description": "Check quota"}
         ]) + "\n```"
         mock_llm, mock_client = self._mock_llm()
-        mock_client.chat.completions.create.return_value = self._fake_completion(steps_json)
+        mock_client.chat.completions.create.return_value = self._fake_completion(
+            steps_json)
 
         with patch("src.agent.workflows.master_orchestrator.get_llm_client", return_value=mock_llm):
             plan = plan_workflow("check drive storage")
@@ -357,7 +364,8 @@ class TestMasterOrchestratorPlan:
         from src.agent.workflows.master_orchestrator import plan_workflow
 
         mock_llm, mock_client = self._mock_llm()
-        mock_client.chat.completions.create.return_value = self._fake_completion("not json at all")
+        mock_client.chat.completions.create.return_value = self._fake_completion(
+            "not json at all")
 
         with patch("src.agent.workflows.master_orchestrator.get_llm_client", return_value=mock_llm):
             plan = plan_workflow("some command")
@@ -368,7 +376,8 @@ class TestMasterOrchestratorPlan:
         from src.agent.workflows.master_orchestrator import plan_workflow
 
         mock_llm, mock_client = self._mock_llm()
-        mock_client.chat.completions.create.side_effect = RuntimeError("timeout")
+        mock_client.chat.completions.create.side_effect = RuntimeError(
+            "timeout")
 
         with patch("src.agent.workflows.master_orchestrator.get_llm_client", return_value=mock_llm):
             plan = plan_workflow("anything")
@@ -393,17 +402,19 @@ class TestRunWorkflow:
         from src.agent.workflows.master_orchestrator import run_workflow
         from src.agent.workflows.workflow_context import WorkflowPlan, WorkflowStep
 
-        mock_step = WorkflowStep(1, "drive", "get_storage_quota", {}, "quota", "Get quota")
+        mock_step = WorkflowStep(
+            1, "drive", "get_storage_quota", {}, "quota", "Get quota")
         mock_plan = WorkflowPlan(
             command="check storage",
             agents_needed=["drive"],
             steps=[mock_step],
         )
-        mock_step_result = {"status": "success", "step": 1, "agent": "drive", "tool": "get_storage_quota", "output_key": "quota", "result": {}}
+        mock_step_result = {"status": "success", "step": 1, "agent": "drive",
+                            "tool": "get_storage_quota", "output_key": "quota", "result": {}}
 
         with patch("src.agent.workflows.master_orchestrator.plan_workflow", return_value=mock_plan), \
-             patch("src.agent.workflows.master_orchestrator.run_step", return_value=mock_step_result), \
-             patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
+                patch("src.agent.workflows.master_orchestrator.run_step", return_value=mock_step_result), \
+                patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
             mock_fb.cleanup_all = MagicMock()
             result = run_workflow("check storage")
 
@@ -419,10 +430,12 @@ class TestRunWorkflow:
             WorkflowStep(1, "drive", "search_files", {}, "found", "Step 1"),
             WorkflowStep(2, "email", "send_email", {}, "sent", "Step 2"),
         ]
-        mock_plan = WorkflowPlan(command="cmd", agents_needed=["drive", "email"], steps=steps)
+        mock_plan = WorkflowPlan(command="cmd", agents_needed=[
+                                 "drive", "email"], steps=steps)
 
         fail_result = {"status": "error", "step": 1, "error": "Drive offline"}
-        success_result = {"status": "success", "step": 2, "agent": "email", "tool": "send_email", "output_key": "sent", "result": {}}
+        success_result = {"status": "success", "step": 2, "agent": "email",
+                          "tool": "send_email", "output_key": "sent", "result": {}}
 
         call_count = 0
 
@@ -432,8 +445,8 @@ class TestRunWorkflow:
             return fail_result if step.step_num == 1 else success_result
 
         with patch("src.agent.workflows.master_orchestrator.plan_workflow", return_value=mock_plan), \
-             patch("src.agent.workflows.master_orchestrator.run_step", side_effect=mock_run_step), \
-             patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
+                patch("src.agent.workflows.master_orchestrator.run_step", side_effect=mock_run_step), \
+                patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
             mock_fb.cleanup_all = MagicMock()
             result = run_workflow("cmd")
 

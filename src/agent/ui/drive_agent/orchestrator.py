@@ -158,23 +158,80 @@ _DRIVE_TOOLS_DESCRIPTION = """
 """
 
 
+def _observation_from_result(result: dict, tool_name: str) -> str:
+    """Convert a Drive tool result into a readable observation string for the ReAct loop."""
+    import json as _json
+
+    if result.get("status") == "error":
+        return f"Error: {result.get('message', 'Unknown error')}"
+
+    # File list results — include IDs so the LLM can chain tool calls
+    files = result.get("files") or result.get("results") or []
+    if files and isinstance(files, list):
+        lines = [f"Found {len(files)} file(s):"]
+        for i, f in enumerate(files[:20], 1):
+            size_str = ""
+            if f.get("size"):
+                try:
+                    mb = int(f["size"]) / (1024 * 1024)
+                    size_str = f" | {mb:.1f} MB"
+                except (ValueError, TypeError):
+                    pass
+            lines.append(
+                f"[{i}] ID: {f.get('id', '?')} | "
+                f"Name: {f.get('name', '?')} | "
+                f"Type: {f.get('mimeType', '?')}{size_str}"
+            )
+        return "\n".join(lines)
+
+    # Storage quota
+    if "used" in result and "limit" in result:
+        used_gb = int(result.get("used", 0)) / (1024 ** 3)
+        limit_gb = int(result.get("limit", 1)) / (1024 ** 3)
+        return f"Storage: {used_gb:.2f} GB used of {limit_gb:.2f} GB"
+
+    # Generic compact serialisation
+    compact = {
+        k: v for k, v in result.items()
+        if k not in ("status",) and not isinstance(v, (list, dict))
+    }
+    list_summaries = {
+        k: f"[{len(v)} items]"
+        for k, v in result.items()
+        if isinstance(v, list)
+    }
+    compact.update(list_summaries)
+    return _json.dumps(compact, default=str)[:600]
+
+
 def execute_with_llm_orchestration(
     user_query: str,
     agent_id: str = None,
     max_operations: int = 100,
+    artifacts_out: dict = None,
 ) -> Dict[str, Any]:
     """
-    Execute Drive commands using LLM-orchestrated tool selection.
+    Execute Drive commands using a Thought-Action-Observation (ReAct) loop.
+
+    ``artifacts_out`` — optional dict that will be populated with any file
+    paths produced by this call (e.g. from download_file).  Pass an empty
+    dict when calling from a multi-agent workflow to receive the path.
+
+    The LLM reasons freely across as many steps as needed:
+      Thought -> Action (tool call) -> Observation (result) -> Thought -> ...
+    until it produces a final_answer.  Supports multi-step tasks like:
+      "Find duplicates in my project folder and delete them" — will:
+        1. list files / find_duplicates  ->  observe duplicate IDs
+        2. trash_duplicates              ->  observe success
+        3. write final_answer
 
     Args:
-        user_query:     Natural language query from user.
+        user_query:     Natural language task from the user.
         agent_id:       Agent ID for memory context.
-        max_operations: Maximum number of individual Drive API operations allowed.
-
-    Returns:
-        Result dictionary from the tool execution.
+        max_operations: Safety cap on bulk API operations per tool call.
     """
     try:
+        # ── Memory context ──────────────────────────────────────────────────
         memory_context = ""
         if agent_id and MEMORY_AVAILABLE:
             try:
@@ -183,21 +240,7 @@ def execute_with_llm_orchestration(
             except Exception:
                 pass
 
-        llm = get_llm_client()
-        tool_decision = llm.orchestrate_mcp_tool(
-            user_query, memory_context, tools_description=_DRIVE_TOOLS_DESCRIPTION
-        )
-
-        tool_name = tool_decision.get("tool")
-        params = tool_decision.get("params", {})
-        reasoning = tool_decision.get("reasoning", "")
-
-        logger.debug(
-            "[LLM] Tool: %s | Params: %s | max_ops: %s",
-            tool_name, params, max_operations,
-        )
-
-        # ── max_operations guard ─────────────────────────────────────────────
+        # ── Tool executor used by the ReAct loop ────────────────────────────
         _ops_capped_note = ""
 
         def _clamp(value, fallback: int = 20) -> int:
@@ -209,335 +252,247 @@ def execute_with_llm_orchestration(
             effective = min(v, max_operations)
             if effective < v:
                 _ops_capped_note = (
-                    f"\n\n⚠️ *Results capped at {effective} (max operations limit). "
-                    f"You can raise this limit in ⚙️ Configure → General Settings.*"
+                    f"\n\n⚠️ *Results capped at {effective} (max operations limit).*"
                 )
             return effective
 
-        # ── Tool dispatch ────────────────────────────────────────────────────
-
-        # Phase 1 ── Core file operations
-        if tool_name == "list_files":
-            files = list_files(
-                max_results=_clamp(params.get("max_results", 20)),
-                query=params.get("query", ""),
-                folder_id=params.get("folder_id", "root"),
-            )
-            return {
-                "status": "success", "action": "list_files",
-                "files": files, "reasoning": reasoning + _ops_capped_note,
+        def _dispatch(tool_name: str, params: dict) -> str:
+            """Execute one Drive tool and return a readable observation string."""
+            result: Dict[str, Any] = {
+                "status": "error", "message": f"Unknown tool: {tool_name}",
             }
 
-        elif tool_name == "search_files":
-            files = search_files(
-                query=params.get("query", ""),
-                max_results=_clamp(params.get("max_results", 20)),
-            )
-            return {
-                "status": "success", "action": "search_files",
-                "files": files, "query": params.get("query", ""),
-                "reasoning": reasoning + _ops_capped_note,
-            }
+            # Phase 1 — Core file operations
+            if tool_name == "list_files":
+                files = list_files(
+                    max_results=_clamp(params.get("max_results", 20)),
+                    query=params.get("query", ""),
+                    folder_id=params.get("folder_id", "root"),
+                )
+                result = {"status": "success", "files": files}
 
-        elif tool_name == "get_file_info":
-            return {**get_file_info(params.get("file_id", "")),
-                    "action": "file_info", "reasoning": reasoning}
+            elif tool_name == "search_files":
+                files = search_files(
+                    query=params.get("query", ""),
+                    max_results=_clamp(params.get("max_results", 20)),
+                )
+                result = {"status": "success", "files": files}
 
-        elif tool_name == "upload_file":
-            result = upload_file(
-                local_path=params.get("local_path", ""),
-                name=params.get("name"),
-                folder_id=params.get("folder_id"),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "get_file_info":
+                result = get_file_info(params.get("file_id", ""))
 
-        elif tool_name == "download_file":
-            raw_id = params.get("file_id", "")
-            # If the supplied "file_id" looks like a name (has extension, space,
-            # or is too short to be a real Drive ID), resolve it via search first.
-            import re as _re
-            _looks_like_name = (
-                "." in raw_id
-                or " " in raw_id
-                or len(raw_id) < 20
-                or not _re.match(r'^[A-Za-z0-9_\-]{20,}$', raw_id)
-            )
-            if _looks_like_name and raw_id:
-                logger.debug(
-                    "[download_file] resolving name '%s' to file ID", raw_id)
-                hits = search_files(query=raw_id, max_results=1)
-                if not hits:
-                    return {
-                        "status": "error",
-                        "message": (
-                            f"Could not find a file named **{raw_id}** in your Drive. "
-                            "Try listing your files first to confirm the exact name."
-                        ),
-                    }
-                raw_id = hits[0]["id"]
-                logger.debug("[download_file] resolved to ID: %s", raw_id)
-            result = download_file(
-                file_id=raw_id,
-                destination=params.get("destination"),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "upload_file":
+                result = upload_file(
+                    local_path=params.get("local_path", ""),
+                    name=params.get("name"),
+                    folder_id=params.get("folder_id"),
+                )
 
-        elif tool_name == "create_folder":
-            result = create_folder(
-                name=params.get("name", "New Folder"),
-                parent_id=params.get("parent_id"),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "download_file":
+                import re as _re
+                raw_id = params.get("file_id", "")
+                _looks_like_name = (
+                    "." in raw_id or " " in raw_id or len(raw_id) < 20
+                    or not _re.match(r'^[A-Za-z0-9_\-]{20,}$', raw_id)
+                )
+                if _looks_like_name and raw_id:
+                    hits = search_files(query=raw_id, max_results=1)
+                    if not hits:
+                        return f"Error: Could not find a file named '{raw_id}' in Drive."
+                    raw_id = hits[0]["id"]
+                result = download_file(file_id=raw_id,
+                                       destination=params.get("destination"))
+                # Capture local_path for inter-agent handoff (Drive → Email)
+                if artifacts_out is not None and isinstance(result, dict):
+                    local = result.get("local_path")
+                    if local:
+                        artifacts_out["file_path"] = local
 
-        elif tool_name == "move_file":
-            result = move_file(
-                file_id=params.get("file_id", ""),
-                destination_folder_id=params.get("destination_folder_id", ""),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "create_folder":
+                result = create_folder(
+                    name=params.get("name", "New Folder"),
+                    parent_id=params.get("parent_id"),
+                )
 
-        elif tool_name == "copy_file":
-            result = copy_file(
-                file_id=params.get("file_id", ""),
-                name=params.get("name"),
-                folder_id=params.get("folder_id"),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "move_file":
+                result = move_file(
+                    file_id=params.get("file_id", ""),
+                    destination_folder_id=params.get("destination_folder_id", ""),
+                )
 
-        elif tool_name == "trash_file":
-            result = trash_file(params.get("file_id", ""))
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "copy_file":
+                result = copy_file(
+                    file_id=params.get("file_id", ""),
+                    name=params.get("name"),
+                    folder_id=params.get("folder_id"),
+                )
 
-        elif tool_name == "restore_file":
-            result = restore_file(params.get("file_id", ""))
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "trash_file":
+                result = trash_file(params.get("file_id", ""))
 
-        elif tool_name == "star_file":
-            result = star_file(
-                params.get("file_id", ""),
-                starred=params.get("starred", True),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "restore_file":
+                result = restore_file(params.get("file_id", ""))
 
-        elif tool_name == "get_storage_quota":
-            result = get_storage_quota()
-            result["action"] = "storage_quota"
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "star_file":
+                result = star_file(
+                    params.get("file_id", ""),
+                    starred=params.get("starred", True),
+                )
 
-        # Phase 2 ── Sharing & Permissions
-        elif tool_name == "share_file":
-            result = share_file(
-                file_id=params.get("file_id", ""),
-                email=params.get("email", ""),
-                role=params.get("role", "reader"),
-                send_notification=params.get("send_notification", True),
-                message=params.get("message"),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "get_storage_quota":
+                result = get_storage_quota()
 
-        elif tool_name == "list_permissions":
-            result = list_permissions(params.get("file_id", ""))
-            result["action"] = "list_permissions"
-            result["reasoning"] = reasoning
-            return result
+            # Phase 2 — Sharing & Permissions
+            elif tool_name == "share_file":
+                result = share_file(
+                    file_id=params.get("file_id", ""),
+                    email=params.get("email", ""),
+                    role=params.get("role", "reader"),
+                    send_notification=params.get("send_notification", True),
+                    message=params.get("message"),
+                )
 
-        elif tool_name == "remove_permission":
-            result = remove_permission(
-                file_id=params.get("file_id", ""),
-                permission_id=params.get("permission_id", ""),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "list_permissions":
+                result = list_permissions(params.get("file_id", ""))
 
-        elif tool_name == "update_permission":
-            result = update_permission(
-                file_id=params.get("file_id", ""),
-                permission_id=params.get("permission_id", ""),
-                role=params.get("role", "reader"),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "remove_permission":
+                result = remove_permission(
+                    file_id=params.get("file_id", ""),
+                    permission_id=params.get("permission_id", ""),
+                )
 
-        elif tool_name == "make_public":
-            result = make_public(params.get("file_id", ""))
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "update_permission":
+                result = update_permission(
+                    file_id=params.get("file_id", ""),
+                    permission_id=params.get("permission_id", ""),
+                    role=params.get("role", "reader"),
+                )
 
-        elif tool_name == "remove_public":
-            result = remove_public(params.get("file_id", ""))
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "make_public":
+                result = make_public(params.get("file_id", ""))
 
-        # Phase 3 ── Smart / AI features
-        elif tool_name == "summarize_file":
-            result = summarize_file(params.get("file_id", ""))
-            result["action"] = "summarize_file"
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "remove_public":
+                result = remove_public(params.get("file_id", ""))
 
-        elif tool_name == "summarize_folder":
-            result = summarize_folder(params.get("folder_id", "root"))
-            result["action"] = "summarize_folder"
-            result["reasoning"] = reasoning
-            return result
+            # Phase 3 — Smart / AI features
+            elif tool_name == "summarize_file":
+                result = summarize_file(params.get("file_id", ""))
 
-        elif tool_name == "find_duplicates":
-            result = find_duplicates(
-                folder_id=params.get("folder_id", "root"),
-                max_files=_clamp(params.get("max_files", 500), 500),
-            )
-            result["action"] = "find_duplicates"
-            result["reasoning"] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "summarize_folder":
+                result = summarize_folder(params.get("folder_id", "root"))
 
-        elif tool_name == "trash_duplicates":
-            result = trash_duplicates(
-                folder_id=params.get("folder_id", "root"),
-                max_files=_clamp(params.get("max_files", 500), 500),
-                dry_run=params.get("dry_run", True),
-            )
-            result["reasoning"] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "find_duplicates":
+                result = find_duplicates(
+                    folder_id=params.get("folder_id", "root"),
+                    max_files=_clamp(params.get("max_files", 500), 500),
+                )
 
-        elif tool_name == "suggest_organization":
-            result = suggest_organization(
-                folder_id=params.get("folder_id", "root"),
-                max_files=_clamp(params.get("max_files", 100), 100),
-            )
-            result["action"] = "suggest_organization"
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "trash_duplicates":
+                result = trash_duplicates(
+                    folder_id=params.get("folder_id", "root"),
+                    max_files=_clamp(params.get("max_files", 500), 500),
+                    dry_run=params.get("dry_run", True),
+                )
 
-        elif tool_name == "auto_organize":
-            result = auto_organize(
-                folder_id=params.get("folder_id", "root"),
-                max_files=_clamp(params.get("max_files", 100), 100),
-                dry_run=params.get("dry_run", True),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "suggest_organization":
+                result = suggest_organization(
+                    folder_id=params.get("folder_id", "root"),
+                    max_files=_clamp(params.get("max_files", 100), 100),
+                )
 
-        elif tool_name == "bulk_rename":
-            result = bulk_rename(
-                folder_id=params.get("folder_id", ""),
-                pattern=params.get("pattern", ""),
-                replacement=params.get("replacement", ""),
-                max_files=_clamp(params.get("max_files", 100), 100),
-                dry_run=params.get("dry_run", True),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "auto_organize":
+                result = auto_organize(
+                    folder_id=params.get("folder_id", "root"),
+                    max_files=_clamp(params.get("max_files", 100), 100),
+                    dry_run=params.get("dry_run", True),
+                )
 
-        elif tool_name == "list_versions":
-            result = list_versions(params.get("file_id", ""))
-            result["action"] = "list_versions"
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "bulk_rename":
+                result = bulk_rename(
+                    folder_id=params.get("folder_id", ""),
+                    pattern=params.get("pattern", ""),
+                    replacement=params.get("replacement", ""),
+                    max_files=_clamp(params.get("max_files", 100), 100),
+                    dry_run=params.get("dry_run", True),
+                )
 
-        elif tool_name == "restore_version":
-            result = restore_version(
-                file_id=params.get("file_id", ""),
-                revision_id=params.get("revision_id", ""),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "list_versions":
+                result = list_versions(params.get("file_id", ""))
 
-        elif tool_name == "delete_old_versions":
-            result = delete_old_versions(
-                file_id=params.get("file_id", ""),
-                keep_latest=params.get("keep_latest", 5),
-                dry_run=params.get("dry_run", True),
-            )
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "get_version_info":
+                result = get_version_info(
+                    file_id=params.get("file_id", ""),
+                    revision_id=params.get("revision_id", ""),
+                )
 
-        # Phase 4 ── Analytics & Insights
-        elif tool_name == "storage_breakdown":
-            result = storage_breakdown(
-                max_files=_clamp(params.get("max_files", 1000), 1000)
-            )
-            result["action"] = "storage_breakdown"
-            result["reasoning"] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "restore_version":
+                result = restore_version(
+                    file_id=params.get("file_id", ""),
+                    revision_id=params.get("revision_id", ""),
+                )
 
-        elif tool_name == "list_large_files":
-            result = list_large_files(
-                min_size_mb=params.get("min_size_mb", 50),
-                max_results=_clamp(params.get("max_results", 50), 50),
-            )
-            result["action"] = "list_large_files"
-            result["reasoning"] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "delete_old_versions":
+                result = delete_old_versions(
+                    file_id=params.get("file_id", ""),
+                    keep_latest=params.get("keep_latest", 5),
+                    dry_run=params.get("dry_run", True),
+                )
 
-        elif tool_name == "list_old_files":
-            result = list_old_files(
-                days=params.get("days", 365),
-                max_results=_clamp(params.get("max_results", 50), 50),
-            )
-            result["action"] = "list_old_files"
-            result["reasoning"] = reasoning + _ops_capped_note
-            return result
+            # Phase 4 — Analytics & Insights
+            elif tool_name == "storage_breakdown":
+                result = storage_breakdown()
 
-        elif tool_name == "list_recently_modified":
-            result = list_recently_modified(
-                max_results=_clamp(params.get("max_results", 20), 20)
-            )
-            result["action"] = "list_files"
-            result["files"] = result.get("files", [])
-            result["reasoning"] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "list_large_files":
+                result = list_large_files(
+                    min_size_mb=params.get("min_size_mb", 50),
+                    max_results=_clamp(params.get("max_results", 50), 50),
+                )
 
-        elif tool_name == "find_orphaned_files":
-            result = find_orphaned_files(
-                max_results=_clamp(params.get("max_results", 100), 100)
-            )
-            result["action"] = "list_files"
-            result["files"] = result.get("files", [])
-            result["reasoning"] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "list_old_files":
+                result = list_old_files(
+                    days=params.get("days", 365),
+                    max_results=_clamp(params.get("max_results", 50), 50),
+                )
 
-        elif tool_name == "sharing_report":
-            result = sharing_report(
-                max_files=_clamp(params.get("max_files", 200), 200)
-            )
-            result["action"] = "sharing_report"
-            result["reasoning"] = reasoning + _ops_capped_note
-            return result
+            elif tool_name == "list_recently_modified":
+                result = list_recently_modified(
+                    max_results=_clamp(params.get("max_results", 20), 20),
+                )
 
-        elif tool_name == "generate_drive_report":
-            result = generate_drive_report()
-            result["action"] = "drive_report"
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "find_orphaned_files":
+                result = find_orphaned_files(
+                    max_results=_clamp(params.get("max_results", 100), 100),
+                )
 
-        elif tool_name == "get_usage_insights":
-            result = get_usage_insights()
-            result["action"] = "usage_insights"
-            result["reasoning"] = reasoning
-            return result
+            elif tool_name == "sharing_report":
+                result = sharing_report(
+                    max_files=_clamp(params.get("max_files", 200), 200),
+                )
 
-        # ── Unknown tool ─────────────────────────────────────────────────────
-        else:
-            logger.warning("[LLM] Unknown Drive tool: %s", tool_name)
-            return {
-                "status": "error",
-                "message": (
-                    f"I don't know how to handle the action `{tool_name}`. "
-                    f"Try rephrasing your request, e.g. 'list my files', "
-                    f"'search for report', or 'show storage usage'."
-                ),
-            }
+            elif tool_name == "generate_drive_report":
+                result = generate_drive_report()
+
+            elif tool_name == "get_usage_insights":
+                result = get_usage_insights()
+
+            return _observation_from_result(result, tool_name)
+
+        # ── Run the ReAct loop ───────────────────────────────────────────────
+        llm = get_llm_client()
+        final_answer = llm.reason_and_act(
+            user_query,
+            _DRIVE_TOOLS_DESCRIPTION,
+            _dispatch,
+            memory_context,
+        )
+        return {"status": "success", "action": "react_response",
+                "message": final_answer}
 
     except Exception as e:
-        logger.error("execute_with_llm_orchestration error: %s", e)
-        return {"status": "error", "message": str(e)}
+        logger.error("Error in ReAct orchestration: %s", e)
+        return {
+            "status": "error",
+            "message": "I had trouble completing that request. Please try rephrasing.",
+        }
+
+

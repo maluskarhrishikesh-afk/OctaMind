@@ -32,67 +32,78 @@ def handle_conversation(
 
     Returns a response string if the message is conversational,
     or None if it should be treated as a Drive command.
+
+    Routing is done by the LLM (classify_intent) rather than brittle keyword
+    matching, so natural phrasings are correctly identified as Drive commands.
     """
-    msg = message.strip().lower()
+    # ── LLM-based intent routing ───────────────────────────────────────────
+    _DRIVE_CONTEXT = (
+        "listing, searching, uploading, downloading, creating, moving, deleting, "
+        "sharing, organising, or otherwise interacting with the user's Google Drive "
+        "files, folders, documents, storage quota, or permissions"
+    )
+    try:
+        llm = get_llm_client()
+        intent = llm.classify_intent(message, agent_context=_DRIVE_CONTEXT)
+        logger.debug(f"[Router] intent={intent!r} for message={message[:60]!r}")
+        if intent == "COMMAND":
+            return None  # Let orchestrator handle it
+    except Exception as e:
+        logger.error(f"Intent classification failed, defaulting to COMMAND: {e}")
+        return None  # safe default: try the drive orchestrator
 
-    # Drive-specific action keywords
-    has_action_word = any(word in msg for word in [
-        "list", "show", "find", "search", "upload", "download", "create",
-        "move", "copy", "trash", "delete", "restore", "star", "unstar",
-        "rename", "organize", "share", "permission", "public", "private",
-        "revoke", "folder", "file", "duplicate", "version", "history",
-        "storage", "quota", "large", "old", "stale", "orphan", "report",
-        "insight", "analytic", "summary", "summarize", "breakdown",
-        "sort", "count", "how many", "size",
-    ])
-    has_drive_word = any(word in msg for word in [
-        "drive", "file", "folder", "document", "gdrive", "google drive",
-        "sheet", "doc", "slide", "pdf", "my drive",
-        # Storage / quota terms — unambiguously Drive-specific
-        "storage", "quota", "usage", "space", "gb", "mb",
-        # Trash / bin
-        "trash", "trashed", "bin", "deleted",
-        # Starred
-        "starred", "starred files",
-    ])
-
-    if has_action_word and has_drive_word:
-        return None  # Let orchestrator handle it
-
-    # Pure Drive action without explicit "drive" keyword (still pass to orchestrator)
-    strong_drive_actions = any(word in msg for word in [
-        "upload", "download", "share file", "list files", "find files",
-        "search files", "create folder", "move file",
-        "storage usage", "storage quota", "disk usage",
-        "sharing report", "drive report", "drive health",
-        "storage breakdown", "usage insights",
-    ])
-    if strong_drive_actions:
-        return None
-
-    # Conversational — use LLM
+    # Conversational — use LLM with memory + recall
     try:
         memory_context = ""
         if agent_id and MEMORY_AVAILABLE:
             try:
                 memory = get_agent_memory(agent_id)
                 memory_context = memory.get_full_context_for_llm()
+                # On-demand recall: inject episodic hits if query references the past
+                recalled = memory.recall_for_llm(message)
+                if recalled:
+                    memory_context += f"\n\n{recalled}"
+                    logger.debug(
+                        f"[Memory] Injected episodic recall ({len(recalled)} chars)")
             except Exception:
                 pass
 
+        # Conversation history for short-term continuity
+        conversation_history = []
+        if "chat_messages" in st.session_state:
+            for m in st.session_state.chat_messages[-10:]:
+                conversation_history.append(
+                    {"role": m["role"], "content": m["content"]})
+
+        if not agent_name:
+            agent_name = os.getenv("AGENT_NAME", "Drive Assistant")
+
         llm = get_llm_client()
-        name = agent_name or "Drive Assistant"
-
-        system = (
-            f"You are {name}, an AI assistant specialising in Google Drive. "
-            "You can list files, search, upload, organise folders, share, and analyse storage. "
-            "Be concise and friendly."
+        response = llm.chat(
+            user_message=message,
+            agent_name=agent_name,
+            agent_type="Google Drive Agent",
+            memory_context=memory_context,
+            conversation_history=conversation_history,
         )
-        if memory_context:
-            system += f"\n\nContext about the user:\n{memory_context}"
 
-        response = llm.chat(system_prompt=system, user_message=message)
+        # Record the exchange to memory
+        if agent_id and MEMORY_AVAILABLE and response:
+            try:
+                memory = get_agent_memory(agent_id)
+                memory.add_interaction(
+                    command=message,
+                    action="conversation",
+                    result={"status": "success", "response": response[:200]},
+                    importance="Medium",
+                )
+            except Exception:
+                pass
+
         return response
     except Exception as e:
         logger.error("handle_conversation error: %s", e)
-        return f"Hi! I'm your Drive Assistant. I can help you manage Google Drive files and folders. What would you like to do?"
+        return (
+            "Hi! I'm your Drive Assistant. I can help you manage Google Drive "
+            "files and folders. What would you like to do?"
+        )

@@ -1,115 +1,86 @@
-# OctaMind
+﻿# OctaMind
 
-A comprehensive project integrating Gmail API and Gemma AI for intelligent email automation.
-
-## 🚀 Quick Start
-
-```bash
-# Install dependencies
-pip install google-auth google-auth-oauthlib google-api-python-client
-pip install torch transformers accelerate bitsandbytes streamlit huggingface_hub
-
-# Send an email
-python run_gmail_examples.py
-
-# Chat with Gemma AI
-python run_gemma_chat.py
-
-# Launch Streamlit UI
-streamlit run src/agent/gemma_chat_ui.py
-```
-
-## 📁 Project Structure
-
-```
-OctaMind/
-├── src/                    # Source code
-│   ├── email/             # Gmail integration
-│   └── agent/             # AI agents
-├── tests/                 # All test files
-│   ├── email/             # Email operation tests
-│   ├── agent/             # Agent functionality tests
-│   └── integration/       # Integration tests
-├── documentation/         # All documentation files
-├── credentials.json       # Gmail OAuth credentials
-└── run_*.py              # Convenience scripts
-```
-
-## 📚 Documentation
-
-All documentation is in the [`documentation/`](documentation/) folder:
-
-- **[PROJECT_OVERVIEW.md](documentation/PROJECT_OVERVIEW.md)** - Complete project guide
-- **[REORGANIZATION_SUMMARY.md](documentation/REORGANIZATION_SUMMARY.md)** - Code organization details
-- **[GMAIL_SETUP.md](documentation/GMAIL_SETUP.md)** - Gmail authentication setup
-- **[README_GMAIL_INTEGRATION.md](documentation/README_GMAIL_INTEGRATION.md)** - Gmail integration guide
-- **[FILE_STRUCTURE.md](documentation/FILE_STRUCTURE.md)** - Original structure reference
-- **[GMAIL_QUICKSTART.md](documentation/GMAIL_QUICKSTART.md)** - Quick start guide
-- **[src/README.md](src/README.md)** - Source code documentation
-
-## 🔧 Usage
-
-### Email Module
-```python
-from src.email import send_email, list_emails
-
-# Send email
-send_email("recipient@example.com", "Hello", "Test message")
-
-# List emails
-emails = list_emails(query='is:unread', max_results=10)
-```
-
-### Agent Module
-```python
-from src.agent.gemma_runner import load_model_and_processor, generate_response
-
-# Load model
-model, processor, device = load_model_and_processor()
-
-# Generate response
-response = generate_response(model, processor, device, "Hello!")
-```
-
-## 🤖 Integration Example
-
-```python
-from src.email import list_emails, send_email
-from src.agent.gemma_runner import load_model_and_processor, generate_response
-
-# Load AI model
-model, processor, device = load_model_and_processor()
-
-# Get unread emails and reply with AI
-emails = list_emails(query='is:unread', max_results=5)
-for email in emails:
-    prompt = f"Reply professionally to: {email['subject']}"
-    reply = generate_response(model, processor, device, prompt)
-    send_email(email['sender'], f"Re: {email['subject']}", reply)
-```
-
-## 🧪 Testing
-
-```bash
-# Test Gmail setup
-python test_gmail_setup.py
-
-# Test new structure
-python test_new_structure.py
-```
-
-## 📖 Learn More
-
-Visit the [`documentation/`](documentation/) folder for comprehensive guides and examples.
-
-## ✅ Features
-
-- ✅ Gmail API integration with OAuth 2.0
-- ✅ AI-powered email responses using Gemma
-- ✅ Streamlit web interface
-- ✅ Modular, maintainable code structure
-- ✅ Comprehensive documentation
+An AI-powered multi-agent platform for managing Gmail and Google Drive through natural language. Each agent runs as an isolated process with its own memory, personality, and context window.
 
 ---
 
-**Happy Coding! 🎉**
+## Quick Start
+
+```bash
+# 1. Install dependencies
+pip install -r requirement/octaMind-requirement.txt
+
+# 2. Configure (see documentation/SETUP.md)
+#    — Add your GitHub token to .env
+#    — Place credentials.json (Google OAuth) in the project root
+
+# 3. Run
+python start.py
+```
+
+`start.py` (or `start.exe`) launches the Agent Hub dashboard at **http://localhost:8501**, truncates all log files for a clean session, and opens the browser automatically.
+
+---
+
+## What It Does
+
+From the **Agent Hub** you create and launch agents. Each agent opens in its own browser tab on a separate port.
+
+| Agent | What it does |
+|-------|-------------|
+| **Email Agent** | Read, send, search, count, draft Gmail messages |
+| **Drive Agent** | List, search, upload, download, share Google Drive files |
+| **Multi-Agent Hub** | Cross-agent commands ("Download X and email it to Y") |
+
+All agents understand **natural language** — no commands to memorise.
+
+---
+
+## Project Structure
+
+```
+OctaMind/
+├── start.py                    # Launch entry point
+├── stop.py                     # Stop all running agents
+├── credentials.json            # Google OAuth credentials (do not commit)
+├── token.json                  # OAuth token (auto-generated)
+├── .env                        # GITHUB_TOKEN (do not commit)
+│
+├── src/
+│   ├── agent/
+│   │   ├── core/               # Process manager, agent registry
+│   │   ├── llm/                # LLM client (GitHub Models), ReAct loop
+│   │   ├── memory/             # 6-layer cognitive memory system
+│   │   ├── ui/
+│   │   │   ├── dashboard/      # Agent Hub UI
+│   │   │   ├── email_agent/    # Email Agent UI + orchestrator
+│   │   │   ├── drive_agent/    # Drive Agent UI + orchestrator
+│   │   │   └── multi_agent/    # Multi-Agent Hub UI
+│   │   └── workflows/          # Multi-agent workflow planner + executor
+│   ├── email/                  # Gmail API service layer
+│   └── drive/                  # Google Drive API service layer
+│
+├── tests/                      # Unit + integration tests
+├── documentation/              # Developer documentation
+└── architecture/               # Architecture deep-dives
+```
+
+---
+
+## Documentation
+
+| File | Contents |
+|------|----------|
+| [documentation/SETUP.md](documentation/SETUP.md) | Gmail OAuth credentials + GitHub Models token |
+| [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) | How the system works (routing, ReAct, memory) |
+| [documentation/AGENTS.md](documentation/AGENTS.md) | What each agent can do + example commands |
+| [documentation/TOOL_REFERENCE.md](documentation/TOOL_REFERENCE.md) | Every tool — parameters, defaults, example prompts |
+| [documentation/IMPLEMENTATION_STATUS.md](documentation/IMPLEMENTATION_STATUS.md) | What's implemented, what's not, known limits |
+| [architecture/memory-system.md](architecture/memory-system.md) | Full memory architecture reference |
+
+---
+
+## Logs
+
+Three log files are written to the project root and **auto-truncated on every start**:
+`drive_agent.log` · `email_agent.log` · `multi_agent.log`

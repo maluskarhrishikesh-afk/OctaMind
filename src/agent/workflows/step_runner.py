@@ -8,6 +8,7 @@ Supports parameter *references*: a param value of the form
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Callable, Dict, Optional
 
@@ -19,6 +20,8 @@ logger = logging.getLogger("workflows")
 # ---------------------------------------------------------------------------
 # Drive tool registry
 # ---------------------------------------------------------------------------
+
+
 def _build_drive_registry() -> Dict[str, Callable]:
     try:
         from src.drive import (
@@ -85,7 +88,7 @@ def _build_drive_registry() -> Dict[str, Callable]:
 def _build_email_registry() -> Dict[str, Callable]:
     try:
         from src.email import (
-            send_email, list_emails, get_inbox_count, get_todays_emails,
+            send_email, send_email_with_attachment, list_emails, get_inbox_count, get_todays_emails,
             delete_emails, extract_action_items, get_all_pending_actions,
             generate_reply_suggestions, quick_reply,
             create_draft, list_drafts, send_draft, delete_draft,
@@ -106,6 +109,7 @@ def _build_email_registry() -> Dict[str, Callable]:
         )
         return {
             "send_email": send_email,
+            "send_email_with_attachment": send_email_with_attachment,
             "list_emails": list_emails,
             "get_inbox_count": get_inbox_count,
             "get_todays_emails": get_todays_emails,
@@ -181,20 +185,101 @@ def _get_email_registry() -> Dict[str, Callable]:
 # Parameter resolution
 # ---------------------------------------------------------------------------
 
+def _value_to_str(value: Any) -> str:
+    """
+    Convert a tool output value (often a dict) to a human-readable string
+    suitable for use as an email message body.
+
+    Priority:
+        1. If dict has 'report_markdown' → use it (Drive report)
+        2. If dict has 'text' / 'message' / 'content' / 'summary' → use it
+        3. If dict has 'status'+'error' → format error
+        4. Fallback: pretty-print as JSON
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("report_markdown", "text", "content", "summary", "message", "result", "output"):
+            if key in value and isinstance(value[key], str) and value[key].strip():
+                return value[key]
+        # Format as readable key: value lines, skipping 'status'
+        lines = []
+        for k, v in value.items():
+            if k == "status":
+                continue
+            if isinstance(v, (list, dict)):
+                continue
+            lines.append(f"{k}: {v}")
+        return "\n".join(lines) if lines else json.dumps(value, indent=2)
+    if isinstance(value, list):
+        parts = []
+        for item in value[:20]:  # cap at 20 items
+            if isinstance(item, dict):
+                name = item.get("name") or item.get(
+                    "title") or item.get("subject") or str(item)
+                parts.append(f"- {name}")
+            else:
+                parts.append(f"- {item}")
+        return "\n".join(parts)
+    return str(value)
+
+
+def _extract_file_id(raw: Any) -> Optional[str]:
+    """
+    Given the stored result of a search_files / list_files call, extract the
+    first file's Drive ID string.  Returns None if extraction fails.
+    """
+    if isinstance(raw, str):
+        return None
+    # dict with a 'files' list: {"status":"success", "files": [{"id":"..."}]}
+    if isinstance(raw, dict):
+        files = raw.get("files") or raw.get("results") or []
+        if files and isinstance(files, list):
+            first = files[0]
+            if isinstance(first, dict):
+                return first.get("id") or first.get("file_id")
+    # plain list of file dicts
+    if isinstance(raw, list) and raw:
+        first = raw[0]
+        if isinstance(first, dict):
+            return first.get("id") or first.get("file_id")
+    return None
+
+
 def _resolve_params(params: Dict[str, Any], ctx: WorkflowContext) -> Dict[str, Any]:
     """
     Walk *params* and replace any string value that looks like ``"{key}"``
     with the actual value from the WorkflowContext.
 
-    Also handles the special ``"$bridge:<handle>"`` prefix for file-bridge
-    paths (used when Drive downloads a file that Email must attach).
+    Smart extractions:
+    - ``file_id`` param + list/dict result from search → first file's Drive ID
+    - ``attachment_path`` / any ``*path*`` / ``*attachment*`` param + download result → local_path
     """
     resolved: Dict[str, Any] = {}
     for k, v in params.items():
         if isinstance(v, str):
             if v.startswith("{") and v.endswith("}"):
                 ctx_key = v[1:-1]
-                resolved[k] = ctx.get(ctx_key, v)  # fallback: keep literal
+                raw = ctx.get(ctx_key, v)  # fallback: keep literal
+
+                # Smart: file_id from search/list result
+                if k == "file_id" and raw != v:
+                    file_id = _extract_file_id(raw)
+                    if file_id:
+                        resolved[k] = file_id
+                        continue
+
+                # Smart: local path from download result
+                if isinstance(raw, dict) and raw.get("local_path") and (
+                    "path" in k or "attachment" in k
+                ):
+                    resolved[k] = str(raw["local_path"])
+
+                # Default: serialise dict/list to readable string
+                elif isinstance(raw, (dict, list)):
+                    resolved[k] = _value_to_str(raw)
+                else:
+                    resolved[k] = raw
             elif v.startswith("$bridge:"):
                 handle = v[len("$bridge:"):]
                 path = file_bridge.resolve(handle)
