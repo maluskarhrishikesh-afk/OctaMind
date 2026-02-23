@@ -23,7 +23,9 @@ from datetime import datetime
 logger = logging.getLogger("whatsapp_agent")
 logger.setLevel(logging.DEBUG)
 
-_log_file = Path(__file__).parent.parent.parent.parent.parent / "whatsapp_agent.log"
+_log_dir = Path(__file__).parent.parent.parent.parent.parent / "logs"
+_log_dir.mkdir(exist_ok=True)
+_log_file = _log_dir / "whatsapp_agent.log"
 _file_handler = logging.FileHandler(_log_file, encoding="utf-8", mode="a")
 _file_handler.setLevel(logging.DEBUG)
 _console_handler = logging.StreamHandler()

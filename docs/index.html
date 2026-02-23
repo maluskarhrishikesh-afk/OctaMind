@@ -1385,6 +1385,7 @@
         </a>
         <div class="nav-links" id="navLinks">
             <a href="#features">Features</a>
+            <a href="#why">Why Different</a>
             <a href="#agents">Agents</a>
             <a href="#how">How it works</a>
             <a href="#roadmap">Roadmap</a>
@@ -1408,8 +1409,9 @@
         </h1>
 
         <p class="hero-sub">
-            OctaMind is a modular, open-source AI platform where you create specialized agents
-            that automate Gmail, Drive, Slack, Calendar — and more — using plain natural language.
+            OctaMind is an open-source, local-first AI platform where you run specialized agents
+            entirely on your own machine — managing Email, Drive, WhatsApp, Files and more — using
+            plain natural language. No cloud subscription. No third-party dependency. Your data stays yours.
         </p>
 
         <div class="hero-buttons">
@@ -1455,14 +1457,14 @@
     <div class="stats-bar">
         <div class="stat-item reveal">
             <div class="stat-number">5<span>+</span></div>
-            <div class="stat-label">Agent Types</div>
+            <div class="stat-label">LIVE Agents</div>
         </div>
         <div class="stat-item reveal">
-            <div class="stat-number">40<span>+</span></div>
-            <div class="stat-label">Gmail Actions</div>
+            <div class="stat-number">100<span>+</span></div>
+            <div class="stat-label">Agent Actions</div>
         </div>
         <div class="stat-item reveal">
-            <div class="stat-number">153<span></span></div>
+            <div class="stat-number">160<span>+</span></div>
             <div class="stat-label">Tests Passing</div>
         </div>
         <div class="stat-item reveal">
@@ -1501,21 +1503,45 @@
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">⚡</div>
-                <div class="feature-title">10+ Gmail Automations</div>
-                <div class="feature-desc">Set-and-forget automations: auto-delete spam, archive newsletters, daily email
-                    digest, VIP contact labeling, out-of-office replies, and more.</div>
+                <div class="feature-title">Automations Per Agent</div>
+                <div class="feature-desc">Set-and-forget automations built into every agent: auto-delete spam, daily digests, scheduled messages, VIP alerts, and more — running silently in the background.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🎭</div>
                 <div class="feature-title">Personality Tuning</div>
-                <div class="feature-desc">Customize each agent's tone, verbosity, humor, empathy, and proactiveness with
-                    precision sliders. Your agents, your style.</div>
+                <div class="feature-desc">Customize each agent's tone, verbosity, humor, empathy, and proactiveness with precision sliders. Your agents, your style.</div>
             </div>
             <div class="feature-card reveal">
                 <div class="feature-icon">🔒</div>
                 <div class="feature-title">Safe by Design</div>
-                <div class="feature-desc">Configurable <code>max_operations</code> guard prevents runaway bulk actions.
-                    OAuth-only access — your credentials never leave your machine.</div>
+                <div class="feature-desc">Configurable <code>max_operations</code> guard prevents runaway bulk actions. Tokens live in <code>config/</code> on your machine — the LLM never sees them.</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── WHY DIFFERENT ─────────────────────────────────── -->
+    <section id="why" class="section-pad" style="background: linear-gradient(180deg, transparent 0%, rgba(124,58,237,0.05) 50%, transparent 100%);">
+        <div class="section-header reveal">
+            <div class="section-tag">Why OctaMind</div>
+            <h2>Built different,<br><em>by design</em></h2>
+            <p class="section-sub">Most AI assistant products run in the cloud, charge a monthly fee, and route your data through third-party services. OctaMind takes the opposite approach.</p>
+        </div>
+
+        <div class="features-grid" style="max-width: 960px; margin: 0 auto;">
+            <div class="feature-card reveal" style="border-color: rgba(233,30,140,0.35); background: rgba(233,30,140,0.04);">
+                <div class="feature-icon" style="font-size: 2rem;">🔗</div>
+                <div class="feature-title">No Platform Dependency</div>
+                <div class="feature-desc">OctaMind runs entirely on your own machine. You don't need to connect through any third-party automation platform, pay for integration middleware, or rely on an external service staying online. Clone, configure, run — that's it. Forever.</div>
+            </div>
+            <div class="feature-card reveal" style="border-color: rgba(233,30,140,0.35); background: rgba(233,30,140,0.04);">
+                <div class="feature-icon" style="font-size: 2rem;">🛡️</div>
+                <div class="feature-title">Your Credentials, Your Machine</div>
+                <div class="feature-desc">OAuth tokens, API keys, and access credentials stay in <code>config/</code> on your computer — never uploaded, never shared. The LLM only ever receives task instructions. It cannot see, request, or infer your credentials. Not even once.</div>
+            </div>
+            <div class="feature-card reveal" style="border-color: rgba(233,30,140,0.35); background: rgba(233,30,140,0.04);">
+                <div class="feature-icon" style="font-size: 2rem;">🚀</div>
+                <div class="feature-title">Near-Zero-Setup Personal AI</div>
+                <div class="feature-desc">Clone the repo, drop your service tokens into <code>config/</code> (the same tokens you already have), run <code>python start.py</code>. In minutes you have a personal AI that manages your email, files, WhatsApp, and Drive — fully local, no account to create, no usage limits.</div>
             </div>
         </div>
     </section>
@@ -1525,50 +1551,51 @@
         <div class="section-header reveal">
             <div class="section-tag">Agent Types</div>
             <h2>Agents for every<br><em>service you use</em></h2>
-            <p class="section-sub">Start with Gmail today. Drive, Slack, Calendar and more are coming in the next
-                phases.</p>
+            <p class="section-sub">Email, Drive, WhatsApp, and Files agents are live today. More services on the way.</p>
         </div>
 
         <div class="agents-grid">
             <div class="agent-card active reveal">
                 <span class="agent-badge badge-live">LIVE</span>
                 <div class="agent-icon">📧</div>
-                <div class="agent-name">Gmail Agent</div>
-                <div class="agent-desc">Send, read, delete, search, label, schedule, summarize, and automate your entire
-                    inbox.</div>
+                <div class="agent-name">Email Agent</div>
+                <div class="agent-desc">Send, read, delete, search, label, schedule, summarize, and fully automate your Gmail inbox.</div>
             </div>
-            <div class="agent-card reveal">
-                <span class="agent-badge badge-soon">Soon</span>
+            <div class="agent-card active reveal">
+                <span class="agent-badge badge-live">LIVE</span>
                 <div class="agent-icon">📁</div>
                 <div class="agent-name">Google Drive</div>
-                <div class="agent-desc">List files, search content, upload, download, share with permissions, organize
-                    folders.</div>
+                <div class="agent-desc">List, search, upload, download, share and organize Drive files — including cross-agent handoff to email.</div>
             </div>
-            <div class="agent-card reveal">
-                <span class="agent-badge badge-soon">Soon</span>
+            <div class="agent-card active reveal">
+                <span class="agent-badge badge-live">LIVE</span>
                 <div class="agent-icon">💬</div>
-                <div class="agent-name">Slack Agent</div>
-                <div class="agent-desc">Send messages, list channels, manage notifications, search conversations.</div>
+                <div class="agent-name">WhatsApp Agent</div>
+                <div class="agent-desc">Send and read messages, search conversations, schedule messages, manage contacts, and set auto-replies.</div>
+            </div>
+            <div class="agent-card active reveal">
+                <span class="agent-badge badge-live">LIVE</span>
+                <div class="agent-icon">🗂️</div>
+                <div class="agent-name">Files Agent</div>
+                <div class="agent-desc">Manage your local filesystem — zip, copy, search, organise by type or date, find duplicates, and monitor disk usage.</div>
+            </div>
+            <div class="agent-card active reveal">
+                <span class="agent-badge badge-live">LIVE</span>
+                <div class="agent-icon">🔧</div>
+                <div class="agent-name">Custom Agent</div>
+                <div class="agent-desc">Define your own agent with a custom role, personality, knowledge base, and natural language prompt.</div>
             </div>
             <div class="agent-card reveal">
                 <span class="agent-badge badge-soon">Soon</span>
                 <div class="agent-icon">📅</div>
                 <div class="agent-name">Calendar</div>
-                <div class="agent-desc">Create events, view schedule, set reminders, reschedule, export ICS files.</div>
+                <div class="agent-desc">Create events, view schedule, set reminders, reschedule, and export ICS files.</div>
             </div>
             <div class="agent-card reveal">
                 <span class="agent-badge badge-soon">Soon</span>
-                <div class="agent-icon">📈</div>
-                <div class="agent-name">Stock Market</div>
-                <div class="agent-desc">Track prices, monitor market trends, manage portfolio, receive price alerts.
-                </div>
-            </div>
-            <div class="agent-card reveal">
-                <span class="agent-badge badge-live">LIVE</span>
-                <div class="agent-icon">🔧</div>
-                <div class="agent-name">Custom Agent</div>
-                <div class="agent-desc">Define your own agent with a custom role, personality, and natural language
-                    prompt.</div>
+                <div class="agent-icon">💼</div>
+                <div class="agent-name">Slack Agent</div>
+                <div class="agent-desc">Send messages, list channels, manage notifications, and search workspace conversations.</div>
             </div>
         </div>
     </section>
@@ -1619,10 +1646,24 @@
                 </div>
             </div>
             <div class="command-box reveal">
-                <div class="cmd-icon">📩</div>
+                <div class="cmd-icon">�</div>
                 <div>
-                    <div class="cmd-text">"Send a follow-up email to john@example.com about the project"</div>
-                    <div class="cmd-result">→ Draft composed with context. Sent. ✓</div>
+                    <div class="cmd-text">"Send a WhatsApp to Alice saying I'm running 10 minutes late"</div>
+                    <div class="cmd-result">→ Message sent to Alice (+91 98765…). ✓</div>
+                </div>
+            </div>
+            <div class="command-box reveal">
+                <div class="cmd-icon">🗂️</div>
+                <div>
+                    <div class="cmd-text">"Zip the rtofraud folder in Downloads and upload it to Drive, email me when done"</div>
+                    <div class="cmd-result">→ Zipped (2.3 GB) → uploaded to Drive → email sent. ✓</div>
+                </div>
+            </div>
+            <div class="command-box reveal">
+                <div class="cmd-icon">📁</div>
+                <div>
+                    <div class="cmd-text">"Find all duplicate files in my Documents folder"</div>
+                    <div class="cmd-result">→ Found 23 duplicate groups. 1.4 GB recoverable. ✓</div>
                 </div>
             </div>
             <div class="command-box reveal">
@@ -1630,20 +1671,6 @@
                 <div>
                     <div class="cmd-text">"Give me a summary of my inbox this week"</div>
                     <div class="cmd-result">→ 84 emails. 12 unread. 3 urgent. Weekly report generated. ✓</div>
-                </div>
-            </div>
-            <div class="command-box reveal">
-                <div class="cmd-icon">📅</div>
-                <div>
-                    <div class="cmd-text">"Schedule this email to be sent tomorrow at 9am"</div>
-                    <div class="cmd-result">→ Email queued for 2026-02-22 09:00. ✓</div>
-                </div>
-            </div>
-            <div class="command-box reveal">
-                <div class="cmd-icon">🏷️</div>
-                <div>
-                    <div class="cmd-text">"Apply smart labels to all uncategorized emails"</div>
-                    <div class="cmd-result">→ Applied labels to 56 emails across 8 categories. ✓</div>
                 </div>
             </div>
         </div>
@@ -1654,33 +1681,42 @@
         <div class="section-header reveal">
             <div class="section-tag">Architecture</div>
             <h2>Modular, clean<br><em>&amp; extensible</em></h2>
-            <p class="section-sub">Three separate Streamlit processes. Each agent gets its own window and port. Zero
-                coupling.</p>
+            <p class="section-sub">Five isolated Streamlit processes. Each agent gets its own window and port. Zero coupling between agents — and zero coupling to any external platform.</p>
         </div>
 
         <div class="arch-diagram reveal">
             <div class="arch-center">
                 <div class="arch-hub">
                     🐙 Agent Hub Dashboard
-                    <small>agent_dashboard.py → ui/dashboard/ (7 modules) · port 8501</small>
+                    <small>run_agent_hub.py · port 8501 · spawns agent sub-processes</small>
                 </div>
             </div>
-            <div class="arch-arrow">↓&nbsp;&nbsp;spawns sub-processes per agent&nbsp;&nbsp;↓</div>
-            <div class="arch-row">
+            <div class="arch-arrow">↓&nbsp;&nbsp;spawns isolated sub-process per agent&nbsp;&nbsp;↓</div>
+            <div class="arch-row" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr;">
                 <div class="arch-node">
                     <div class="arch-node-icon">📧</div>
-                    <div class="arch-node-title">Gmail Agent UI</div>
-                    email_agent/ (6 modules)<br>port: dynamic
+                    <div class="arch-node-title">Email Agent</div>
+                    40+ actions<br>Gmail API
                 </div>
                 <div class="arch-node">
-                    <div class="arch-node-icon">🔧</div>
-                    <div class="arch-node-title">Generic Agent UI</div>
-                    generic_agent_ui.py<br>port: dynamic
+                    <div class="arch-node-icon">📁</div>
+                    <div class="arch-node-title">Drive Agent</div>
+                    25+ actions<br>Drive API
+                </div>
+                <div class="arch-node">
+                    <div class="arch-node-icon">💬</div>
+                    <div class="arch-node-title">WhatsApp</div>
+                    20+ actions<br>WA Business API
+                </div>
+                <div class="arch-node">
+                    <div class="arch-node-icon">🗂️</div>
+                    <div class="arch-node-title">Files Agent</div>
+                    30+ actions<br>Local filesystem
                 </div>
                 <div class="arch-node">
                     <div class="arch-node-icon">💾</div>
-                    <div class="arch-node-title">Agent Memory</div>
-                    6-layer .md files<br>per agent_id/
+                    <div class="arch-node-title">Per-Agent Memory</div>
+                    6-layer .md files<br>agent_id/ folder
                 </div>
             </div>
         </div>
@@ -1697,7 +1733,9 @@
             <div class="tech-pill"><span class="tech-logo">🎈</span> Streamlit</div>
             <div class="tech-pill"><span class="tech-logo">🤖</span> GPT-4o mini</div>
             <div class="tech-pill"><span class="tech-logo">📧</span> Gmail API</div>
-            <div class="tech-pill"><span class="tech-logo">🔑</span> OAuth 2.0</div>
+            <div class="tech-pill"><span class="tech-logo">�</span> Drive API</div>
+            <div class="tech-pill"><span class="tech-logo">💬</span> WhatsApp Business API</div>
+            <div class="tech-pill"><span class="tech-logo">�🔑</span> OAuth 2.0</div>
             <div class="tech-pill"><span class="tech-logo">🧪</span> Pytest</div>
             <div class="tech-pill"><span class="tech-logo">📦</span> GitHub Models</div>
             <div class="tech-pill"><span class="tech-logo">🦙</span> Gemma 3 4B</div>
@@ -1721,28 +1759,30 @@
                     </div>
                 </div>
                 <ul class="phase-items">
-                    <li class="done"><span class="check-done">✓</span> Agent Hub dashboard</li>
-                    <li class="done"><span class="check-done">✓</span> Agent creation wizard</li>
-                    <li class="done"><span class="check-done">✓</span> Gmail agent + 40 actions</li>
-                    <li class="done"><span class="check-done">✓</span> LLM-powered orchestration</li>
+                    <li class="done"><span class="check-done">✓</span> Agent Hub + creation wizard</li>
+                    <li class="done"><span class="check-done">✓</span> Email agent — 40+ actions</li>
+                    <li class="done"><span class="check-done">✓</span> Google Drive agent</li>
+                    <li class="done"><span class="check-done">✓</span> WhatsApp agent</li>
+                    <li class="done"><span class="check-done">✓</span> Files agent (local FS)</li>
+                    <li class="done"><span class="check-done">✓</span> Multi-agent workflows</li>
                     <li class="done"><span class="check-done">✓</span> Persistent 6-layer memory</li>
-                    <li class="done"><span class="check-done">✓</span> 10 Gmail automations</li>
-                    <li class="done"><span class="check-done">✓</span> 153 tests passing</li>
+                    <li class="done"><span class="check-done">✓</span> 10+ automations per agent</li>
+                    <li class="done"><span class="check-done">✓</span> 160+ tests passing</li>
                 </ul>
             </div>
             <div class="phase-card reveal">
                 <div class="phase-header">
                     <div class="phase-number">02</div>
                     <div>
-                        <div class="phase-label">Phase 2 — More Services</div>
+                        <div class="phase-label">Phase 2 — Expand</div>
                         <div class="phase-status">🔜 Up Next</div>
                     </div>
                 </div>
                 <ul class="phase-items">
-                    <li><span class="check-todo">○</span> Google Drive agent</li>
                     <li><span class="check-todo">○</span> Slack agent</li>
                     <li><span class="check-todo">○</span> Calendar agent</li>
-                    <li><span class="check-todo">○</span> Agent-to-agent communication</li>
+                    <li><span class="check-todo">○</span> Agent scheduling (cron)</li>
+                    <li><span class="check-todo">○</span> Agent-to-agent messaging</li>
                     <li><span class="check-todo">○</span> Real-time notifications</li>
                 </ul>
             </div>
@@ -1770,7 +1810,7 @@
         <div class="section-header reveal">
             <div class="section-tag">Quick Start</div>
             <h2>Up and running<br><em>in 3 minutes</em></h2>
-            <p class="section-sub">Python 3.10+ required. Gmail OAuth credentials needed for the Gmail agent.</p>
+            <p class="section-sub">Python 3.10+ required. Service credentials go into <code>config/</code> on your machine — never anywhere else.</p>
         </div>
 
         <div class="qs-grid">
@@ -1799,16 +1839,15 @@
                     <div class="qs-title">Configure credentials</div>
                 </div>
                 <div class="code-block">
-                    <div><span class="cb-comment"># Copy your Gmail OAuth file</span></div>
-                    <div><span class="cb-cmd">cp</span> ~/Downloads/credentials.json .</div>
+                    <div><span class="cb-comment"># Place your service credentials locally</span></div>
+                    <div><span class="cb-cmd">cp</span> ~/credentials.json config/credentials.json</div>
                     <br>
-                    <div><span class="cb-comment"># Set GitHub Models API token (for LLM)</span></div>
-                    <div><span class="cb-cmd">echo</span> <span class="cb-str">"GITHUB_TOKEN=ghp_..."</span> &gt; .env
-                    </div>
+                    <div><span class="cb-comment"># Set LLM provider token (task instructions only)</span></div>
+                    <div><span class="cb-cmd">echo</span> <span class="cb-str">"GITHUB_TOKEN=ghp_..."</span> &gt; .env</div>
                     <br>
-                    <div><span class="cb-comment"># Verify setup</span></div>
+                    <div><span class="cb-comment"># Confirm everything is wired correctly</span></div>
                     <div><span class="cb-cmd">python -m pytest</span> tests/ <span class="cb-flag">-q</span></div>
-                    <div><span style="color:#68d391">153 passed in 30s ✓</span></div>
+                    <div><span style="color:#68d391">160 passed in 3s ✓</span></div>
                 </div>
             </div>
 
@@ -1858,8 +1897,7 @@
             </div>
             <h2>Start automating<br><em>your digital life today</em></h2>
             <p>OctaMind is completely free and open source, built by <strong>Pink Raven</strong>. No subscriptions, no
-                usage limits on your own machine. Fork
-                it, extend it, own it.</p>
+                usage limits, no data leaving your machine. Fork it, extend it, own it.</p>
             <div class="cta-buttons">
                 <a href="#quickstart" class="btn-primary">🚀 Get Started Free</a>
                 <a href="https://github.com" class="btn-secondary">

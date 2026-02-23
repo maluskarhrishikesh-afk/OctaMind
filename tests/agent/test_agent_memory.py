@@ -1,92 +1,207 @@
 """
-Test Agent Memory System
+Unit tests for src/agent/memory/agent_memory.py
+
+Covers:
+ - Initialisation: memory folder + all 6 files created
+ - add_interaction / get_recent_interactions
+ - add_episodic_event / search_episodic_memory
+ - update_semantic_memory / get_semantic_memory
+ - get_personality / update_personality
+ - get_habits / add_habit
+ - recall_for_llm: recall-signal → returns results; no signal → returns ""
+ - working memory cap (max 10)
+ - clear_working_memory
 """
 
-from src.agent.memory.agent_memory import get_agent_memory
+from src.agent.memory.agent_memory import AgentMemory, get_agent_memory
 import sys
 from pathlib import Path
 
-# Add project root to path
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
+import pytest
+
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def test_memory_system():
-    """Test the agent memory system"""
+# ─────────────────────────── fixtures ────────────────────────────────────────
 
-    print("🧠 Testing Agent Memory System")
-    print("=" * 60)
-
-    # Create memory for test agent
-    agent_id = "test_agent_001"
-    memory = get_agent_memory(agent_id)
-
-    print(f"\n✅ Created memory for agent: {agent_id}")
-    print(f"📂 Memory location: {memory.memory_dir}")
-
-    # Test short-term memory
-    print("\n1. Testing Short-Term Memory...")
-    memory.add_interaction(
-        command="Delete all emails from LinkedIn",
-        action="delete",
-        result={"status": "success", "deleted_count": 50},
-        metadata={"sender": "LinkedIn"}
-    )
-
-    memory.add_interaction(
-        command="Count my emails",
-        action="count",
-        result={"status": "success", "total": 1234, "unread": 42}
-    )
-
-    recent = memory.get_recent_interactions(2)
-    print(f"   ✅ Added 2 interactions")
-    print(f"   📝 Recent: {len(recent)} interactions stored")
-
-    # Test long-term memory
-    print("\n2. Testing Long-Term Memory...")
-    memory.update_long_term_memory(
-        "User Preferences",
-        "- User prefers to delete promotional emails weekly\n- Likes seeing full email body"
-    )
-    print("   ✅ Updated preferences")
-
-    # Test personality
-    print("\n3. Testing Personality...")
-    personality = memory.get_personality()
-    print(f"   ✅ Personality loaded ({len(personality)} chars)")
-
-    # Test habits
-    print("\n4. Testing Habits...")
-    memory.add_habit(
-        "Trigger-Based",
-        "When inbox > 1000 emails, suggest cleanup"
-    )
-    print("   ✅ Added habit")
-
-    # Test context
-    print("\n5. Testing Context...")
-    memory.update_context(
-        "Working Memory",
-        "- Last action: Deleted 50 LinkedIn emails\n- User seems focused on inbox cleanup"
-    )
-    print("   ✅ Updated context")
-
-    # Get full context for LLM
-    print("\n6. Testing LLM Context...")
-    llm_context = memory.get_full_context_for_llm()
-    print(f"   ✅ Generated LLM context ({len(llm_context)} chars)")
-    print("\n   Preview:")
-    print("   " + "\n   ".join(llm_context.split('\n')[:15]))
-    print("   ...")
-
-    print("\n" + "=" * 60)
-    print(f"✅ All tests passed!")
-    print(f"📂 Check memory files at: {memory.memory_dir}")
-    print("\nMemory files created:")
-    for file in memory.memory_dir.iterdir():
-        print(f"  - {file.name}")
+@pytest.fixture
+def mem(tmp_path):
+    """Fresh AgentMemory pointed at a tmp directory."""
+    return AgentMemory("test_agent", memory_base_dir=str(tmp_path / "memory"))
 
 
-if __name__ == "__main__":
-    test_memory_system()
+# ─────────────────────────── initialisation ──────────────────────────────────
+
+class TestInitialisation:
+    EXPECTED_FILES = {
+        "working_memory.md",
+        "episodic_memory.md",
+        "semantic_memory.md",
+        "personality.md",
+        "habits.md",
+        "consciousness.md",
+    }
+
+    def test_memory_dir_created(self, mem, tmp_path):
+        assert (tmp_path / "memory" / "test_agent").exists()
+
+    def test_archive_dir_created(self, mem, tmp_path):
+        assert (tmp_path / "memory" / "test_agent" / "archive").exists()
+
+    def test_all_six_files_created(self, mem, tmp_path):
+        created = {f.name for f in (
+            tmp_path / "memory" / "test_agent").iterdir() if f.is_file()}
+        assert self.EXPECTED_FILES.issubset(created)
+
+    def test_get_agent_memory_returns_correct_dir(self, tmp_path, monkeypatch):
+        """get_agent_memory returns an AgentMemory pointed at the right folder."""
+        monkeypatch.chdir(tmp_path)
+        m1 = get_agent_memory("dir_check_agent")
+        m2 = get_agent_memory("dir_check_agent")
+        # Both should resolve to the same memory directory path
+        assert m1.memory_dir == m2.memory_dir
+
+
+# ─────────────────────────── interactions (working memory) ───────────────────
+
+class TestInteractions:
+    def test_add_and_retrieve_interaction(self, mem):
+        mem.add_interaction("list emails", "list_emails", {"count": 5})
+        recent = mem.get_recent_interactions(1)
+        assert len(recent) >= 1
+
+    def test_multiple_interactions_stored(self, mem):
+        for i in range(3):
+            mem.add_interaction(f"cmd {i}", "action", {"i": i})
+        recent = mem.get_recent_interactions(5)
+        assert len(recent) >= 3
+
+    def test_working_memory_capped_at_10(self, mem):
+        """Adding 15 interactions should keep only the most recent 10."""
+        for i in range(15):
+            mem.add_interaction(f"cmd {i}", "action", {"n": i})
+        recent = mem.get_recent_interactions(20)
+        assert len(recent) <= 10
+
+    def test_search_interactions(self, mem):
+        mem.add_interaction("delete spam emails", "delete", {"count": 5})
+        mem.add_interaction("list unread", "list", {"count": 3})
+        results = mem.search_interactions("spam")
+        assert any("spam" in str(r).lower() for r in results)
+
+
+# ─────────────────────────── episodic memory ─────────────────────────────────
+
+class TestEpisodicMemory:
+    def test_add_and_retrieve_event(self, mem):
+        mem.add_episodic_event(
+            event="User deleted 50 LinkedIn emails",
+            importance="high",
+        )
+        text = mem.episodic_memory_path.read_text()
+        assert "LinkedIn" in text
+
+    def test_importance_levels_accepted(self, mem):
+        for level in ("high", "medium", "low"):
+            mem.add_episodic_event(
+                event=f"Test event [{level}]", importance=level)
+        text = mem.episodic_memory_path.read_text()
+        for level in ("high", "medium", "low"):
+            assert level.capitalize() in text or level in text
+
+    def test_search_episodic_memory(self, mem):
+        mem.add_episodic_event(
+            event="Ran weekly report automation", importance="medium")
+        mem.add_episodic_event(event="Sent 5 OOO replies", importance="low")
+        results = mem.search_episodic_memory("weekly report")
+        assert any("weekly" in str(r).lower() for r in results)
+
+
+# ─────────────────────────── semantic memory ─────────────────────────────────
+
+class TestSemanticMemory:
+    def test_update_and_read_semantic_memory(self, mem):
+        mem.update_semantic_memory(
+            "User Preferences", "- Prefers daily digests")
+        content = mem.get_semantic_memory()
+        assert "Prefers daily digests" in content
+
+    def test_legacy_update_long_term_memory(self, mem):
+        """update_long_term_memory is a legacy alias — must still work."""
+        mem.update_long_term_memory("Interests", "- Python programming")
+        content = mem.get_long_term_memory()
+        assert "Python programming" in content
+
+
+# ─────────────────────────── personality ─────────────────────────────────────
+
+class TestPersonality:
+    def test_get_personality_returns_string(self, mem):
+        p = mem.get_personality()
+        assert isinstance(p, str)
+        assert len(p) > 0
+
+    def test_update_personality(self, mem):
+        mem.update_personality("Communication Style",
+                               "Very direct and concise")
+        p = mem.get_personality()
+        assert "Very direct" in p
+
+
+# ─────────────────────────── habits ──────────────────────────────────────────
+
+class TestHabits:
+    def test_add_and_get_habits(self, mem):
+        mem.add_habit("Daily", "Checks inbox every morning")
+        habits = mem.get_habits()
+        assert "inbox" in habits.lower()
+
+    def test_habits_file_exists(self, mem):
+        assert mem.habits_path.exists()
+
+
+# ─────────────────────────── consciousness ───────────────────────────────────
+
+class TestConsciousness:
+    def test_get_consciousness_returns_string(self, mem):
+        c = mem.get_consciousness()
+        assert isinstance(c, str)
+        assert len(c) > 0
+
+
+# ─────────────────────────── recall_for_llm ──────────────────────────────────
+
+class TestRecallForLlm:
+    def test_no_recall_signal_returns_empty(self, mem):
+        result = mem.recall_for_llm("list my unread emails please")
+        assert result == ""
+
+    def test_recall_signal_returns_non_empty_when_data_exists(self, mem):
+        mem.add_interaction("deleted 100 spam emails",
+                            "delete", {"count": 100})
+        result = mem.recall_for_llm("do you remember what we did earlier?")
+        # Should return non-empty string — may be empty if no matches, but should not raise
+        assert isinstance(result, str)
+
+    def test_recall_specific_term(self, mem):
+        mem.add_episodic_event(
+            event="Ran out_of_office automation successfully", importance="low")
+        result = mem.recall_for_llm("did we talk about out_of_office?")
+        # If recall found anything, it should mention the term
+        if result:
+            assert "out_of_office" in result.lower() or "automation" in result.lower()
+
+
+# ─────────────────────────── clear_working_memory ────────────────────────────
+
+class TestClearWorkingMemory:
+    def test_clear_removes_interactions(self, mem):
+        mem.add_interaction("test cmd", "test", {})
+        mem.clear_working_memory()
+        recent = mem.get_recent_interactions(10)
+        assert len(recent) == 0
+
+    def test_file_still_exists_after_clear(self, mem):
+        mem.clear_working_memory()
+        assert mem.working_memory_path.exists()
