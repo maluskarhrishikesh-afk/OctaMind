@@ -25,22 +25,14 @@ _DRIVE_KEYWORDS: frozenset[str] = frozenset(
     {
         "drive",
         "gdrive",
-        "file",
-        "files",
         "download",
-        "folder",
-        "folders",
-        "document",
-        "documents",
         "spreadsheet",
         "spreadsheets",
         "presentation",
-        "pdf",
         "upload",
         "docs",
         "sheets",
         "slides",
-        "storage",
         "gdoc",
         "gsheet",
     }
@@ -50,14 +42,10 @@ _EMAIL_KEYWORDS: frozenset[str] = frozenset(
     {
         "email",
         "emails",
-        "send",
         "mail",
         "inbox",
-        "attach",
         "attachment",
         "attachments",
-        "message",
-        "messages",
         "gmail",
         "compose",
         "reply",
@@ -65,8 +53,35 @@ _EMAIL_KEYWORDS: frozenset[str] = frozenset(
         "recipient",
         "cc",
         "bcc",
-        "subject",
         "smtp",
+    }
+)
+
+# Local-file keywords that imply the Files agent is needed
+_FILES_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "zip",
+        "unzip",
+        "archive",
+        "compress",
+        "extract",
+        "folder",
+        "folders",
+        "file",
+        "files",
+        "rename",
+        "duplicate",
+        "duplicates",
+        "organise",
+        "organize",
+        "disk",
+        "drive",   # also matches local drives
+        "storage",
+        "document",
+        "documents",
+        "downloads",
+        "desktop",
+        "pdf",
     }
 )
 

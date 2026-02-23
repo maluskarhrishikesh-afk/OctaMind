@@ -27,6 +27,8 @@ _AGENT_SCRIPTS: Dict[str, str] = {
     "gmail": "src/agent/ui/email_agent_ui.py",
     "google_drive": "src/agent/ui/drive_agent_ui.py",
     "multi_agent": "src/agent/ui/multi_agent_ui.py",
+    "whatsapp": "src/agent/ui/whatsapp_agent_ui.py",
+    "files": "src/agent/ui/files_agent_ui.py",
     "slack": "src/agent/ui/generic_agent_ui.py",
     "calendar": "src/agent/ui/generic_agent_ui.py",
     "stock_market": "src/agent/ui/generic_agent_ui.py",

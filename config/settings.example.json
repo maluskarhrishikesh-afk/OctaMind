@@ -11,5 +11,13 @@
     "oauth_credentials_path": "config/credentials.json",
     "gmail_token_path": "config/token.json",
     "drive_token_path": "config/drive_token.json"
+  },
+
+  "whatsapp": {
+    "_comment": "Meta WhatsApp Cloud API credentials — see documentation/WHATSAPP_SETUP.md",
+    "access_token": "EAAxxxxxxxxxx_your_permanent_access_token",
+    "phone_number_id": "123456789012345",
+    "verify_token": "any_secret_string_you_choose",
+    "webhook_port": 9001
   }
 }

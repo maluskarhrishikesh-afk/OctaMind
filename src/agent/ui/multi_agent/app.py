@@ -442,14 +442,19 @@ def main() -> None:
             # ── Single-agent shortcut — bypass the workflow planner ───────────
             if len(agents_needed) == 1:
                 single_agent = agents_needed[0]
-                icon = "📁" if single_agent == "drive" else "✉️"
-                label = "Drive" if single_agent == "drive" else "Email"
+                icons = {"drive": "📁", "email": "✉️", "files": "🗂️"}
+                labels = {"drive": "Drive", "email": "Email", "files": "Files"}
+                icon = icons.get(single_agent, "🤖")
+                label = labels.get(single_agent, single_agent.title())
                 st.markdown(f"{icon} **Routing to {label} Agent…**")
                 with st.spinner(f"Running {label} Agent…"):
                     try:
                         if single_agent == "drive":
                             from src.agent.ui.drive_agent.orchestrator import execute_with_llm_orchestration as _drive_exec
                             result = _drive_exec(command, agent_id=None)
+                        elif single_agent == "files":
+                            from src.agent.ui.files_agent.orchestrator import execute_with_llm_orchestration as _files_exec
+                            result = _files_exec(command, agent_id=None)
                         else:
                             from src.agent.ui.email_agent.orchestrator import execute_with_llm_orchestration as _email_exec
                             result = _email_exec(command, agent_id=None)
@@ -460,6 +465,9 @@ def main() -> None:
                             if single_agent == "drive":
                                 from src.agent.ui.drive_agent.app import _compose_drive_response
                                 reply = _compose_drive_response(result, action, command)
+                            elif single_agent == "files":
+                                from src.agent.ui.files_agent.app import _compose_files_response
+                                reply = _compose_files_response(result, command)
                             else:
                                 from src.agent.ui.email_agent.app import _compose_email_response
                                 reply = _compose_email_response(result, action, command)
@@ -472,10 +480,9 @@ def main() -> None:
                 st.session_state.is_processing = False
                 st.rerun()
 
-            # ── Multi-agent workflow path (both Drive + Email needed) ─────────
-            agent_labels = " + ".join(
-                ("📁 Drive" if a == "drive" else "✉️ Email") for a in agents_needed
-            )
+            # ── Multi-agent workflow path ──────────────────────────────────────
+            _badge = {"drive": "📁 Drive", "email": "✉️ Email", "files": "🗂️ Files"}
+            agent_labels = " + ".join(_badge.get(a, a.title()) for a in agents_needed)
             st.markdown(f"🔀 **Routing:** {agent_labels}")
 
             # Execute with live step display

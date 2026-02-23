@@ -9,7 +9,8 @@ For implementation status and known limitations, see [IMPLEMENTATION_STATUS.md](
 
 **Script:** `src/agent/ui/email_agent_ui.py`  
 **Backend:** Gmail API via `src/email/`  
-**LLM loop:** ReAct (up to 6 iterations, `max_tokens=3000`)
+**LLM loop:** ReAct (up to 6 iterations, `max_tokens=3000`)  
+**Setup Guide:** [EMAIL_SETUP.md](EMAIL_SETUP.md)
 
 ### What It Can Do
 
@@ -52,7 +53,8 @@ export_contacts()
 
 **Script:** `src/agent/ui/drive_agent_ui.py`  
 **Backend:** Drive API via `src/drive/`  
-**LLM loop:** ReAct (up to 6 iterations, `max_tokens=3000`)
+**LLM loop:** ReAct (up to 6 iterations, `max_tokens=3000`)  
+**Setup Guide:** [EMAIL_SETUP.md — Drive section](EMAIL_SETUP.md#also-setting-up-google-drive)
 
 ### What It Can Do
 
@@ -88,6 +90,195 @@ find_duplicates()
 summarize_file(file_id)
 generate_drive_report()
 ```
+
+---
+
+## WhatsApp Agent
+
+**Script:** `src/agent/ui/whatsapp_agent_ui.py`  
+**Backend:** Meta WhatsApp Cloud API via `src/whatsapp/`  
+**LLM loop:** ReAct (same pattern as Email/Drive agents)  
+**Setup guide:** [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md)
+
+### What It Can Do
+
+| Category | Example commands |
+|----------|----------------|
+| **Send** | "Send hi to 919876543210" · "Message Alice saying I'll be late" |
+| **Read** | "Show unread messages" · "Show recent messages" |
+| **Reply** | "Reply to message wamid.xxx saying thanks" |
+| **Search** | "Search for invoice" · "Messages from last week" |
+| **Contacts** | "List my contacts" · "Who messages me most?" |
+| **Groups** | "Show my groups" · "Messages in group <id>" |
+| **AI** | "Summarize chat with 919876543210" · "Draft a message about project update" |
+| **Translate** | "Translate message wamid.xxx to Hindi" |
+| **Schedule** | "Schedule message for tomorrow 9am" · "Show scheduled messages" |
+| **Analytics** | "WhatsApp stats 30 days" · "Who messages me most?" |
+
+### Tools Available (36 total)
+
+```
+# Core Messaging (7)
+send_message(to, body)
+send_media(to, media_type, url, caption, filename)
+send_template(to, template_name, language_code)
+reply_to_message(to, original_message_id, body)
+get_messages(limit)
+get_unread_messages(limit)
+mark_as_read(message_id)
+
+# Contacts (4)
+list_contacts(limit)
+get_contact_info(phone)
+get_frequent_contacts(limit)
+set_contact_name(phone, name)
+
+# Groups (3)
+list_groups(limit)
+get_group_info(group_id)
+get_group_messages(group_id, limit)
+
+# Search (4)
+search_messages(query, limit)
+get_conversation(phone, limit)
+get_messages_by_date(start_date, end_date, limit)
+get_media_messages(limit)
+
+# AI Smart Features (8)
+summarize_conversation(phone, limit)
+extract_action_items(phone, limit)
+draft_message(to, context)
+generate_reply(message_id)
+detect_urgent_messages(limit)
+extract_key_info(message_id)
+translate_message(message_id, target_language)
+sentiment_analysis(phone, limit)
+
+# Scheduling (5)
+schedule_message(to, body, send_time)
+list_scheduled_messages()
+cancel_scheduled_message(scheduled_id)
+set_auto_reply(enabled, message)
+get_auto_reply_config()
+
+# Analytics (4)
+get_message_stats(days)
+get_response_time(phone)
+get_activity_report(days)
+get_top_senders(limit)
+
+# Cross-Agent (2)
+forward_to_email(message_id, to_email, subject)
+share_drive_file(to, file_id, message)
+```
+
+### Architecture Notes
+
+- **Inbound messages** arrive via a FastAPI webhook server (port 9001) and are stored in `data/whatsapp_messages.json`
+- **Outbound messages** are sent directly via the Meta Graph API
+- **Contacts and groups** are discovered automatically from incoming messages
+- Requires `fastapi`, `uvicorn`, `requests`, and `python-dateutil` (not in base requirements)
+- See [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md) for full setup, ngrok config, and testing guide
+
+---
+
+## Files Agent
+
+**Script:** `src/agent/ui/files_agent_ui.py`  
+**Backend:** Python stdlib (`pathlib`, `shutil`, `zipfile`, `hashlib`, `os`) — no credentials required  
+**LLM loop:** ReAct (same pattern as Email/Drive/WhatsApp agents)  
+**Setup guide:** [FILES_SETUP.md](FILES_SETUP.md)
+
+### What It Can Do
+
+| Category | Example commands |
+|----------|----------------|
+| **Files** | "List my Downloads folder" · "Copy report.pdf to D:/Backup" · "Rename old.txt to new.txt" |
+| **Search** | "Find all PDFs in D:/Documents" · "Files modified last 7 days" · "Find large files on C:" |
+| **Duplicates** | "Find duplicate files in D:/Photos" · "Find empty folders in C:/Users/me" |
+| **Archives** | "Zip my Documents folder" · "Unzip archive.zip to D:/Extracted" · "List contents of backup.zip" |
+| **Organise** | "Organise D:/Downloads by file type" · "Organise D:/Photos by date" · "Bulk rename files" |
+| **Disk** | "Show all drives" · "Disk usage on C:" · "How big is my Documents folder?" |
+| **Read** | "Read notes.txt" · "Preview data.csv" · "Tail app.log last 50 lines" |
+| **AI** | "Summarize D:/Finance/budget.txt" · "Analyse my Downloads" · "Suggest how to organise D:/Desktop" |
+| **Cross-agent** | "Email report.pdf to alice@example.com" · "Upload D:/report.pdf to Google Drive" |
+
+### Tools Available (48 total)
+
+```
+# File Operations (8)
+list_directory(path, limit, show_hidden)
+get_file_info(path)
+copy_file(source, destination, overwrite)
+move_file(source, destination, overwrite)
+delete_file(path, permanent)
+create_folder(path)
+rename_file(path, new_name)
+open_file(path)
+
+# Search (6)
+search_by_name(root, pattern, limit, recursive)
+search_by_extension(root, extensions, limit, recursive)
+search_by_date(root, since, until, limit)
+search_by_size(root, min_bytes, max_bytes, limit)
+find_duplicates(root, limit)
+find_empty_folders(root, limit)
+
+# Archives (5)
+zip_files(sources, output_path)
+zip_folder(folder_path, output_path)
+unzip_file(archive_path, destination)
+list_archive_contents(archive_path)
+get_archive_info(archive_path)
+
+# Organiser (7)
+bulk_rename(folder, pattern, replacement, dry_run)
+organize_by_type(folder, dry_run)
+organize_by_date(folder, dry_run)
+move_files_matching(src_folder, dest_folder, pattern, dry_run)
+delete_files_matching(folder, pattern, dry_run)
+clean_empty_folders(folder, dry_run)
+deduplicate_files(folder, dry_run)
+
+# Disk (5)
+list_drives()
+get_disk_usage(path)
+get_directory_size(path)
+find_large_files(root, min_bytes, limit)
+get_recently_modified(root, hours, limit)
+
+# Reader (6)
+read_text_file(path, max_lines, start_line)
+get_file_stats(path)
+preview_csv(path, rows)
+read_json_file(path)
+tail_log(path, lines)
+calculate_file_hash(path, algorithm)
+
+# AI Smart Features (6)
+summarize_file(path, max_chars)
+analyze_folder(path)
+suggest_organization(path)
+generate_rename_suggestions(folder, limit)
+find_related_files(path, limit)
+describe_file(path)
+
+# Cross-Agent (5)
+zip_and_email(source, to_email, subject, body)
+zip_and_upload_to_drive(source, drive_folder_id)
+email_file(file_path, to_email, subject, body)
+upload_file_to_drive(file_path, drive_folder_id)
+send_file_via_whatsapp(file_path, to)
+```
+
+### Architecture Notes
+
+- **No credentials required** for core 43 tools — works on first launch
+- **Cross-agent tools** (5) gracefully handle `ImportError` if Gmail/Drive/WhatsApp not configured
+- **Safety:** `_is_safe_path()` blocks operations on `C:/Windows`, `C:/System32`, `C:/Program Files`, and similar Linux paths
+- **Destructive operations** (delete, bulk remove, deduplicate) default to `dry_run=True`
+- **Optional:** `send2trash` for Recycle Bin support (`pip install send2trash`)
+- See [FILES_SETUP.md](FILES_SETUP.md) for a full testing guide with expected outputs
 
 ---
 

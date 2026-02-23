@@ -2,7 +2,7 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
-Last updated: 2026-02-23
+Last updated: 2026-02-24
 
 ---
 
@@ -31,7 +31,8 @@ All tools described in TOOL_REFERENCE.md are implemented and wired to the Google
 | Analytics | storage_breakdown, list_large_files, list_old_files, list_recently_modified, find_orphaned_files, sharing_report, generate_drive_report, get_usage_insights | ✅ |
 
 ### Email Agent — 47 Tools
-All tools described in TOOL_REFERENCE.md are implemented and wired to the Gmail API.
+All tools described in TOOL_REFERENCE.md are implemented and wired to the Gmail API.  
+**Setup:** Full guide at `documentation/EMAIL_SETUP.md`.
 
 | Category | Tools | Status |
 |----------|-------|--------|
@@ -42,6 +43,42 @@ All tools described in TOOL_REFERENCE.md are implemented and wired to the Gmail 
 | Action items | extract_action_items, get_all_pending_actions, mark_action_complete, get_saved_tasks, mark_for_followup, get_pending_followups, send_followup_reminder, mark_followup_done, dismiss_followup | ✅ |
 | Calendar | extract_calendar_events, suggest_calendar_entry, export_to_calendar | ✅ |
 | Contacts & analytics | get_frequent_contacts, get_contact_summary, suggest_vip_contacts, export_contacts, extract_unsubscribe_link, calculate_response_time, get_email_stats, get_productivity_insights, visualize_patterns, generate_weekly_report | ✅ |
+
+### WhatsApp Agent — 36 Tools
+All tools described in WHATSAPP_SETUP.md are implemented and wired to the Meta WhatsApp Cloud API.
+
+| Category | Tools | Status |
+|----------|-------|--------|
+| Core messaging | send_message, send_media, send_template, reply_to_message, get_messages, get_unread_messages, mark_as_read | ✅ |
+| Contacts | list_contacts, get_contact_info, get_frequent_contacts, set_contact_name | ✅ |
+| Groups | list_groups, get_group_info, get_group_messages | ✅ |
+| Search & retrieval | search_messages, get_conversation, get_messages_by_date, get_media_messages | ✅ |
+| AI smart features | summarize_conversation, extract_action_items, draft_message, generate_reply, detect_urgent_messages, extract_key_info, translate_message, sentiment_analysis | ✅ |
+| Scheduling | schedule_message, list_scheduled_messages, cancel_scheduled_message, set_auto_reply, get_auto_reply_config | ✅ |
+| Analytics | get_message_stats, get_response_time, get_activity_report, get_top_senders | ✅ |
+| Cross-agent | forward_to_email, share_drive_file | ✅ |
+
+**Webhook server:** FastAPI + uvicorn on port 9001; inbound messages stored in `data/whatsapp_messages.json`.  
+**Credentials:** Configured in `config/settings.json["whatsapp"]` — `access_token` + `phone_number_id` required.  
+**Setup:** Full guide at `documentation/WHATSAPP_SETUP.md`.
+
+### Files Agent — 48 Tools
+All tools use Python stdlib only (`pathlib`, `shutil`, `zipfile`, `hashlib`, `os`). No credentials required for 43/48 tools.
+
+| Category | Tools | Status |
+|----------|-------|--------|
+| File operations | list_directory, get_file_info, copy_file, move_file, delete_file, create_folder, rename_file, open_file | ✅ |
+| Search | search_by_name, search_by_extension, search_by_date, search_by_size, find_duplicates, find_empty_folders | ✅ |
+| Archives | zip_files, zip_folder, unzip_file, list_archive_contents, get_archive_info | ✅ |
+| Organiser | bulk_rename, organize_by_type, organize_by_date, move_files_matching, delete_files_matching, clean_empty_folders, deduplicate_files | ✅ |
+| Disk | list_drives, get_disk_usage, get_directory_size, find_large_files, get_recently_modified | ✅ |
+| Reader | read_text_file, get_file_stats, preview_csv, read_json_file, tail_log, calculate_file_hash | ✅ |
+| AI smart features | summarize_file, analyze_folder, suggest_organization, generate_rename_suggestions, find_related_files, describe_file | ✅ |
+| Cross-agent | zip_and_email, zip_and_upload_to_drive, email_file, upload_file_to_drive, send_file_via_whatsapp | ✅ |
+
+**Credentials:** None required for core 43 tools. Gmail/Drive OAuth needed for 5 cross-agent tools.  
+**Safety:** `_is_safe_path()` blocks ops on system directories; destructive ops default to `dry_run=True`.  
+**Setup:** Full guide at `documentation/FILES_SETUP.md`.
 
 ### Multi-Agent Hub
 - [x] Drive-only command routing → Drive Agent direct
@@ -56,10 +93,14 @@ All tools described in TOOL_REFERENCE.md are implemented and wired to the Gmail 
 - [x] Composed final response from all agent results
 - [x] **Hard-coded `__multi_agent__` personality** — warm, proactive, protective personal-assistant character baked in as prose; immune to personality trait slider edits
 - [x] **`collective_consciousness.md`** — synthesised from every sub-agent's `consciousness.md` each consolidation cycle; gives the hub a cross-domain mental model of the user
+- [x] **WhatsApp agent** registered in `agent_registry.py` — available for multi-agent workflows
+- [x] **Files agent** registered in `agent_registry.py` — available for multi-agent workflows
 
 ### UI
 - [x] Streamlit chat UI for Drive Agent (port 8502)
 - [x] Streamlit chat UI for Email Agent (port 8503)
+- [x] Streamlit chat UI for WhatsApp Agent (WhatsApp green theme #25d366)
+- [x] Streamlit chat UI for Files Agent (blue theme #4a90d9 — no credentials required)
 - [x] Streamlit chat UI for Multi-Agent Hub (port 8504)
 - [x] Agent Hub management UI (port 8501)
 - [x] `start.py` / `stop.py` for launching/stopping all UIs

@@ -46,6 +46,28 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
         "module": "src.agent.ui.email_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
+    "whatsapp": {
+        "description": (
+            "WhatsApp agent. Handles: send/receive text and media messages, "
+            "reply to messages, manage contacts and groups, search conversations, "
+            "schedule messages, set auto-reply, summarize chats, extract action items, "
+            "draft and translate messages, detect urgent messages, sentiment analysis, "
+            "message analytics, and cross-agent forwarding to email or Drive."
+        ),
+        "module": "src.agent.ui.whatsapp_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
+    "files": {
+        "description": (
+            "Files Agent. Handles: list/copy/move/delete/rename local files and folders, "
+            "search by name/extension/date/size, find duplicates, zip/unzip archives, "
+            "bulk organise by type or date, read text/CSV/JSON files, disk usage analytics, "
+            "AI file summarisation and folder analysis, and cross-agent workflows "
+            "(zip+email, zip+Drive upload, attach file to email)."
+        ),
+        "module": "src.agent.ui.files_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
     # ── Add future agents here, e.g.: ───────────────────────────────────────
     # "calendar": {
     #     "description": "Google Calendar agent. Handles: create/read/update/delete events...",

@@ -43,12 +43,20 @@ _MAX_REACT_ITERATIONS = 8
 
 
 def _react_system_prompt() -> str:
+    from pathlib import Path as _Path
+    home = _Path.home()
+    path_ctx = (
+        f"\nSystem path context (use in instructions to the files agent):\n"
+        f"  Home: {home} | Downloads: {home / 'Downloads'} | "
+        f"Desktop: {home / 'Desktop'} | Documents: {home / 'Documents'}\n"
+        f"Always pass full absolute paths when delegating to the files agent.\n"
+    )
     caps = get_capabilities_text()
     return f"""You are a multi-agent workflow orchestrator. Satisfy the user's request by coordinating specialized agents.
 
 Available agents:
 {caps}
-
+{path_ctx}
 Each turn output exactly one JSON object — no markdown code fences:
 {{
   "thought": "<reasoning: what has been done so far, what is still needed>",

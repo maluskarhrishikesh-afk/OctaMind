@@ -1,6 +1,6 @@
 # Collective Consciousness
 
-> Last synthesised: 2026-02-23 12:19
+> Last synthesised: 2026-02-23 14:48
 
 > Cross-agent synthesis: a unified picture of the user assembled from
 > every specialised agent's individual consciousness layer.
@@ -24,7 +24,10 @@
 
 ## Composite Trust Baseline
 
-*(Building baseline — more interactions needed)*
+**ba3a0a2c:** Trust & Safety Profile
+- (Normal transaction patterns, usual contacts, baseline for anomaly detection)
+**d90d84d6:** Trust & Safety Profile
+- (Normal transaction patterns, usual contacts, baseline for anomaly detection)
 
 ## Cross-Domain Patterns
 

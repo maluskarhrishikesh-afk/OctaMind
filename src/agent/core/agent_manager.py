@@ -125,6 +125,18 @@ class AgentManager:
             'icon': '📈',
             'capabilities': ['track_price', 'market_trends', 'portfolio', 'news', 'alerts']
         },
+        'whatsapp': {
+            'name': 'WhatsApp Agent',
+            'description': 'Send and receive WhatsApp messages, manage contacts, schedule messages, and analyse conversations',
+            'icon': '💬',
+            'capabilities': ['send', 'receive', 'search', 'schedule', 'analytics', 'ai_features']
+        },
+        'files': {
+            'name': 'Files Agent',
+            'description': 'Manage, search, organise and analyse local files and folders',
+            'icon': '🗂️',
+            'capabilities': ['search', 'organise', 'archive', 'read', 'analyse', 'cross_agent']
+        },
         'custom': {
             'name': 'Custom Agent',
             'description': 'Build your own agent with custom capabilities',
