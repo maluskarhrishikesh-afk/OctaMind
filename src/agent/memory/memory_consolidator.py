@@ -172,6 +172,11 @@ class MemoryConsolidator:
         if self._should_update_consciousness():
             self._update_consciousness_layer()
 
+        # Step 6 (multi-agent only): Synthesise collective consciousness
+        from src.agent.memory.agent_memory import MULTI_AGENT_ID
+        if self.memory.agent_id == MULTI_AGENT_ID:
+            self._update_collective_consciousness()
+
         self.last_consolidation = datetime.now()
 
         # Persist state to survive restarts
@@ -453,6 +458,61 @@ class MemoryConsolidator:
                 'description': f"Prefers {most_common_complexity.replace('_', ' ')} ({percentage:.0f}% of tasks)"
             })
 
+        # ── Scheduled / Day-of-week behaviour detection ────────────────────────
+        # Core insight: "user deletes spam every Friday", "sends OOO on Fridays"
+        # We look for (day-of-week, action_keyword) pairs that appear 3+ times.
+        _DAYS = ['monday', 'tuesday', 'wednesday',
+                 'thursday', 'friday', 'saturday', 'sunday']
+        _ACTION_KEYWORDS = {
+            'delete': ['delete', 'remove', 'clear', 'trash', 'spam'],
+            'send': ['send', 'compose', 'reply', 'forward', 'draft'],
+            'schedule': ['schedule', 'calendar', 'invite', 'meeting', 'event'],
+            'ooo': ['out of office', 'ooo', 'vacation', 'away'],
+            'archive': ['archive', 'file', 'folder', 'organiz'],
+            'review': ['read', 'check', 'review', 'open', 'list'],
+        }
+
+        day_action_combos: dict[str, int] = defaultdict(int)
+
+        for interaction in interactions:
+            ts = interaction.get('timestamp', '')
+            cmd = (interaction.get('command', '') + ' ' +
+                   interaction.get('action', '')).lower()
+            if not ts or not cmd:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts)
+                day_name = _DAYS[dt.weekday()]
+                hour = dt.hour
+            except Exception:
+                continue
+
+            for action_label, keywords in _ACTION_KEYWORDS.items():
+                if any(kw in cmd for kw in keywords):
+                    day_action_combos[f"{day_name}|{action_label}"] += 1
+                    # Also track hour-of-day habits (e.g. "sends emails at 9am")
+                    hour_bucket = f"{hour:02d}:00"
+                    day_action_combos[f"{hour_bucket}|{action_label}"] += 1
+
+        for combo_key, occurrences in day_action_combos.items():
+            if occurrences >= 3:
+                parts = combo_key.split('|')
+                if len(parts) != 2:
+                    continue
+                time_part, action_part = parts
+                # Prettify
+                if ':' in time_part:
+                    label = f"around {time_part}"
+                else:
+                    label = f"on {time_part.capitalize()}s"
+                new_habits.append({
+                    'type': 'Scheduled Behaviour',
+                    'description': (
+                        f"Tends to {action_part} {label} "
+                        f"(seen {occurrences}\u00d7)"
+                    ),
+                })
+
         return new_habits
 
     def _add_confirmed_habits(self, habits: List[Dict[str, str]]):
@@ -617,97 +677,204 @@ class MemoryConsolidator:
 
     def _update_consciousness_layer(self):
         """
-        Update consciousness meta-summary layer
+        Update consciousness meta-summary layer.
 
-        Synthesizes:
-        - User profile evolution
-        - Core pattern recognition
-        - Strategic direction insights
+        Synthesises a manager-level mental model of the user by reading
+        ALL memory layers: working, episodic, semantic, and habits.
+        This gives the richest possible picture of the user.
         """
         logger.info("Updating consciousness layer...")
 
-        # Analyze semantic memory for meta-patterns
+        now_str = datetime.now().strftime("%Y-%m-%d")
+
+        # ── Gather all memory layers ─────────────────────────────────────────
         semantic = self.memory.get_semantic_memory()
-        habits = self.memory.get_habits()
+        habits   = self.memory.get_habits()
+        recent_events = self.memory.get_recent_events(count=30)
+        recent_interactions = self.memory.get_recent_interactions(count=50)
 
-        # Extract user profile evolution
-        profile_update = self._synthesize_user_profile(semantic, habits)
-        if profile_update:
-            self.memory.update_consciousness(
-                "User Profile Evolution", profile_update)
+        # ── Who Is This Person? ——————————————————————————————————————---------
+        profile_lines = [l.strip() for l in semantic.split('\n')
+                         if l.strip().startswith('-') and len(l.strip()) > 5]
+        profile_section = (
+            f"**Last updated:** {now_str}\n\n"
+            + ("\n".join(profile_lines[:8]) if profile_lines
+               else "*(Still building understanding — more interactions needed)*")
+        )
+        self.memory.update_consciousness("Who Is This Person?", profile_section)
 
-        # Extract core patterns
-        pattern_update = self._synthesize_core_patterns(semantic, habits)
-        if pattern_update:
+        # ── Current Life / Work Chapter ——————————————————————————————---------
+        # Use the most recent high-importance episodic events as chapter signals
+        high_events = [e for e in recent_events if e.get('importance') == 'High']
+        if high_events:
+            chapter_lines = []
+            for ev in high_events[-5:]:
+                chapter_lines.append(
+                    f"- [{ev.get('date', '?')}] {ev.get('insight') or ev.get('event', '')}")
+            chapter_section = (
+                f"**Last updated:** {now_str}\n\n"
+                "Recent high-signal events suggesting current context:\n\n"
+                + "\n".join(chapter_lines)
+            )
             self.memory.update_consciousness(
-                "Core Pattern Recognition", pattern_update)
+                "Current Life / Work Chapter", chapter_section)
+
+        # ── How They Think & Communicate ——————————————————————————————--------
+        interaction_styles: list[str] = []
+        for i in recent_interactions:
+            cmd = i.get('command', '').lower()
+            if any(w in cmd for w in ['can you', 'could you', 'please', 'would you']):
+                interaction_styles.append('polite-request')
+            elif cmd.endswith('?'):
+                interaction_styles.append('question')
+            else:
+                interaction_styles.append('direct-command')
+
+        style_counter = Counter(interaction_styles)
+        dominant_style = style_counter.most_common(1)[0][0] if style_counter else 'unknown'
+        style_section = (
+            f"**Last updated:** {now_str}\n\n"
+            f"Dominant interaction style: **{dominant_style}** "
+            f"({style_counter.get(dominant_style, 0)} of {len(interaction_styles)} recent interactions)\n"
+        )
+        self.memory.update_consciousness(
+            "How They Think & Communicate", style_section)
+
+        # ── Where They Need the Most Help ——————————————————————————————-------
+        # Look at failed/error interactions and recurring commands
+        error_interactions = [i for i in recent_interactions
+                              if i.get('status') == 'error']
+        command_freq = Counter(
+            i.get('action', '') for i in recent_interactions if i.get('action')
+        )
+        freq_summary = ", ".join(
+            f"{action} ({cnt}x)"
+            for action, cnt in command_freq.most_common(5)
+        )
+        help_section = (
+            f"**Last updated:** {now_str}\n\n"
+            f"Most-used actions: {freq_summary or 'N/A'}\n"
+            f"Errors encountered: {len(error_interactions)}\n"
+        )
+        self.memory.update_consciousness(
+            "Where They Need the Most Help", help_section)
+
+        # ── Trust & Safety Profile ——————————————————————————————--------------
+        # Build a lightweight baseline from confirmed habits and timing patterns
+        habit_content = habits
+        timing_habits = [l for l in habit_content.split('\n')
+                         if 'timing' in l.lower() or 'pattern' in l.lower()
+                         or 'routine' in l.lower()]
+        safety_section = (
+            f"**Last updated:** {now_str}\n\n"
+            "Established normal patterns (deviations may signal anomalies):\n\n"
+            + ("\n".join(timing_habits[:5]) if timing_habits
+               else "*(Building baseline — more interactions needed)*")
+        )
+        self.memory.update_consciousness(
+            "Trust & Safety Profile", safety_section)
 
         self.last_consciousness_update = datetime.now()
-
-        # Persist updated consciousness timestamp
         self._save_state()
+        logger.info("Consciousness layer updated (all memory layers used)")
 
-        logger.info("Consciousness layer updated")
-
-    def _synthesize_user_profile(self, semantic: str, habits: str) -> str:
+    def _update_collective_consciousness(self) -> None:
         """
-        Synthesize user profile from semantic memory and habits
+        Synthesise collective_consciousness.md for the multi-agent hub.
 
-        Args:
-            semantic: Semantic memory content
-            habits: Habits content
-
-        Returns:
-            Synthesized profile text
+        Reads consciousness.md from every registered agent and combines
+        them into a unified cross-agent mental model of the user.
+        Only runs for the __multi_agent__ agent.
         """
-        # Extract key phrases from semantic memory
-        lines = semantic.split('\n')
-        preferences = [l for l in lines if 'prefer' in l.lower()
-                       or 'like' in l.lower()]
+        from src.agent.memory.agent_memory import get_agent_memory
 
-        if preferences or habits:
-            synthesis = f"**Updated:** {datetime.now().strftime('%Y-%m-%d')}\n\n"
+        if self.memory.collective_consciousness_path is None:
+            return
 
-            if preferences:
-                synthesis += "User demonstrates clear preferences in email management:\n"
-                synthesis += "\n".join(
-                    f"- {p.strip()}" for p in preferences[:5])
-                synthesis += "\n\n"
+        logger.info("Updating collective consciousness...")
 
-            synthesis += "Behavioral patterns have stabilized around systematic email interaction."
+        agents_json = Path(__file__).parent.parent.parent.parent / "agents.json"
 
-            return synthesis
+        agent_ids: list[str] = []
+        try:
+            if agents_json.exists():
+                data = json.loads(agents_json.read_text(encoding="utf-8"))
+                agent_ids = [a.get("id", "") for a in data.get("agents", []) if a.get("id")]
+        except Exception as exc:
+            logger.error(f"Could not read agents.json for collective consciousness: {exc}")
+            return
 
-        return ""
+        if not agent_ids:
+            logger.debug("No registered agents — skipping collective consciousness update")
+            return
 
-    def _synthesize_core_patterns(self, semantic: str, habits: str) -> str:
-        """
-        Synthesize core patterns from memory
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+        sections: list[str] = [
+            "# Collective Consciousness\n",
+            f"> Last synthesised: {now_str}\n",
+            "> Cross-agent synthesis: a unified picture of the user assembled from",
+            "> every specialised agent's individual consciousness layer.\n",
+            "---\n",
+        ]
 
-        Args:
-            semantic: Semantic memory content
-            habits: Habits content
+        per_agent_insights: list[str] = []
+        trust_signals: list[str] = []
 
-        Returns:
-            Synthesized pattern text
-        """
-        # Analyze habits for patterns
-        habit_lines = habits.split('\n')
-        communication = [l for l in habit_lines if 'Communication' in l]
-        work = [l for l in habit_lines if 'Work' in l]
+        for agent_id in agent_ids:
+            try:
+                agent_mem = get_agent_memory(agent_id)
+                consciousness_path = agent_mem.consciousness_path
 
-        if communication or work:
-            synthesis = f"**Updated:** {datetime.now().strftime('%Y-%m-%d')}\n\n"
-            synthesis += "Emerging patterns in user behavior:\n\n"
+                if not consciousness_path.exists():
+                    continue
 
-            if communication:
-                synthesis += "**Communication:** Consistent interaction style established.\n"
+                content = consciousness_path.read_text(encoding="utf-8")
 
-            if work:
-                synthesis += "**Work Rhythm:** Regular usage patterns detected.\n"
+                # Extract non-empty bullet points as insights
+                bullets = [
+                    line.strip() for line in content.split("\n")
+                    if line.strip().startswith("-")
+                    and "(" not in line  # skip placeholder text
+                    and len(line.strip()) > 10
+                ]
 
-            synthesis += "\nUser exhibits systematic approach to email management with growing sophistication."
+                if bullets:
+                    per_agent_insights.append(
+                        f"### {agent_id}\n" + "\n".join(bullets[:8])
+                    )
 
-            return synthesis
+                # Trust & Safety section extraction
+                if "Trust & Safety Profile" in content:
+                    idx = content.find("Trust & Safety Profile")
+                    snippet = content[idx: idx + 400].split("##")[0].strip()
+                    trust_signals.append(f"**{agent_id}:** {snippet[:200]}")
 
-        return ""
+            except Exception as exc:
+                logger.warning(f"Could not read consciousness for {agent_id}: {exc}")
+
+        # ── Build the collective document ────────────────────────────────────
+        sections.append("## Agent-Specific Insights\n")
+        if per_agent_insights:
+            sections.extend(per_agent_insights)
+        else:
+            sections.append("*(No agent has accumulated enough data yet)*")
+
+        sections.append("\n## Composite Trust Baseline\n")
+        if trust_signals:
+            sections.extend(trust_signals)
+        else:
+            sections.append("*(Building baseline — more interactions needed)*")
+
+        sections.append("\n## Cross-Domain Patterns\n")
+        sections.append("*(Automatically populated as agents accumulate memory)*")
+
+        sections.append("\n## Conflict / Inconsistency Log\n")
+        sections.append("*(Populated when agent models conflict on the same observation)*")
+
+        final_content = "\n".join(sections)
+        self.memory.collective_consciousness_path.write_text(
+            final_content, encoding="utf-8"
+        )
+        logger.info(
+            f"Collective consciousness updated from {len(agent_ids)} agent(s)."
+        )

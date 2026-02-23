@@ -13,8 +13,9 @@ Last updated: 2026-02-23
 - [x] ReAct loop (`reason_and_act`) — up to 6 iterations, 45s timeout, `max_tokens=3000`
 - [x] Intent classification (`classify_intent`) for multi-agent routing
 - [x] Agent process isolation — each agent runs as a separate `subprocess.Popen`
-- [x] Per-agent memory system (episodic, semantic, working, habits, personality, consciousness)
-- [x] Memory consolidation and archiving
+- [x] Per-agent memory system (working, episodic, semantic, personality, habits, consciousness)
+- [x] Memory consolidation, decay, and archiving
+- [x] **Global consolidation background thread** — starts at app launch, runs every 24 h across ALL agents (including inactive ones)
 - [x] Log files written to project root; truncated on every `start.py` launch
 - [x] 429 rate-limit error surfaced to user with wait-time estimate
 - [x] Single-agent shortcut in Multi-Agent Hub (bypasses planner for Drive-only or Email-only commands)
@@ -53,6 +54,8 @@ All tools described in TOOL_REFERENCE.md are implemented and wired to the Gmail 
 - [x] Artifact handoff between agents (`artifacts_out` dict + `{output_key.field}` token substitution)
 - [x] Drive → Email file path handoff: `artifacts_out["file_path"]` populated from `download_file` result
 - [x] Composed final response from all agent results
+- [x] **Hard-coded `__multi_agent__` personality** — warm, proactive, protective personal-assistant character baked in as prose; immune to personality trait slider edits
+- [x] **`collective_consciousness.md`** — synthesised from every sub-agent's `consciousness.md` each consolidation cycle; gives the hub a cross-domain mental model of the user
 
 ### UI
 - [x] Streamlit chat UI for Drive Agent (port 8502)
@@ -131,7 +134,7 @@ All tools described in TOOL_REFERENCE.md are implemented and wired to the Gmail 
 |-------|--------|--------|
 | GitHub Models rate limit (150 req/day, 15 req/min) | All agents fail with 429 after limit | Surfaced to user with wait-time; no workaround except waiting or switching model |
 | `max_tokens=3000` vs context window | Very long tool results may exceed context; LLM truncates | No chunking implemented |
-| Memory consolidation agent | Consolidation task runs on startup but output is not surfaced in UI | Low impact — memory still accumulates normally |
+| Memory consolidation agent | ~~Consolidation task runs on startup but output is not surfaced in UI~~ **FIXED** — `ConsolidationRunner` daemon thread boots with the dashboard and runs all agents every 24 h | Memory improves continuously even for idle agents |
 | Log file locked on Windows | Logs in `src/` may stay locked if processes don't exit cleanly | Truncated on next `start.py` |
 
 ---
@@ -175,6 +178,10 @@ src/
     llm/
       llm_parser.py          # GitHubModelsLLM — all LLM calls go through here
     memory/                  # Memory system (load/save/consolidate)
+      agent_memory.py        # AgentMemory — 6-layer per-agent storage + MULTI_AGENT_ID constant
+      memory_consolidator.py # MemoryConsolidator — pattern extraction, habit detection, consciousness update
+      consolidation_runner.py # ConsolidationRunner — daemon thread, runs all agents every 24 h
+      collective_memory.py   # get_collective_context() — episodic snapshot for multi-agent LLM context
     ui/
       drive_agent/
         app.py               # Streamlit UI + _compose_drive_response()
@@ -184,6 +191,8 @@ src/
         orchestrator.py      # execute_with_llm_orchestration() + _dispatch() + 47 Gmail tools + artifacts_out
       multi_agent/
         app.py               # Streamlit UI + routing + _compose_final_response()
+      dashboard/
+        app.py               # Agent Hub Streamlit entry — boots ConsolidationRunner + multi-agent memory on startup
     workflows/
       agent_registry.py      # AGENT_REGISTRY dict — one entry per agent (~10 tokens each)
       master_orchestrator.py # _build_planning_prompt() + plan_nl_workflow() + run_workflow()

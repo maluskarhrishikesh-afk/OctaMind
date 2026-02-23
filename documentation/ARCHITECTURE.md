@@ -124,18 +124,35 @@ detect_agents_needed()
 
 ## Memory System
 
-Each agent has a dedicated memory folder at `memory/<agent_id>/`. The system uses 6 layers:
+Each agent has a dedicated memory folder at `memory/<agent_id>/`. The system uses 6 layers (7 for the multi-agent hub):
 
 | File | Purpose | Sent to LLM |
 |------|---------|------------|
 | `working_memory.md` | Last 10 interactions | ✅ Always |
 | `episodic_memory.md` | Timestamped events | On-demand recall only |
-| `semantic_memory.md` | Learned user facts | ✅ Last 3000 chars |
-| `personality.md` | Agent's tone + identity | ✅ Full file |
-| `habits.md` | Patterns after 3+ repetitions | ✅ Last 3000 chars |
-| `consciousness.md` | Big-picture user model | ✅ Full file |
+| `semantic_memory.md` | Learned facts about the user — preferences, recurring needs, background | ✅ Last 3000 chars |
+| `personality.md` | Agent tone + identity. **Multi-agent: hard-coded protective persona, never overwritten by trait sliders** | ✅ Full file |
+| `habits.md` | Confirmed user behavioural patterns — time-of-day, day-of-week, action type. Requires 3+ occurrences | ✅ Last 3000 chars |
+| `consciousness.md` | Big-picture mental model of the user synthesised from ALL memory layers. Updated every 2–4 weeks | ✅ Full file |
+| `collective_consciousness.md` | **Multi-agent only.** Synthesis of every sub-agent's `consciousness.md`. Cross-domain user model | ✅ Full file |
 
-Consolidation runs automatically every 20 interactions or 24 hours (background thread). See [memory-system.md](../architecture/memory-system.md) for full details.
+### Consolidation
+
+A `ConsolidationRunner` daemon thread starts automatically when the dashboard boots. It:
+1. Runs an immediate consolidation pass across all registered agents on startup
+2. Repeats every 24 hours — covers **all** agents, including those not actively running
+
+Consolidation cycle per agent:
+1. Extract patterns from working memory → update `semantic_memory.md`
+2. Extract themes from episodic memory → update `semantic_memory.md`
+3. Detect habits (3+ occurrences, including day-of-week patterns) → update `habits.md`
+4. Apply 90-day decay (Low importance → delete, Medium → archive, High → keep)
+5. Update `consciousness.md` from all memory layers (if 2+ weeks since last update)
+6. **Multi-agent only:** synthesise `collective_consciousness.md` from all agent `consciousness.md` files
+
+### `__multi_agent__` Memory
+
+The multi-agent hub's memory files are created on first dashboard launch (not on first chat). Its `personality.md` is always restored to the hard-coded protective personal-assistant character on each init — it cannot be changed via the trait-slider UI.
 
 ---
 

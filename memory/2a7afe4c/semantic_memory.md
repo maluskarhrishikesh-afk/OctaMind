@@ -16,3 +16,27 @@
 
 ## Key Patterns
 - (Identifying patterns over time...)
+
+### 2026-02-23 - Usage Patterns
+**Action Preferences:**
+- react_response (performed 10 times)
+
+### 2026-02-23 - Episodic Themes
+**Recurring Events:**
+- react_response: list my recent files (occurred 2 times)
+- react_response: can you list all files in google drive? (occurred 2 times)
+
+**User Context:**
+- success (0 emails)
+
+### 2026-02-23 - Usage Patterns
+**Action Preferences:**
+- react_response (performed 10 times)
+
+### 2026-02-23 - Episodic Themes
+**Recurring Events:**
+- react_response: list my recent files (occurred 2 times)
+- react_response: can you list all files in google drive? (occurred 2 times)
+
+**User Context:**
+- success (0 emails)

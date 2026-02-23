@@ -2,7 +2,7 @@
 
 **Complete Implementation Guide & Reference**
 
-*Last Updated: February 22, 2026*
+*Last Updated: February 23, 2026*
 
 ---
 
@@ -25,23 +25,25 @@
 
 ## Overview
 
-The Cognitive Memory Architecture implements a **6-layer memory system** inspired by human cognitive processes. This system enables agents to:
+The Cognitive Memory Architecture implements a **6-layer memory system** (7 for the multi-agent hub) inspired by human cognitive processes. This system enables agents to:
 
 - ✅ Remember short-term interactions (Working Memory)
 - ✅ Store long-term events with timestamps (Episodic Memory)
-- ✅ Extract and maintain learned knowledge (Semantic Memory)
+- ✅ Extract and maintain learned knowledge about the **user** (Semantic Memory)
 - ✅ Maintain stable identity (Personality)
-- ✅ Learn behavioral patterns after 3+ confirmations (Habits)
-- ✅ Develop meta-level understanding (Consciousness)
+- ✅ Learn confirmed behavioural patterns after 3+ occurrences, including day-of-week and time-of-day habits (Habits)
+- ✅ Develop a big-picture manager-level mental model of the user — synthesised from ALL memory layers (Consciousness)
+- ✅ **Multi-agent only:** Synthesise a cross-domain user model from all sub-agents' consciousness layers (Collective Consciousness)
 
 ### Key Features
 
-- **Automatic Consolidation**: Runs every 20 interactions or 24 hours
-- **Pattern Extraction**: Automatically detects repeated behaviors
-- **Habit Learning**: Requires 3+ confirmations before establishing habits
-- **90-Day Decay**: Old memories archived based on importance
-- **State Persistence**: Survives agent restarts
+- **Automatic Consolidation**: `ConsolidationRunner` daemon thread starts with the app and runs every 24 h for **all** agents — including idle/stopped agents
+- **Pattern Extraction**: Automatically detects repeated behaviours
+- **Habit Learning**: Requires 3+ confirmations. Detects day-of-week patterns (e.g. “deletes spam every Friday”) and time-of-day patterns (e.g. “sends emails at 09:00”)
+- **90-Day Decay**: Old memories archived or deleted based on importance
+- **State Persistence**: Consolidation timestamps survive agent restarts
 - **LLM Integration**: Memory-aware responses
+- **Multi-Agent Hard-Coded Personality**: `__multi_agent__` personality is prose-level, protective, always restored on init — immune to trait-slider edits
 
 ---
 
@@ -52,26 +54,28 @@ The Cognitive Memory Architecture implements a **6-layer memory system** inspire
 | File                 | What it stores                                                        | Written by                                                       | Grows how fast                  |                        Sent to LLM?                         |                                  Cleanup                                   |
 | -------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------- | :---------------------------------------------------------: | :------------------------------------------------------------------------: |
 | `working_memory.md`  | The last 10 things the agent did or was asked                         | Every interaction                                                | Fast — auto-trimmed to 10 items |                    ✅ Last 10 interactions                   |                           Auto-trimmed in-place                            |
-| `episodic_memory.md` | Time-stamped events: what happened and why it matters                 | Every interaction (via `add_interaction`) + consolidation themes | Moderate                        | ❌ Not sent by default — loaded on-demand for recall queries | Items older than 90 days → `archive/` (⚠️ file rewrite not yet implemented) |
-| `semantic_memory.md` | Learned facts about the user — preferences, patterns, recurring needs | Consolidation engine                                             | Slow                            |                   ✅ Last 3 000 chars only                   |                     Never archived (caps protect LLM)                      |
-| `personality.md`     | Who the agent is: tone, communication style, goals                    | Manual / agent setup                                             | Barely at all                   |                   ✅ Full file (no cap)                      |                               Never changes                                |
-| `habits.md`          | Confirmed behavioural patterns (needs 3+ repetitions to form)         | Consolidation engine                                             | Slow                            |                     ✅ Last 3 000 chars                      |                     Never archived (caps protect LLM)                      |
-| `consciousness.md`   | Big-picture understanding of the user (like a manager's mental model) | Consolidation engine (every 2–4 weeks)                           | Very slow                       |                   ✅ Full file (no cap)                      |                               Never archived                               |
+| `episodic_memory.md` | Time-stamped events: what happened and why it matters                 | Every interaction (via `add_interaction`) + consolidation themes | Moderate                        | ❌ Not sent by default — loaded on-demand for recall queries | Items older than 90 days → `archive/` (Low → deleted, Medium → archived, High → kept) |
+| `semantic_memory.md` | Learned facts about the user — preferences, recurring needs, background, values, people | Consolidation engine                            | Slow                            |                   ✅ Last 3 000 chars only                   |                     Never archived (caps protect LLM)                      |
+| `personality.md`     | Who the agent is: tone, communication style, goals. **Multi-agent: hard-coded protective persona** | Manual / agent setup. Multi-agent: always restored on init | Barely at all |                   ✅ Full file (no cap)                      |                               Never changes                                |
+| `habits.md`          | Confirmed user behavioural patterns (3+ occurrences). Captures day-of-week, time-of-day, and action-type patterns | Consolidation engine | Slow |                     ✅ Last 3 000 chars                      |                     Never archived (caps protect LLM)                      |
+| `consciousness.md`   | Big-picture manager-level mental model of the user. Synthesised from ALL memory layers | Consolidation engine (every 2–4 weeks) | Very slow |                   ✅ Full file (no cap)                      |                               Never archived                               |
+| `collective_consciousness.md` | **Multi-agent only.** Cross-domain synthesis of every sub-agent’s `consciousness.md` | Consolidation engine (each cycle for `__multi_agent__`) | Very slow | ✅ Full file (no cap) | Never archived |
 
 ### Rule of thumb
 
 - **User sends a message** → `working_memory.md` gains one entry (oldest dropped if > 10).
-- **20 interactions or 24 hours pass** → consolidation runs and may update `episodic_memory.md`, `semantic_memory.md`, `habits.md`, `consciousness.md`.
-- **Event is 90 days old** → that specific event should move from `episodic_memory.md` to `archive/`. ⚠️ The decay rules are calculated but the actual file rewrite is not yet implemented (see §10).
-- **Every LLM call** → the last 10 interactions from working memory are sent. `personality.md` and `consciousness.md` are sent in full (no cap). `habits.md` is capped at 3 000 chars. `semantic_memory.md` is capped at 3 000 chars. `episodic_memory.md` is excluded by default (loaded on-demand for recall queries).
-- **User asks "do you remember X?"** → `recall_for_llm()` runs before the LLM call, searches episodic/working/semantic on demand, and injects only the matching entries into the prompt for that single turn.
+- **App boots** → `ConsolidationRunner` daemon thread starts immediately and runs a full consolidation pass for all agents. Subsequent passes run every 24 hours — even for stopped/inactive agents.
+- **Each consolidation cycle:** working memory patterns → `semantic_memory.md`; episodic themes → `semantic_memory.md`; day-of-week/time-of-day patterns → `habits.md`; consciousness update (if 2+ weeks); multi-agent → `collective_consciousness.md`.
+- **Event is 90 days old** → Low importance deleted, Medium moved to `archive/episodic_YYYY_MM.md`, High kept forever.
+- **Every LLM call** → last 10 working memory interactions sent. `personality.md` and `consciousness.md` sent in full. `habits.md` and `semantic_memory.md` capped at 3 000 chars. `episodic_memory.md` excluded by default (on-demand recall only). Multi-agent additionally sends `collective_consciousness.md` in full.
+- **User asks “do you remember X?”** → `recall_for_llm()` runs before the LLM call, searches episodic/working/semantic on demand, and injects only matching entries into the prompt for that single turn.
 
 ### What gets summarised vs archived
 
 | Action             | What happens                                                                                                                                      |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Summarised**     | `working_memory.md` entries are distilled into `semantic_memory.md` and `episodic_memory.md` by the consolidation engine                          |
-| **Archived**       | `episodic_memory.md` entries older than 90 days — Low → deleted, Medium → `archive/`. ⚠️ Logic is calculated but file rewrite not yet implemented. |
+| **Archived**       | `episodic_memory.md` entries older than 90 days — Low → deleted, Medium → `archive/episodic_YYYY_MM.md`. ✅ File rewrite implemented. |
 | **Trimmed**        | `working_memory.md` is trimmed in-place to the last 10 interactions                                                                               |
 | **Capped for LLM** | `semantic_memory.md`, `habits.md`, `personality.md`, `consciousness.md` are tail-capped before being added to the LLM prompt                      |
 
@@ -273,54 +277,56 @@ The Cognitive Memory Architecture implements a **6-layer memory system** inspire
 
 ---
 
-### Layer 6: Consciousness (Meta Summary)
+### Layer 6: Consciousness (Manager’s Mental Model)
 
-**Purpose**: High-level strategic understanding
+**Purpose**: Big-picture understanding of the user — synthesised from ALL memory layers
 
-**Characteristics**:
-- Meta-cognitive: Understanding of understanding
-- Long-term view: User's goals and evolution
-- Infrequently updated: Every 2-4 weeks
-- Synthesis of all layers: Big picture view
+**Characteristics**:  
+- Synthesised from working, episodic, semantic, and habits — not just semantic
+- Infrequently updated: Every 2–4 weeks
+- Covers 7 structured sections (who they are, what they care about, how they communicate, where they need help, trust baseline, trajectory, key insights)
 
 **Storage**: `memory/{agent_id}/consciousness.md`
 
-**Structure**:
-```markdown
-# Consciousness Layer
+**Sections**:
 
-## User Profile Evolution
-
-**Updated:** 2026-02-20
-
-User demonstrates systematic approach to email management with
-growing sophistication in automation preferences. Shows clear
-patterns of proactive inbox maintenance and efficiency focus.
-
-## Core Pattern Recognition
-
-User exhibits strong organizational tendencies:
-- Regular monitoring of email volume
-- Proactive spam/junk management
-- Preference for quantitative metrics (counts, summaries)
-- Values time efficiency over detailed exploration
-
-## Strategic Direction
-
-Moving towards automated email workflows. User seeks to minimize
-manual email management through intelligent filtering and
-automated responses. Future focus: predictive email prioritization.
-
-## Key Insights
-
-- High email volume professional (40+ emails/day)
-- Technical proficiency: Comfortable with natural language commands
-- Trust building: Increasingly complex tasks delegated to agent
-- Efficiency mindset: Values speed and accuracy equally
-```
+| Section | What it captures |
+|---------|------------------|
+| Who Is This Person? | Professional identity, role, context |
+| What Do They Care About Most? | Values, priorities, non-negotiables |
+| Current Life / Work Chapter | Phase they’re in right now |
+| How They Think & Communicate | Mental models, dominant interaction style |
+| Where They Need the Most Help | Frequent friction points, top actions |
+| Trust & Safety Profile | Normal patterns — baseline for anomaly detection |
+| Strategic Trajectory | Where they seem to be heading |
 
 **Implementation**: `agent_memory.py::update_consciousness()`  
 **Auto-updated by**: `memory_consolidator.py::_update_consciousness_layer()`
+
+---
+
+### Layer 7: Collective Consciousness *(Multi-Agent Hub only)*
+
+**Purpose**: Cross-domain synthesis of all sub-agents’ individual consciousness layers into a single unified picture of the user
+
+**Characteristics**:  
+- Only exists for `__multi_agent__` (`memory/__multi_agent__/collective_consciousness.md`)
+- Updated every consolidation cycle (not just every 2–4 weeks)
+- Aggregates non-placeholder bullets from each agent’s `consciousness.md`
+- Builds a composite trust baseline from all agents’ safety sections
+
+**Storage**: `memory/__multi_agent__/collective_consciousness.md`
+
+**Sections**:
+
+| Section | What it captures |
+|---------|------------------|
+| Agent-Specific Insights | Key bullets each agent has independently learned |
+| Composite Trust Baseline | Normal patterns across all services — for anomaly detection |
+| Cross-Domain Patterns | Behaviours that appear in multiple agents’ memory |
+| Conflict / Inconsistency Log | Cases where two agents have contradictory models |
+
+**Auto-updated by**: `memory_consolidator.py::_update_collective_consciousness()`
 
 ---
 
@@ -333,13 +339,22 @@ memory/
 ├── {agent_id}/
 │   ├── working_memory.md          # Last 10 interactions
 │   ├── episodic_memory.md         # Time-stamped events
-│   ├── semantic_memory.md         # Extracted knowledge
+│   ├── semantic_memory.md         # Learned facts about the user
 │   ├── personality.md             # Agent identity
-│   ├── habits.md                  # Learned patterns (3+)
-│   ├── consciousness.md           # Meta-level understanding
+│   ├── habits.md                  # Confirmed user behavioural patterns (3+)
+│   ├── consciousness.md           # Big-picture mental model of the user
 │   ├── consolidation_state.json   # Persistence state
 │   └── archive/                   # Old episodic memories
 │       └── episodic_2025_*.md
+└── __multi_agent__/             # Multi-agent hub (created on first dashboard launch)
+    ├── working_memory.md
+    ├── episodic_memory.md
+    ├── semantic_memory.md
+    ├── personality.md             # Hard-coded protective personal-assistant persona
+    ├── habits.md
+    ├── consciousness.md
+    ├── collective_consciousness.md # Cross-agent synthesis (unique to multi-agent)
+    └── archive/
 ```
 
 ### Core Classes
@@ -600,17 +615,20 @@ class MemoryConsolidator:
 
 ### Trigger Conditions
 
-**1. Counter-Based Trigger**
-- Triggers: Every 20 interactions
+**1. Global Background Thread (Primary — added Feb 2026)**
+- Implementation: `ConsolidationRunner` daemon thread (`src/agent/memory/consolidation_runner.py`)
+- Starts: Automatically when the Agent Hub dashboard boots (`dashboard/app.py` at import time)
+- First run: Immediately on startup
+- Subsequent runs: Every 24 hours
+- Scope: **All registered agents + `__multi_agent__`** — including stopped/inactive agents
+- Survives dashboard reruns: Yes (daemon thread lives with the Streamlit process)
+- Use case: Ensures memory improves continuously regardless of agent activity
+
+**2. Counter-Based Trigger (Per-Agent, Legacy)**
+- Triggers: Every 20 interactions within an active agent session
 - Reset: After each consolidation
 - Survives restarts: No (counter resets)
-- Use case: Active sessions with many interactions
-
-**2. Time-Based Trigger**
-- Triggers: Every 24 hours
-- Tracked: `consolidation_state.json`
-- Survives restarts: **YES** (persisted to disk)
-- Use case: Agent stopped overnight, low-activity periods
+- Use case: Active sessions that need more frequent consolidation
 
 **3. Manual Trigger**
 - Triggers: `memory.run_consolidation()` called directly
@@ -626,7 +644,7 @@ Analyzes last 50 interactions for:
 - Action preferences (count, list, delete patterns)
 - Error patterns
 
-**Output**: Updates `semantic_memory.md` → "Usage Patterns" section
+**Output**: Updates `semantic_memory.md` → “Usage Patterns” section
 
 **Step 2: Theme Extraction from Episodic Memory**
 
@@ -635,15 +653,15 @@ Analyzes events for:
 - Recurring event types (2+ occurrences)
 - Common contexts
 
-**Output**: Updates `semantic_memory.md` → "Episodic Themes" section
+**Output**: Updates `semantic_memory.md` → “Episodic Themes” section
 
-**Step 3: Habit Detection (3+ Confirmations)**
+**Step 3: Habit Detection (3+ Confirmations required)**
 
 Analyzes 100 most recent interactions for:
 
 - **Communication Pattern**
   - Question style: Inquisitive vs Direct vs Imperative
-  - Requires: 7+ instances of same style (threshold)
+  - Requires: 7+ instances of same style
   
 - **Work Pattern**
   - Time of day: Morning/Afternoon/Evening/Night
@@ -653,17 +671,23 @@ Analyzes 100 most recent interactions for:
   - Task complexity: Simple/Complex/Conversational
   - Requires: 5+ tasks of same type
 
+- **Scheduled / Day-of-Week Patterns** *(added Feb 2026)*
+  - Correlates day-of-week + action type (delete, send, schedule, OOO, archive, review)
+  - Also correlates hour-of-day + action type
+  - Requires: 3+ occurrences of the same (time, action) combination
+  - Examples: “Tends to delete on Fridays (seen 4×)” · “Tends to send around 09:00 (seen 5×)”
+
 **Output**: Adds to `habits.md` if threshold met
 
 **Step 4: 90-Day Decay Mechanism**
 
 For each episodic event older than 90 days:
 
-| Importance | Intended action              | Current status                          |
-| ---------- | ---------------------------- | --------------------------------------- |
-| Low        | Delete completely            | ⚠️ Calculated but file not rewritten yet |
-| Medium     | Archive to `archive/` folder | ⚠️ Calculated but file not rewritten yet |
-| High       | Keep in episodic memory      | ✅ Works (events are kept in keep list)  |
+| Importance | Action | Status |
+| ---------- | ------ | ------ |
+| Low        | Delete completely | ✅ Implemented — removed from episodic file |
+| Medium     | Archive to `archive/episodic_YYYY_MM.md` | ✅ Implemented — file rewritten, archived to monthly files |
+| High       | Keep in episodic memory | ✅ Always kept |
 
 > The decay logic in `_apply_decay_mechanism()` correctly classifies events but the `episodic_memory.md` file is not actually rewritten — there is a `TODO` comment at the end of the method. The counts are logged only. This must be implemented before the file grows too large.
 
@@ -927,13 +951,14 @@ Medium Importance events (90+ days):
 
 ### Key Files
 
-| File                                      | Purpose                                 | Lines |
+| File                                      | Purpose                                 | Notes |
 | ----------------------------------------- | --------------------------------------- | ----- |
-| `src/agent/memory/agent_memory.py`        | Core memory management class            | ~940  |
-| `src/agent/memory/memory_consolidator.py` | Automatic consolidation engine          | ~640  |
-| `src/agent/ui/email_agent_ui.py`          | UI integration & consolidation triggers | ~950  |
-| `src/agent/ui/generic_agent_ui.py`        | Generic agent UI with recall hook       | ~400  |
-| `src/agent/llm/llm_parser.py`             | LLM integration with memory context     | ~260  |
+| `src/agent/memory/agent_memory.py`        | Core memory management class + `MULTI_AGENT_ID` constant | ~ 1140 lines |
+| `src/agent/memory/memory_consolidator.py` | Consolidation engine: patterns, habits, consciousness, collective consciousness | ~830 lines |
+| `src/agent/memory/consolidation_runner.py` | Global 24 h background thread — covers all agents | ~140 lines |
+| `src/agent/memory/collective_memory.py`   | Episodic snapshot aggregator for multi-agent LLM context | ~140 lines |
+| `src/agent/ui/dashboard/app.py`           | Dashboard entry — boots ConsolidationRunner + `__multi_agent__` memory on startup | |
+| `src/agent/llm/llm_parser.py`             | LLM integration with memory context     | |
 
 ### Critical Functions
 
@@ -946,12 +971,18 @@ Medium Importance events (90+ days):
 - `remember(query)` — human-readable recall response (used by generic agent UI)
 
 **Consolidation** (`src/agent/memory/memory_consolidator.py`):
-- `should_consolidate(interaction_count)` — checks 20-interaction or 24-hour trigger
-- `consolidate()` — full consolidation cycle (5 steps)
+- `consolidate()` — full consolidation cycle (6 steps; step 6 is multi-agent only)
 - `_extract_patterns_from_working_memory()` — working → semantic patterns
 - `_extract_themes_from_episodic()` — episodic → semantic themes
-- `_detect_habits()` — habit detection (requires 3+ confirmations)
-- `_apply_decay_mechanism()` — 90-day decay classification (⚠️ file rewrite TODO)
+- `_detect_habits()` — habit detection including day-of-week + time-of-day patterns (3+ threshold)
+- `_apply_decay_mechanism()` — 90-day decay with file rewrite ✅
+- `_update_consciousness_layer()` — reads ALL memory layers to write 7-section consciousness
+- `_update_collective_consciousness()` — **multi-agent only**; synthesises `collective_consciousness.md` from all agents
+
+**Global Consolidation Runner** (`src/agent/memory/consolidation_runner.py`):
+- `get_consolidation_runner()` — singleton accessor
+- `ConsolidationRunner.start()` — idempotent; starts daemon thread
+- `ConsolidationRunner._run_cycle()` — loops all agents, calls `MemoryConsolidator.consolidate()`
 
 **State Persistence** (`src/agent/memory/memory_consolidator.py`):
 - `_load_state()` — loads `consolidation_state.json` on init

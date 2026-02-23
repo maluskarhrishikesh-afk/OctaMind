@@ -3,6 +3,8 @@ OctaMind Agent Hub — main Streamlit entry point.
 """
 from __future__ import annotations
 
+import logging
+
 import streamlit as st
 
 from src.agent.core.process_manager import cleanup_stale, get_agent_status
@@ -13,6 +15,47 @@ from .styles import inject_css
 from .create_form import show_create_agent_form
 from .agent_card import show_agent_card
 from .configure_panel import show_configure_panel
+
+logger = logging.getLogger("octamind.dashboard")
+
+# ---------------------------------------------------------------------------
+# One-time application startup (runs once per Streamlit worker process).
+# A module-level flag ensures this block does NOT re-execute on every
+# Streamlit hot-reload / page interaction.
+# ---------------------------------------------------------------------------
+_APP_INITIALIZED: bool = False
+
+
+def _startup() -> None:
+    """
+    Bootstrap tasks that must run exactly once when the app process starts:
+      1. Ensure __multi_agent__ memory files exist (creates them if absent).
+      2. Start the global consolidation background thread.
+    """
+    global _APP_INITIALIZED
+    if _APP_INITIALIZED:
+        return
+    _APP_INITIALIZED = True
+
+    # 1 — Ensure multi-agent memory is ready from the very first launch
+    try:
+        from src.agent.memory.agent_memory import get_agent_memory, MULTI_AGENT_ID
+        get_agent_memory(MULTI_AGENT_ID)   # triggers _ensure_memory_files_exist()
+        logger.info("[startup] Multi-agent memory initialised.")
+    except Exception as exc:
+        logger.error(f"[startup] Failed to init multi-agent memory: {exc}")
+
+    # 2 — Start the 24-hour consolidation background thread
+    try:
+        from src.agent.memory.consolidation_runner import get_consolidation_runner
+        runner = get_consolidation_runner()
+        runner.start()
+        logger.info("[startup] ConsolidationRunner started.")
+    except Exception as exc:
+        logger.error(f"[startup] Failed to start ConsolidationRunner: {exc}")
+
+
+_startup()   # execute at import time (once per process)
 
 
 def main() -> None:

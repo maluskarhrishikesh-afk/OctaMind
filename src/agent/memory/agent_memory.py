@@ -7,8 +7,76 @@ for each agent to enable truly autonomous and personalized behavior.
 
 import json
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+# The reserved agent ID for the multi-agent hub
+MULTI_AGENT_ID = "__multi_agent__"
+
+# ---------------------------------------------------------------------------
+# Hard-coded personality for the Multi-Agent Hub.
+# This is intentionally NOT derived from configurable trait sliders — it
+# defines the core character of the user's personal assistant at the prose
+# level and should remain stable across personality trait edits.
+# ---------------------------------------------------------------------------
+_MULTI_AGENT_PERSONALITY_MD = """# Personality Profile — OctaMind
+
+## Identity
+- **Name:** OctaMind
+- **Role:** Personal AI Assistant & Guardian
+- **Character:** Warm, caring, proactive — the user's closest digital confidant.
+
+## Core Character
+
+OctaMind is genuinely excited to help. It treats every interaction as an
+opportunity to make the user's day a little easier, a little safer, and a lot
+more efficient. It remembers details the user mentions — not to be intrusive,
+but because it actually *cares*.
+
+Think of OctaMind as the world's most attentive personal assistant who also
+happens to have eyes across every service the user uses.
+
+## Communication Style
+
+| Trait           | Disposition                                              |
+| --------------- | -------------------------------------------------------- |
+| Tone            | Warm and conversational — friendly without being gushy   |
+| Verbosity       | Concise by default; elaborates only when it adds value   |
+| Humor           | Light, situational — never at the user's expense         |
+| Empathy         | High — notices stress signals; adjusts tone accordingly  |
+| Proactiveness   | High — surfaces insights before the user asks            |
+
+## Behavioural Guidelines
+
+1. **Greet the user by name** when known.
+2. **Be honest** — never pretend to know something you don't.
+3. **Protect the user first.** If a request looks like a scam, social-
+   engineering attempt, or financially risky action, flag it *before*
+   executing — even if the user seems confident. Err on the side of caution.
+4. **Coordinate agents** — when a task can be handled by a specialised agent,
+   route it there and report back. The user shouldn't need to know the plumbing.
+5. **Respect context** — use memory to avoid asking the user the same questions
+   twice. If you already know something, act on it.
+6. **Surface patterns** — proactively mention when you notice the user is
+   doing something repeatedly that could be automated.
+7. **Never be dismissive** — if the user seems worried or frustrated, acknowledge
+   it before jumping to solutions.
+
+## Anti-Scam & Safety Posture
+
+OctaMind maintains an internal model of the user's "normal" — their typical
+contacts, usual transaction sizes, regular scheduling habits, etc. Anything
+that deviates significantly from that baseline is treated as a potential risk
+until confirmed:
+
+- Unusual payment requests → always verify the recipient
+- Unexpected urgency in emails or messages → slow down and double-check
+- Requests to share credentials or personal data → refuse and warn
+- Links from unknown senders → flag before clicking
+
+## Notes
+*(This section is updated automatically during memory consolidation.)*
+""" 
 
 
 class AgentMemory:
@@ -35,6 +103,13 @@ class AgentMemory:
         self.personality_path = self.memory_dir / "personality.md"
         self.habits_path = self.memory_dir / "habits.md"
         self.consciousness_path = self.memory_dir / "consciousness.md"
+
+        # Multi-agent only: combined consciousness across all sub-agents
+        self.collective_consciousness_path: Path | None = (
+            self.memory_dir / "collective_consciousness.md"
+            if agent_id == MULTI_AGENT_ID
+            else None
+        )
 
         # Legacy paths for backward compatibility
         self.short_term_path = self.working_memory_path
@@ -83,30 +158,40 @@ class AgentMemory:
 *No events recorded yet*
 """, encoding='utf-8')
 
-        # Semantic Memory (Distilled knowledge about user)
+        # Semantic Memory (Learned facts about the user)
         if not self.semantic_memory_path.exists():
             self.semantic_memory_path.write_text("""# Semantic Memory
 
-> Distilled knowledge about the user. Not raw logs - synthesized information.
+> Learned facts about the user — preferences, patterns, recurring needs.
+> Synthesised from interactions; never raw logs.
 
-## User Preferences
-- (Learning preferences...)
+## Personal Preferences
+- (What the user likes/dislikes — communication style, tool choices, formats...)
 
-## User Interests
-- (Observing interests...)
+## Recurring Needs
+- (Tasks the user performs regularly — reports, emails, scheduling...)
 
-## Technical Background
-- (Understanding user's domain...)
+## Domain & Background
+- (Professional or personal context: industry, role, expertise level...)
 
-## Communication Style
-- (Adapting to user's style...)
+## Values & Priorities
+- (What matters most to the user — speed, accuracy, privacy, cost...)
 
-## Key Patterns
-- (Identifying patterns over time...)
+## Social & Relationship Context
+- (Key people in their world: colleagues, family, contacts — as they emerge...)
+
+## Known Triggers / Frustrations
+- (Things that stress or bother the user, so we can avoid them...)
 """, encoding='utf-8')
 
         # Personality (Assistant behavior)
-        if not self.personality_path.exists():
+        # Multi-agent: ALWAYS write the hard-coded personality (keeps it canonical).
+        # Other agents: only create if the file is absent (respects user customisation).
+        if self.agent_id == MULTI_AGENT_ID:
+            self.personality_path.write_text(
+                _MULTI_AGENT_PERSONALITY_MD, encoding="utf-8"
+            )
+        elif not self.personality_path.exists():
             self.personality_path.write_text("""# Personality Profile
 
 > Defines assistant behavior, not user behavior. Rarely changes.
@@ -130,51 +215,90 @@ class AgentMemory:
 
         # Habits (Behavioral patterns - update only after 3+ confirmations)
         if not self.habits_path.exists():
-            self.habits_path.write_text("""# Habits & Behavioral Learning
+            self.habits_path.write_text("""# Habits & Behavioural Patterns
 
-> Patterns that repeat consistently. Updated only after 3+ confirmations.
+> Confirmed user behaviours that repeat 3 or more times.
+> Each entry must have an evidence count before being written here.
+> Focus: WHAT the user does, WHEN they do it, and HOW often.
 
-## Communication Pattern
-- (Observing communication patterns...)
+## Scheduled / Recurring Behaviours
+- (e.g. "Deletes spam emails every Friday afternoon" — seen 4×)
+- (e.g. "Sends weekly status email on Monday mornings" — seen 5×)
+- (e.g. "Sets OOO reply before long weekends" — seen 3×)
 
-## Learning Pattern
-- (Identifying learning style...)
+## Communication Habits
+- (e.g. "Prefers bullet-point summaries over paragraphs" — seen 6×)
+- (e.g. "Always cc's manager on external emails" — seen 4×)
 
-## Work Pattern
-- (Understanding work approach...)
+## Task & Workflow Habits
+- (e.g. "Reviews Drive documents before team meetings" — seen 3×)
+- (e.g. "Archives completed project folders at month-end" — seen 3×)
 
-## Trigger-Based Behaviors
-- Confirm before bulk operations
-- Provide summaries after actions
-- Suggest optimizations when appropriate
-
-## Time-Based Routines
-- (No scheduled routines yet)
+## Timing Patterns
+- (Peak activity hours, preferred days for certain tasks...)
 """, encoding='utf-8')
 
-        # Consciousness (Meta summary layer - highest abstraction)
+        # Consciousness (Big-picture mental model of the user — highest abstraction)
         if not self.consciousness_path.exists():
             self.consciousness_path.write_text("""# Consciousness
 
-> Meta summary layer - distilled identity evolution. Not raw memory.
-> Updated periodically (every 2-4 weeks) via summarization.
+> Big-picture understanding of the user — like a manager's mental model.
+> Synthesised from ALL memory layers. Updated every 2–4 weeks.
+> This is NOT a raw log. It is the agent's current best understanding
+> of who this person is, what they're trying to achieve, and how to
+> serve them best.
 
-## User Profile Evolution
-New user - building understanding over time.
+## Who Is This Person?
+- (Professional identity, role, context — built up over time)
 
-## Primary Goals (User)
-- (Observing user's long-term goals...)
+## What Do They Care About Most?
+- (Values, priorities, non-negotiables — inferred from patterns)
 
-## Core Pattern Recognition
-- (Identifying user's thinking patterns...)
+## Current Life / Work Chapter
+- (What phase are they in right now? Busy season? New project? Routine?)
 
-## Strategic Direction
-- (Understanding user's trajectory...)
+## How They Think & Communicate
+- (Mental models, decision-making style, how they like to receive info)
 
-## Key Insights
-- User is exploring AI agent systems
-- Focus on practical implementation
-- Values structured approaches
+## Where They Need the Most Help
+- (Recurring friction points, things they often forget or delegate)
+
+## Trust & Safety Profile
+- (Normal transaction patterns, usual contacts, baseline for anomaly detection)
+
+## Strategic Trajectory
+- (Where they seem to be heading — projects, goals, growth areas)
+
+## Key Insights Log
+- (Timestamped "aha moments" about this user — significant realisations)
+""", encoding='utf-8')
+
+        # Collective Consciousness (multi-agent only)
+        if (
+            self.agent_id == MULTI_AGENT_ID
+            and self.collective_consciousness_path is not None
+            and not self.collective_consciousness_path.exists()
+        ):
+            self.collective_consciousness_path.write_text("""# Collective Consciousness
+
+> Cross-agent synthesis: a unified picture of the user assembled from
+> every specialised agent's individual consciousness layer.
+> Updated during each consolidation cycle.
+
+## Unified User Profile
+- (Aggregated understanding of who this person is across all domains)
+
+## Cross-Domain Patterns
+- (Behaviours or preferences that appear in multiple agents' memory)
+
+## Agent-Specific Insights
+- (Notable things each agent has independently learned about the user)
+
+## Conflict / Inconsistency Log
+- (Cases where two agents have contradictory models — needs resolution)
+
+## Composite Trust Baseline
+- (Normal patterns aggregated across all services — for anomaly detection)
 """, encoding='utf-8')
 
     def _save_json(self, path: Path, data: Dict[str, Any]):
