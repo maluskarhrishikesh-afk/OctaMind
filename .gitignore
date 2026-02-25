@@ -40,13 +40,34 @@ ENV/
 Thumbs.db
 
 # Credentials (keep secure!) — all stored under config/
+# NEVER commit these — they grant full access to user accounts
 config/credentials.json
 config/token.json
 config/drive_token.json
+config/calendar_token.json
 config/settings.json
+
+# ── Runtime data (user-specific, potentially sensitive) ───────────────────────
+# This directory holds all live application data including:
+#   - assistants.json      → Telegram bot tokens, channel configs
+#   - *_messages.json      → private message histories
+#   - habits/links/etc.    → personal user data
+data/
+
+# Agent registry & runtime state (machine-specific, may contain tokens)
+agents.json
+running_agents.json
+running_tg_pollers.json
+
+# ── Personal Assistant memory (private user context) ──────────────────────────
+memory/
 
 # Model Cache
 model_cache/
 
 # Logs
 *.log
+logs/
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+replacements.txt
