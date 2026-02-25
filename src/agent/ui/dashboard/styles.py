@@ -8,14 +8,119 @@ import streamlit as st
 DARK_THEME_CSS = """
 <style>
 /* ============================================================
-   OctaMind — Global Dark Theme Fixes
+   OctaMind — Global Dark Theme  (v2 — modern, elegant)
    ============================================================ */
 
 /* App background */
 [data-testid="stAppViewContainer"] {
-    background: linear-gradient(135deg, #0f172a 0%, #1a1a2e 50%, #16213e 100%) !important;
+    background: linear-gradient(135deg, #0d1117 0%, #161b2e 50%, #0f172a 100%) !important;
 }
 [data-testid="stHeader"] { background: transparent !important; }
+
+/* ── Dialog overlay — dark themed ────────────────────────────────────────── */
+[data-testid="stDialog"],
+[data-testid="stModal"],
+div[data-baseweb="modal"],
+div[data-baseweb="dialog"] {
+    background: #161b2e !important;
+}
+div[data-baseweb="modal"] > div,
+div[data-baseweb="dialog"] > div {
+    background: #161b2e !important;
+    border: 1px solid rgba(99,102,241,0.3) !important;
+    border-radius: 16px !important;
+}
+/* All text inside dialogs */
+[data-testid="stDialog"] p,
+[data-testid="stDialog"] span,
+[data-testid="stDialog"] label,
+[data-testid="stDialog"] div {
+    color: #e2e8f0;
+}
+/* Dialog inputs */
+[data-testid="stDialog"] input,
+[data-testid="stDialog"] textarea,
+div[data-baseweb="modal"] input,
+div[data-baseweb="modal"] textarea,
+div[data-baseweb="dialog"] input,
+div[data-baseweb="dialog"] textarea {
+    background: #1e293b !important;
+    color: #f1f5f9 !important;
+    border: 1.5px solid rgba(99,102,241,0.4) !important;
+    border-radius: 10px !important;
+    caret-color: #818cf8 !important;
+    font-size: 0.95rem !important;
+}
+[data-testid="stDialog"] input:focus,
+[data-testid="stDialog"] textarea:focus,
+div[data-baseweb="modal"] input:focus,
+div[data-baseweb="modal"] textarea:focus {
+    border-color: #818cf8 !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.2) !important;
+    outline: none !important;
+}
+[data-testid="stDialog"] input::placeholder,
+[data-testid="stDialog"] textarea::placeholder,
+div[data-baseweb="modal"] input::placeholder,
+div[data-baseweb="modal"] textarea::placeholder {
+    color: #475569 !important;
+}
+/* Dialog labels */
+[data-testid="stDialog"] [data-testid="stWidgetLabel"] p,
+[data-testid="stDialog"] [data-testid="stWidgetLabel"],
+[data-testid="stDialog"] label,
+div[data-baseweb="modal"] label,
+div[data-baseweb="modal"] [data-testid="stWidgetLabel"] p {
+    color: #94a3b8 !important;
+    font-weight: 600 !important;
+    font-size: 0.82rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+}
+/* Dialog multiselect */
+[data-testid="stDialog"] [data-baseweb="select"] > div,
+div[data-baseweb="modal"] [data-baseweb="select"] > div {
+    background: #1e293b !important;
+    border: 1.5px solid rgba(99,102,241,0.4) !important;
+    border-radius: 10px !important;
+    color: #f1f5f9 !important;
+}
+[data-testid="stDialog"] [data-baseweb="select"] span,
+[data-testid="stDialog"] [data-baseweb="select"] div,
+div[data-baseweb="modal"] [data-baseweb="select"] span,
+div[data-baseweb="modal"] [data-baseweb="select"] div { color: #f1f5f9 !important; }
+/* Dialog selection tags/pills */
+[data-testid="stDialog"] [data-baseweb="tag"],
+div[data-baseweb="modal"] [data-baseweb="tag"] {
+    background: rgba(99,102,241,0.25) !important;
+    color: #a5b4fc !important;
+    border-radius: 6px !important;
+}
+/* Dialog error/info/success banners */
+[data-testid="stDialog"] [data-testid="stAlert"],
+div[data-baseweb="modal"] [data-testid="stAlert"] {
+    background: rgba(239,68,68,0.12) !important;
+    border: 1px solid rgba(239,68,68,0.35) !important;
+    border-radius: 10px !important;
+}
+[data-testid="stDialog"] [data-testid="stAlert"] p,
+div[data-baseweb="modal"] [data-testid="stAlert"] p {
+    color: #fca5a5 !important;
+    font-weight: 600 !important;
+}
+/* Dialog success */
+[data-testid="stDialog"] [data-testid="stAlert"][data-baseweb="notification"],
+div[data-baseweb="modal"] [data-testid="stAlert"][data-baseweb="notification"] {
+    background: rgba(34,197,94,0.12) !important;
+}
+/* Dialog dividers */
+[data-testid="stDialog"] hr { border-color: rgba(99,102,241,0.2) !important; }
+/* Dialog heading text */
+[data-testid="stDialog"] h1, [data-testid="stDialog"] h2,
+[data-testid="stDialog"] h3, [data-testid="stDialog"] h4 {
+    color: #e2e8f0 !important;
+}
+
 
 /* ── All widget labels ── */
 [data-testid="stWidgetLabel"] p,
@@ -176,28 +281,103 @@ details summary span,
 [data-testid="stAlert"] { color: #e0e0e0 !important; }
 
 /* ── Sidebar ── */
-[data-testid="stSidebar"] { background: #0f172a !important; }
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0d1117 0%, #0f172a 100%) !important;
+    border-right: 1px solid rgba(99,102,241,0.12) !important;
+}
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
-[data-testid="stSidebar"] label { color: #b0b0b0 !important; }
+[data-testid="stSidebar"] label { color: #94a3b8 !important; }
 
-/* ── Buttons — secondary style ── */
+/* ══════════════════════════════════════════════════════════════
+   BUTTON SYSTEM  — elegant, not gaudy
+   ══════════════════════════════════════════════════════════════ */
+
+/* All buttons — base reset */
+button[data-testid^="stBaseButton"],
+[data-testid="stFormSubmitButton"] button {
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    font-size: 0.875rem !important;
+    letter-spacing: 0.01em !important;
+    transition: all 0.18s ease !important;
+    padding: 6px 14px !important;
+    min-height: 38px !important;
+    cursor: pointer !important;
+}
+
+/* PRIMARY — deep indigo, used for main "create" and "save" actions */
+[data-testid="stBaseButton-primary"] {
+    background: linear-gradient(135deg, #4338ca 0%, #4f46e5 100%) !important;
+    border: 1px solid rgba(99,102,241,0.6) !important;
+    color: #fff !important;
+    box-shadow: 0 2px 8px rgba(79,70,229,0.3) !important;
+}
+[data-testid="stBaseButton-primary"]:hover {
+    background: linear-gradient(135deg, #3730a3 0%, #4338ca 100%) !important;
+    box-shadow: 0 4px 14px rgba(79,70,229,0.45) !important;
+    transform: translateY(-1px) !important;
+}
+[data-testid="stBaseButton-primary"]:active {
+    transform: translateY(0) !important;
+    box-shadow: 0 1px 4px rgba(79,70,229,0.3) !important;
+}
+
+/* SECONDARY — subtle glass, used for cancel / neutral actions */
 [data-testid="stBaseButton-secondary"] {
-    background: rgba(255,255,255,0.06) !important;
-    border: 1px solid rgba(233,30,140,0.3) !important;
-    color: #e0e0e0 !important;
-    border-radius: 8px !important;
+    background: rgba(255,255,255,0.05) !important;
+    border: 1px solid rgba(148,163,184,0.25) !important;
+    color: #94a3b8 !important;
+    border-radius: 10px !important;
 }
 [data-testid="stBaseButton-secondary"]:hover {
-    background: rgba(233,30,140,0.12) !important;
-    border-color: #e91e8c !important;
-    color: #e91e8c !important;
+    background: rgba(255,255,255,0.09) !important;
+    border-color: rgba(148,163,184,0.45) !important;
+    color: #e2e8f0 !important;
 }
 
-/* ── Form submit button ── */
+/* Form submit button */
 [data-testid="stFormSubmitButton"] button {
-    border-radius: 8px !important;
+    background: linear-gradient(135deg, #4338ca 0%, #4f46e5 100%) !important;
+    border: 1px solid rgba(99,102,241,0.6) !important;
+    color: #fff !important;
+    border-radius: 10px !important;
     font-weight: 700 !important;
+    box-shadow: 0 2px 8px rgba(79,70,229,0.3) !important;
+}
+[data-testid="stFormSubmitButton"] button:hover {
+    background: linear-gradient(135deg, #3730a3 0%, #4338ca 100%) !important;
+    box-shadow: 0 4px 14px rgba(79,70,229,0.45) !important;
+}
+
+/* ── Semantic button colour helpers via data-key  ─────────────────────────── *
+ * We encode intent in the label/key names; the CSS below applies colours      *
+ * based on those matching patterns.                                            */
+
+/* GREEN — start / launch buttons */
+button[data-testid^="stBaseButton"][kind="primary"][aria-label*="Start"],
+button[kind="primary"][aria-label*="▶️"] {
+    background: linear-gradient(135deg, #15803d 0%, #16a34a 100%) !important;
+    border-color: rgba(22,163,74,0.6) !important;
+    box-shadow: 0 2px 8px rgba(22,163,74,0.3) !important;
+}
+
+/* Link button (Open Chat) — sky blue */
+[data-testid="stLinkButton"] a,
+[data-testid="stLinkButton"] button {
+    background: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%) !important;
+    border: 1px solid rgba(14,165,233,0.5) !important;
+    color: #fff !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    box-shadow: 0 2px 6px rgba(14,165,233,0.25) !important;
+    text-decoration: none !important;
+}
+[data-testid="stLinkButton"] a:hover,
+[data-testid="stLinkButton"] button:hover {
+    background: linear-gradient(135deg, #0369a1 0%, #0284c7 100%) !important;
+    box-shadow: 0 4px 12px rgba(14,165,233,0.35) !important;
+    transform: translateY(-1px) !important;
 }
 
 /* ── Caption / helper text ── */
@@ -261,6 +441,26 @@ hr { border-color: rgba(233,30,140,0.2) !important; }
 }
 [data-testid="stForm"] [data-testid="stNumberInput"] button:hover {
     background: rgba(233,30,140,0.18) !important;
+}
+
+/* ── Skill chip hover tooltip ───────────────────────────────────────────── */
+.oa-tooltip {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: #1e293b;
+    border: 1px solid rgba(99,102,241,0.35);
+    border-radius: 10px;
+    padding: 10px 12px;
+    z-index: 9999;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    pointer-events: none;
+    min-width: 180px;
+}
+.oa-skill-chip:hover .oa-tooltip {
+    display: block;
 }
 </style>
 """

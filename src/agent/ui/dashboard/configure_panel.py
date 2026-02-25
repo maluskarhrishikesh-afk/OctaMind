@@ -1,101 +1,55 @@
 """
-Agent configure panel — personality traits, automations, and general settings tabs.
+Agent configure panel — automations and general settings for Skills.
+Note: Personality is managed at the Personal Assistant level, not per-skill.
 """
 from __future__ import annotations
 
 import streamlit as st
 
-from src.agent.core.agent_manager import get_agent_manager, DEFAULT_PERSONALITY_TRAITS
+from src.agent.core.agent_manager import get_agent_manager
 from src.agent.core.automations.automation_config import (
     load_automation_config,
     update_automation_state,
     get_automations_for_agent_type,
 )
 
-# ── Personality trait metadata ────────────────────────────────────────────────
-_TRAIT_META = [
-    ("tone",          "\U0001f5e3 Tone",          "Formal",   "Casual"),
-    ("verbosity",     "\U0001f4dd Verbosity",      "Brief",    "Detailed"),
-    ("humor",         "\U0001f604 Humor",          "Serious",  "Witty"),
-    ("empathy",       "\u2764\ufe0f Empathy",      "Neutral",  "Warm"),
-    ("proactiveness", "\u26a1 Proactiveness",      "Reactive", "Proactive"),
-]
-
 
 def show_configure_panel(agent: dict) -> None:
-    """Full configure panel: personality traits + per-type automations + general settings."""
+    """Configure panel for Skills: automations + general settings.
+    
+    Note: Personality traits are managed at the Personal Assistant level,
+    not per-skill. Skills are stateless — they have no personality of their own.
+    """
     agent_id = agent["id"]
     agent_type = agent["type"]
     manager = get_agent_manager()
 
-    # — Header
+    # Header
     st.markdown(
         f"""
-        <div style="background:linear-gradient(135deg,rgba(233,30,140,0.15) 0%,rgba(156,39,176,0.1) 100%);
-                    border:1px solid rgba(233,30,140,0.3);padding:24px 28px;border-radius:16px;
-                    margin-bottom:24px;">
-            <div style="font-size:1.6rem;font-weight:800;color:#e91e8c;margin-bottom:4px;">
-                \u2699\ufe0f Configure  —  {agent['name']}
+        <div style="background:linear-gradient(135deg,rgba(233,30,140,0.10) 0%,rgba(99,102,241,0.07) 100%);
+                    border:1px solid rgba(233,30,140,0.25);padding:18px 22px;border-radius:12px;
+                    margin-bottom:20px;">
+            <div style="font-size:1.2rem;font-weight:800;color:#e91e8c;margin-bottom:3px;">
+                ⚙️ Configure — {agent['name']}
             </div>
-            <div style="color:#a8dadc;font-size:0.9rem;">
-                Adjust personality traits and set up recurring automations.
+            <div style="color:#64748b;font-size:0.84rem;">
+                Set up automations and adjust runtime settings for this skill.
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    tab_personality, tab_automations, tab_general = st.tabs(
-        ["\U0001f3ad Personality Traits", "\u2699\ufe0f Automations", "\U0001f527 General Settings"])
-
-    # ── Personality tab ─────────────────────────────────────────────
-    with tab_personality:
-        st.markdown(
-            "<p style='color:#a8dadc;font-size:0.88rem;margin-bottom:16px;'>"
-            "These sliders control the agent\u2019s communication style. "
-            "0 = left extreme  \u00b7  10 = right extreme. Changes rewrite "
-            "<code>personality.md</code> in the agent\u2019s memory.</p>",
-            unsafe_allow_html=True,
-        )
-        current = agent.get("config", {}).get(
-            "personality_traits", DEFAULT_PERSONALITY_TRAITS)
-
-        with st.form(f"cfg_personality_{agent_id}"):
-            pc1, pc2 = st.columns(2)
-            new_traits: dict = {}
-            for i, (key, label, lo, hi) in enumerate(_TRAIT_META):
-                col = pc1 if i % 2 == 0 else pc2
-                with col:
-                    st.markdown(
-                        f"<p style='color:#e91e8c;font-weight:600;margin-bottom:2px;'>"
-                        f"{label}</p>"
-                        f"<p style='color:#a0a0a0;font-size:0.75rem;margin-top:0;letter-spacing:0.02em;'>{lo} ← → {hi}</p>",
-                        unsafe_allow_html=True,
-                    )
-                    new_traits[key] = st.slider(
-                        label,
-                        min_value=0, max_value=10,
-                        value=int(current.get(
-                            key, DEFAULT_PERSONALITY_TRAITS.get(key, 5))),
-                        key=f"cfg_p_{agent_id}_{key}",
-                        label_visibility="collapsed",
-                    )
-            if st.form_submit_button("\U0001f4be Save Personality", type="primary"):
-                ok = manager.update_personality_traits(agent_id, new_traits)
-                if ok:
-                    st.success(
-                        "\u2705 Personality updated and written to memory.")
-                    st.rerun()
-                else:
-                    st.error("\u274c Could not update personality.")
+    tab_automations, tab_general = st.tabs(["⚙️ Automations", "🔧 Settings"])
 
     # ── Automations tab ─────────────────────────────────────────────
     with tab_automations:
         catalog = get_automations_for_agent_type(agent_type)
         if not catalog:
             st.info(
-                "\U0001f6a7 No automations are available for this agent type yet. "
-                "Gmail agents have 10 built-in automations."
+                "🚧 No automations are available for this skill type yet. "
+                "Email skills have built-in automations."
             )
             return
 

@@ -36,12 +36,7 @@ from src.email import (
 
 logger = logging.getLogger("email_agent")
 
-# Optional memory integration
-try:
-    from src.agent.memory.agent_memory import get_agent_memory
-    MEMORY_AVAILABLE = True
-except Exception:
-    MEMORY_AVAILABLE = False
+# Skills are stateless executors — memory belongs to Personal Assistants only.
 
 # ── Gmail tool descriptions for LLM orchestration ─────────────────────────────
 # Passed to orchestrate_mcp_tool() so the LLM only sees Gmail/email tools.
@@ -320,14 +315,27 @@ def execute_with_llm_orchestration(
         max_operations: Safety cap on bulk API operations per tool call.
     """
     try:
-        # ── Memory context ──────────────────────────────────────────────────
+        # ── Gmail auth preflight ─────────────────────────────────────────────
+        # Verify credentials before starting the ReAct loop so auth errors
+        # surface as a structured auth_error status the PA UI can act on.
+        try:
+            from src.email.gmail_service import _get_client as _gmail_client
+            _gmail_client()  # raises if auth fails
+        except Exception as _auth_exc:
+            _msg = str(_auth_exc).lower()
+            if any(p in _msg for p in ("authorization", "credentials", "token", "oauth", "auth")):
+                return {
+                    "status": "auth_error",
+                    "message": (
+                        "🔑 Gmail is not authorized yet (or the token has expired).\n\n"
+                        "Click **Re-authorize Gmail** below to open a browser sign-in window, "
+                        "then retry your request."
+                    ),
+                }
+            raise  # unexpected error — let the outer except handle it
+
+        # Skills are stateless — zero memory injection
         memory_context = ""
-        if agent_id and MEMORY_AVAILABLE:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory_context = memory.get_full_context_for_llm()
-            except Exception:
-                pass
 
         # ── Tool executor used by the ReAct loop ────────────────────────────
         _ops_capped_note = ""

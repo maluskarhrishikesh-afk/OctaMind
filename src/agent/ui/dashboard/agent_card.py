@@ -1,106 +1,136 @@
 """
-Agent card component — renders a single agent tile with Start/Stop/Configure/Delete controls.
+Agent card component — compact chip tile for a single Skill with Configure and Delete controls.
+Skills are stateless executors with no memory of their own.
 """
 from __future__ import annotations
 
-from datetime import datetime
-
 import streamlit as st
 
-from src.agent.core.process_manager import start_agent, stop_agent, get_agent_status
 from src.agent.core.agent_manager import get_agent_manager
+
+# Plain-language abilities per agent type — shown in the hover tooltip
+_SKILL_ABILITIES: dict[str, list[str]] = {
+    "gmail": [
+        "📨 Read, search & send emails",
+        "🔗 Smart labels & auto-sort",
+        "⏰ Schedule emails for later",
+        "✅ Extract to-dos from threads",
+        "⚠️ Detect urgent & unread mail",
+    ],
+    "google_drive": [
+        "📄 Browse, upload & download files",
+        "🔗 Share files with anyone",
+        "🔍 Find & remove duplicates",
+        "📂 Auto-organise folders",
+        "📊 Storage reports & analytics",
+    ],
+    "files": [
+        "🖥️ Browse & search your computer",
+        "📈 Copy, move, zip & unzip",
+        "🔍 Find duplicate files",
+        "🖼️ Sort by type or date",
+        "💾 Check disk usage & large files",
+    ],
+    "whatsapp": [
+        "💬 Send & read messages",
+        "⏰ Schedule messages for later",
+        "🤖 Set up auto-replies",
+        "👥 Manage & search contacts",
+        "📝 Summarise long conversations",
+    ],
+    "telegram": [
+        "📨 Send & receive messages",
+        "⏰ Schedule messages for later",
+        "📊 Create polls & pin messages",
+        "📖 Summarise chats",
+        "📤 Forward messages to email",
+    ],
+    "calendar": [
+        "📅 View daily & weekly agenda",
+        "✏️ Create, update & delete events",
+        "🔍 Find free time slots",
+        "🔔 Set reminders & recurring events",
+        "⚠️ Detect scheduling conflicts",
+    ],
+    "scheduler": [
+        "🧠 Find optimal meeting time slots",
+        "🛡️ Protect deep-work / focus blocks",
+        "⚡ Smart conflict resolution",
+        "📊 Meeting-load & scheduling insights",
+        "🔄 Set up recurring focus sessions",
+    ],
+    "file_organizer": [
+        "🔍 Scan folders & propose tidy plans",
+        "👁️ Preview every move before applying",
+        "✅ Apply plans only on your confirmation",
+        "🗄️ Archive old files by age automatically",
+        "📋 Set & run archival policies for folders",
+    ],
+    "habit_tracker": [
+        "➕ Add & manage daily habits",
+        "✅ Log completions with notes",
+        "🔥 Track current & longest streaks",
+        "📊 Weekly & 30/60/90-day analytics",
+        "📅 Schedule habits on Google Calendar",
+    ],
+}
+_DEFAULT_ABILITIES = [
+    "🔧 Custom-configured skill",
+    "💬 Handles natural language commands",
+    "⚙️ Adapts to your instructions",
+]
 
 
 def show_agent_card(agent: dict) -> None:
-    """Render one agent card with Start / Stop / Delete controls."""
-    agent_id = agent["id"]
-    icon = agent["metadata"]["icon"]
+    """Render one skill as a compact chip with a hover tooltip."""
+    agent_id  = agent["id"]
+    icon      = agent["metadata"]["icon"]
     type_name = agent["metadata"]["name"]
+    abilities = _SKILL_ABILITIES.get(agent["type"], _DEFAULT_ABILITIES)
 
-    # Check live status
-    status_info = get_agent_status(agent_id)
-    is_running = status_info is not None
+    # Build tooltip lines
+    tooltip_items = "".join(
+        f"<div style='padding:2px 0;font-size:0.72rem;color:#cbd5e1;'>{a}</div>"
+        for a in abilities
+    )
 
-    status_badge = "🟢 Running" if is_running else "⚫ Stopped"
-    status_color = "#28a745" if is_running else "#ff6b6b"
-    bg_gradient = "linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%)" if is_running else "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"
-    border_glow = "0 0 20px rgba(233,30,140,0.4)" if is_running else "0 4px 15px rgba(0,0,0,0.2)"
+    # Truncate role text for the chip
+    role = agent.get("role", "")
+    role_short = (role[:45] + "…") if len(role) > 45 else role
 
     st.markdown(
         f"""
-        <div style="background:{bg_gradient};padding:20px;border-radius:14px;border:1px solid rgba(233,30,140,0.3);
-                    margin-bottom:16px;box-shadow:{border_glow};transition:all 0.3s ease;
-                    position:relative;overflow:hidden;">
-            <div style="position:absolute;top:0;right:0;width:100px;height:100px;
-                       background:radial-gradient(circle, rgba(233,30,140,0.1) 0%, transparent 70%);
-                       border-radius:50%;"></div>
-            <div style="position:relative;z-index:1;">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-                    <div style="font-size:1.8rem;font-weight:800;color:#e91e8c;">
-                        {icon} {agent['name']}
-                    </div>
-                    <div style="background:{status_color};color:white;padding:6px 14px;border-radius:20px;
-                               font-size:0.8rem;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.3);">
-                        {status_badge}
-                    </div>
-                </div>
-                <div style="color:#b0b0b0;font-size:0.95rem;line-height:1.6;margin-bottom:14px;">
-                    <div><span style="color:#a8dadc;">Type:</span> {type_name}</div>
-                    <div><span style="color:#a8dadc;">Role:</span> {agent['role']}</div>
-                </div>
-                <div style="color:#666;font-size:0.8rem;border-top:1px solid rgba(255,255,255,0.1);padding-top:10px;margin-top:10px;">
-                    Created: {datetime.fromisoformat(agent['created_at']).strftime('%b %d, %Y • %H:%M')}
-                </div>
+        <div style="position:relative;display:inline-block;width:100%;" class="oa-skill-chip">
+          <!-- chip body -->
+          <div style="background:rgba(255,255,255,0.03);padding:10px 12px 8px;
+                      border-radius:10px;border:1px solid rgba(233,30,140,0.2);
+                      margin-bottom:6px;cursor:default;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;">
+              <span style="font-size:1.15rem;line-height:1;">{icon}</span>
+              <span style="font-size:0.85rem;font-weight:700;color:#e2e8f0;
+                           white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{agent['name']}</span>
             </div>
+            <div style="font-size:0.68rem;color:#475569;margin-bottom:3px;">{type_name}</div>
+            <div style="font-size:0.72rem;color:#64748b;line-height:1.35;
+                        display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;
+                        overflow:hidden;">{role_short}</div>
+            <!-- hover tooltip -->
+            <div class="oa-tooltip">
+              <div style="font-size:0.72rem;font-weight:700;color:#a5b4fc;
+                          margin-bottom:6px;letter-spacing:0.04em;">WHAT THIS SKILL CAN DO</div>
+              {tooltip_items}
+            </div>
+          </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    if is_running:
-        url = status_info["url"]
-        port = status_info["port"]
-        st.markdown(
-            f"""
-            <div style="background:rgba(40, 167, 69, 0.1);border:1px solid rgba(40, 167, 69, 0.3);
-                       padding:12px 16px;border-radius:10px;margin-bottom:14px;">
-                <div style="color:#28a745;font-weight:600;margin-bottom:10px;">✅ Agent running on port {port}</div>
-                <a href="{url}" target="_blank" style="text-decoration:none;">
-                    <div style="background:linear-gradient(135deg, #28a745, #20c997);color:white;padding:10px 18px;
-                               border-radius:8px;text-align:center;font-weight:600;box-shadow:0 4px 12px rgba(40, 167, 69, 0.3);
-                               transition:all 0.3s ease;cursor:pointer;display:inline-block;width:100%;">
-                        🚀 Open {agent["name"]} Window
-                    </div>
-                </a>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    col1, col2, col3 = st.columns([2, 2, 1])
+    col1, col2 = st.columns([3, 1])
 
     with col1:
-        if not is_running:
-            if st.button("▶️ Start Agent", key=f"start_{agent_id}",
-                         type="primary", use_container_width=True):
-                with st.spinner(f"🚀 Starting {agent['name']}..."):
-                    try:
-                        info = start_agent(
-                            agent_id, agent["name"], agent["type"])
-                        st.success(f"✅ Started on port {info['port']}")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Failed to start: {e}")
-        else:
-            if st.button("⏹️ Stop Agent", key=f"stop_{agent_id}",
-                         type="primary", use_container_width=True):
-                with st.spinner(f"Stopping {agent['name']}..."):
-                    stop_agent(agent_id)
-                    st.rerun()
-
-    with col2:
         is_configuring = st.session_state.get("configure_agent_id") == agent_id
-        cfg_label = "✖ Close Config" if is_configuring else "⚙️ Configure"
+        cfg_label = "✖ Close" if is_configuring else "⚙️ Configure"
         if st.button(cfg_label, key=f"config_{agent_id}", use_container_width=True):
             if is_configuring:
                 st.session_state.configure_agent_id = None
@@ -109,28 +139,24 @@ def show_agent_card(agent: dict) -> None:
                 st.session_state.show_create_form = False
             st.rerun()
 
-    with col3:
+    with col2:
         confirm_key = f"delete_confirm_{agent_id}"
         if confirm_key not in st.session_state:
             st.session_state[confirm_key] = False
 
         if not st.session_state[confirm_key]:
-            if st.button("🗑️", key=f"delete_{agent_id}", use_container_width=True):
-                if is_running:
-                    stop_agent(agent_id)
+            if st.button("🗑️", key=f"delete_{agent_id}", use_container_width=True,
+                         help=f"Delete {agent['name']}"):
                 st.session_state[confirm_key] = True
                 st.rerun()
         else:
-            if st.button("⚠️ Confirm Delete?", key=f"confirm_del_{agent_id}",
+            if st.button("⚠️ Confirm", key=f"confirm_del_{agent_id}",
                          type="primary", use_container_width=True):
                 manager = get_agent_manager()
                 manager.delete_agent(agent_id)
                 st.session_state[confirm_key] = False
-                st.success(f"✅ Deleted {agent['name']}")
+                st.success(f"Deleted {agent['name']}")
                 st.rerun()
 
     if st.session_state.get(confirm_key, False):
-        st.warning(
-            f"⚠️ This will permanently delete **{agent['name']}** and all its memory. "
-            "Click 'Confirm Delete?' above, or refresh to cancel."
-        )
+        st.caption(f"⚠️ This will permanently delete **{agent['name']}**. Click Confirm above.")

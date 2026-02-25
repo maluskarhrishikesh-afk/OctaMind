@@ -131,11 +131,35 @@ class AgentManager:
             'icon': '💬',
             'capabilities': ['send', 'receive', 'search', 'schedule', 'analytics', 'ai_features']
         },
+        'telegram': {
+            'name': 'Telegram Agent',
+            'description': 'Send and receive Telegram messages, manage chats, schedule messages, create polls, and analyse conversations',
+            'icon': '✈️',
+            'capabilities': ['send', 'receive', 'search', 'schedule', 'polls', 'media', 'ai_features']
+        },
         'files': {
             'name': 'Files Agent',
             'description': 'Manage, search, organise and analyse local files and folders',
             'icon': '🗂️',
             'capabilities': ['search', 'organise', 'archive', 'read', 'analyse', 'cross_agent']
+        },
+        'scheduler': {
+            'name': 'Scheduler Agent',
+            'description': 'Smart calendar scheduling — find optimal meeting slots, protect deep-work time, and resolve conflicts',
+            'icon': '🧠',
+            'capabilities': ['suggest_slots', 'protect_focus', 'resolve_conflicts', 'optimize_day', 'recurring_blocks']
+        },
+        'file_organizer': {
+            'name': 'File Organizer Agent',
+            'description': 'Approval-driven file organisation — scans folders, proposes plans, and applies them only on your confirmation',
+            'icon': '🗃️',
+            'capabilities': ['scan_propose', 'preview_plan', 'apply_plan', 'archive_old', 'archival_policies']
+        },
+        'habit_tracker': {
+            'name': 'Habit Tracker Agent',
+            'description': 'Track daily habits, log completions, monitor streaks, and get weekly analytics reports',
+            'icon': '✅',
+            'capabilities': ['add_habit', 'log_completion', 'streaks', 'weekly_report', 'analytics', 'calendar_sync']
         },
         'custom': {
             'name': 'Custom Agent',
@@ -177,18 +201,21 @@ class AgentManager:
         personality_traits: Optional[Dict[str, int]] = None,
     ) -> Dict[str, Any]:
         """
-        Create a new agent.
+        Create a new skill agent.
+
+        Skills are stateless executors — they do NOT get their own memory.
+        Memory and personality live at the Personal Assistant (PA) level.
 
         Args:
-            name: Agent's display name
-            agent_type: Type of agent (gmail, google_drive, slack, calendar, custom)
-            role: Description of what the agent should do
+            name: Skill's display name
+            agent_type: Type of skill (gmail, google_drive, files, custom, …)
+            role: Description of what the skill should do
             config: Additional configuration options
-            personality_traits: Optional dict with keys tone/verbosity/humor/empathy/proactiveness
-                                 scored 0–10.  Defaults to DEFAULT_PERSONALITY_TRAITS if omitted.
+            personality_traits: Ignored for skills (kept for API compatibility).
+                                 Personality is managed at the PA level.
 
         Returns:
-            Created agent data
+            Created agent/skill data dict
         """
         if agent_type not in self.AGENT_TYPES:
             raise ValueError(
@@ -196,11 +223,8 @@ class AgentManager:
 
         agent_id = str(uuid.uuid4())[:8]
 
-        # Merge provided traits with defaults
-        traits = {**DEFAULT_PERSONALITY_TRAITS, **(personality_traits or {})}
-
         merged_config = config or {}
-        merged_config["personality_traits"] = traits
+        # Do NOT store personality traits on skills — they belong to the PA.
 
         agent = {
             'id': agent_id,
@@ -213,24 +237,15 @@ class AgentManager:
             'metadata': self.AGENT_TYPES[agent_type].copy()
         }
 
-        # Save agent
+        # Save skill record
         data = self._load_agents()
         data['agents'].append(agent)
         self._save_agents(data)
 
-        # Create memory folder and write personality.md from traits
-        try:
-            from src.agent.memory.agent_memory import get_agent_memory
-            memory = get_agent_memory(agent_id)
-            # Overwrite the default personality.md template with the structured traits
-            personality_content = _build_personality_md(name, role, traits)
-            memory.personality_path.write_text(
-                personality_content, encoding="utf-8")
-            print(f"✅ Created memory folder for agent {agent_id}")
-        except Exception as e:
-            print(f"⚠️ Warning: Could not create memory folder: {e}")
-
+        # Skills are stateless — no memory folder is created.
+        # Memory lives at the Personal Assistant level.
         return agent
+
 
     def list_agents(self) -> List[Dict[str, Any]]:
         """Get all agents"""

@@ -1,0 +1,25 @@
+[
+  {
+    "id": "pa_53ed4393",
+    "name": "My Personal Assistant",
+    "skills": [
+      "drive",
+      "files",
+      "email",
+      "calendar"
+    ],
+    "channels": [
+      "dashboard",
+      "telegram"
+    ],
+    "config": {
+      "telegram": {
+        "bot_token": "REVOKED_TELEGRAM_BOT_TOKEN",
+        "auto_reply": true,
+        "auto_reply_persona": "You are My Personal Assistant, a friendly AI assistant built with OctaMind. Keep replies concise (2-3 sentences max) and conversational."
+      }
+    },
+    "memory_id": "pa_53ed4393",
+    "created_at": "2026-02-24T17:50:16.636904+00:00"
+  }
+]

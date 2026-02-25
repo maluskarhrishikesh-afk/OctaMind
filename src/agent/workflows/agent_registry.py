@@ -23,6 +23,11 @@ logger = logging.getLogger("workflows")
 #   "module":      dotted module path to the orchestrator,
 #   "function":    name of the execute_with_llm_orchestration function,
 # }
+#
+# MEMORY POLICY: Skills are stateless executors — they do NOT have their own
+# memory.  Always call skill executors with agent_id=None.  Memory lives at
+# the Personal Assistant (PA) level; the PA's id is used when recording
+# interactions and loading context for conversational replies.
 # ---------------------------------------------------------------------------
 AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
     "drive": {
@@ -68,12 +73,52 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
         "module": "src.agent.ui.files_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
-    # ── Add future agents here, e.g.: ───────────────────────────────────────
-    # "calendar": {
-    #     "description": "Google Calendar agent. Handles: create/read/update/delete events...",
-    #     "module": "src.agent.ui.calendar_agent.orchestrator",
-    #     "function": "execute_with_llm_orchestration",
-    # },
+    "calendar": {
+        "description": (
+            "Google Calendar agent. Handles: list/view/search events, create/update/delete events, "
+            "quick natural-language event creation, recurring events, find free slots, detect conflicts, "
+            "daily/weekly agenda, set reminders, accept/decline invites, and list calendars."
+        ),
+        "module": "src.agent.ui.calendar_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
+    "scheduler": {
+        "description": (
+            "Scheduler / Smart Calendar agent. Handles: find best meeting time slots, "
+            "find mutual availability for multi-attendee meetings, protect deep-work / focus blocks, "
+            "analyse and optimise a day's schedule, smart conflict resolution with proposed alternatives, "
+            "create named time blocks (focus/admin/break/review/learning), "
+            "get scheduling insights and meeting-load analytics, "
+            "set up recurring focus time. "
+            "Use instead of the Calendar agent when the request involves INTELLIGENT scheduling, "
+            "optimisation, or scheduling for multiple people."
+        ),
+        "module": "src.agent.ui.scheduler_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
+    "file_organizer": {
+        "description": (
+            "File Organizer agent. Approval-driven file organization: scan a folder and propose a plan "
+            "(by type/date/name prefix), preview the plan, then apply only after confirmation. "
+            "Also: archive old files by age, set archival policies for folders, run archival policies, "
+            "and clean up OctaMind's own data/ directory (old exports, stale plan records). "
+            "Use instead of the Files agent when the request is about ORGANIZING a whole folder or "
+            "setting up ARCHIVAL RULES — it never modifies files without user approval."
+        ),
+        "module": "src.agent.ui.file_organizer_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
+    "habit_tracker": {
+        "description": (
+            "Habit & Health Tracker agent. Handles: add/delete habits, log daily completions, "
+            "daily check-in (show pending habits), streak tracking (current and longest), "
+            "weekly habit completion reports, per-habit analytics over 30/60/90 days, "
+            "and optional Google Calendar integration to schedule habit sessions. "
+            "Completely new — no overlap with Calendar or Files agents."
+        ),
+        "module": "src.agent.ui.habit_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
 }
 
 

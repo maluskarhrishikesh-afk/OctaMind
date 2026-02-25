@@ -162,7 +162,7 @@ class TestUpdatePersonalityTraits:
 
 class TestAgentTypes:
     def test_has_six_types(self):
-        assert len(AgentManager.AGENT_TYPES) == 6
+        assert len(AgentManager.AGENT_TYPES) == 9
 
     def test_all_types_have_required_keys(self):
         for atype, meta in AgentManager.AGENT_TYPES.items():

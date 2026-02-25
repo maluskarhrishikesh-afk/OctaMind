@@ -18,15 +18,16 @@ from typing import Dict, Any, Optional
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 _STATE_FILE = _PROJECT_ROOT / "running_agents.json"
 
-# Port range for agent windows
-_PORT_START = 8502
+# Port range for agent windows (8502 is reserved for the Hub REST API)
+_PORT_START = 8503
 _PORT_END = 8600
 
 # Map agent type → which Streamlit script to launch
 _AGENT_SCRIPTS: Dict[str, str] = {
     "gmail": "src/agent/ui/email_agent_ui.py",
     "google_drive": "src/agent/ui/drive_agent_ui.py",
-    "multi_agent": "src/agent/ui/multi_agent_ui.py",
+    "multi_agent": "src/agent/ui/personal_assistant_ui.py",  # legacy key — kept for backward compat
+    "personal_assistant": "src/agent/ui/pa_ui.py",
     "whatsapp": "src/agent/ui/whatsapp_agent_ui.py",
     "files": "src/agent/ui/files_agent_ui.py",
     "slack": "src/agent/ui/generic_agent_ui.py",
@@ -56,13 +57,19 @@ def _is_pid_alive(pid: int) -> bool:
     try:
         if sys.platform == "win32":
             import ctypes
-            SYNCHRONIZE = 0x00100000
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            STILL_ACTIVE = 259
             handle = ctypes.windll.kernel32.OpenProcess(
-                SYNCHRONIZE, False, pid)
-            if handle == 0:
+                PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+            )
+            if not handle:
                 return False
+            exit_code = ctypes.c_ulong(0)
+            ok = ctypes.windll.kernel32.GetExitCodeProcess(
+                handle, ctypes.byref(exit_code)
+            )
             ctypes.windll.kernel32.CloseHandle(handle)
-            return True
+            return bool(ok) and exit_code.value == STILL_ACTIVE
         else:
             os.kill(pid, 0)
             return True
@@ -73,7 +80,10 @@ def _is_pid_alive(pid: int) -> bool:
 def _next_free_port() -> int:
     """Find the next port that is not claimed by a running agent."""
     state = _load_state()
-    used_ports = {v["port"] for v in state.values() if _is_pid_alive(v["pid"])}
+    used_ports = {
+        v["port"] for v in state.values()
+        if "port" in v and _is_pid_alive(v["pid"])
+    }
     for port in range(_PORT_START, _PORT_END):
         if port not in used_ports:
             return port
@@ -209,6 +219,8 @@ def get_all_agent_statuses() -> list:
     results = []
     stale = []
     for agent_id, info in state.items():
+        if "port" not in info:   # skip non-agent entries (e.g. tg_pa_* if ever mixed)
+            continue
         alive = _is_pid_alive(info["pid"])
         if alive:
             results.append({

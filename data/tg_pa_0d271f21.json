@@ -1,0 +1,101 @@
+{
+  "offset": 95775227,
+  "messages": [
+    {
+      "id": "1509189824:41",
+      "message_id": 41,
+      "direction": "inbound",
+      "chat_id": 1509189824,
+      "chat_type": "private",
+      "from_user": "Hrishikesh",
+      "from_user_id": 1509189824,
+      "username": "bandraboy007",
+      "text": "Hello bro",
+      "timestamp": "2026-02-24T10:12:13",
+      "read": false,
+      "media_type": null,
+      "file_id": null,
+      "caption": null,
+      "update_id": 95775224
+    },
+    {
+      "id": "1509189824:42",
+      "message_id": 42,
+      "direction": "inbound",
+      "chat_id": 1509189824,
+      "chat_type": "private",
+      "from_user": "Hrishikesh",
+      "from_user_id": 1509189824,
+      "username": "bandraboy007",
+      "text": "Hi dude",
+      "timestamp": "2026-02-24T17:15:00",
+      "read": false,
+      "media_type": null,
+      "file_id": null,
+      "caption": null,
+      "update_id": 95775225
+    },
+    {
+      "id": "1509189824:43:out",
+      "message_id": 43,
+      "direction": "outbound",
+      "chat_id": 1509189824,
+      "chat_type": "private",
+      "from_user": "Bot",
+      "from_user_id": 0,
+      "username": "",
+      "text": "Hello! 😊 How's it going?",
+      "timestamp": "2026-02-24T22:45:08.775894",
+      "read": true,
+      "media_type": null,
+      "file_id": null,
+      "caption": null,
+      "update_id": 0
+    },
+    {
+      "id": "1509189824:44",
+      "message_id": 44,
+      "direction": "inbound",
+      "chat_id": 1509189824,
+      "chat_type": "private",
+      "from_user": "Hrishikesh",
+      "from_user_id": 1509189824,
+      "username": "bandraboy007",
+      "text": "How are you",
+      "timestamp": "2026-02-24T17:15:18",
+      "read": false,
+      "media_type": null,
+      "file_id": null,
+      "caption": null,
+      "update_id": 95775226
+    },
+    {
+      "id": "1509189824:45:out",
+      "message_id": 45,
+      "direction": "outbound",
+      "chat_id": 1509189824,
+      "chat_type": "private",
+      "from_user": "Bot",
+      "from_user_id": 0,
+      "username": "",
+      "text": "⏳ **API rate limit reached.** Please wait 88 minutes before retrying.",
+      "timestamp": "2026-02-24T22:45:24.399047",
+      "read": true,
+      "media_type": null,
+      "file_id": null,
+      "caption": null,
+      "update_id": 0
+    }
+  ],
+  "chats": {
+    "1509189824": {
+      "id": 1509189824,
+      "type": "private",
+      "title": "Hrishikesh",
+      "username": "@bandraboy007",
+      "first_seen": "2026-02-24T10:12:13",
+      "last_seen": "2026-02-24T17:15:18",
+      "message_count": 3
+    }
+  }
+}

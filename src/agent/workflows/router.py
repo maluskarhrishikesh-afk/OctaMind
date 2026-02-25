@@ -1,89 +1,120 @@
 """
-Router — decides whether a user command needs one or multiple agents.
+Router — decides which agents a user command needs.
+
+Fully dynamic: agent knowledge comes entirely from AGENT_REGISTRY.
+Adding a new agent requires ONLY an entry in agent_registry.py —
+this file never needs to change.
 
 Strategy:
-1. Fast keyword scan (no LLM needed for obvious cases).
-2. If only one agent's keywords are present → single-agent (return None).
-3. If both Drive AND Email keywords present → multi-agent workflow.
+1. Build the routing prompt at runtime from the registry descriptions.
+2. Ask the LLM to return a JSON array of agent names, e.g. ["files"] or
+   ["drive", "email"] or [] for pure conversation.
+3. If the LLM is unavailable, fall back to a keyword scan built dynamically
+   from the same registry descriptions.
 
 Usage:
-    agents = detect_agents_needed("download the Q3 report and email it to bob")
-    # → ["drive", "email"]
+    agents = detect_agents_needed("zip Images and upload to Drive, then mail me")
+    # → ["files", "drive", "email"]
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
-from typing import List, Optional
+from typing import Dict, FrozenSet, List, Optional
 
 logger = logging.getLogger("workflows")
 
 # ---------------------------------------------------------------------------
-# Keyword sets
+# Dynamic keyword fallback — built once from the registry at import time.
+# Each agent gets a frozenset of significant words extracted from its description.
+# No words are hardcoded here.
 # ---------------------------------------------------------------------------
-_DRIVE_KEYWORDS: frozenset[str] = frozenset(
+
+# Common English stop-words to skip when extracting capability keywords
+_STOP_WORDS: frozenset[str] = frozenset(
     {
-        "drive",
-        "gdrive",
-        "download",
-        "spreadsheet",
-        "spreadsheets",
-        "presentation",
-        "upload",
-        "docs",
-        "sheets",
-        "slides",
-        "gdoc",
-        "gsheet",
+        "a", "an", "the", "and", "or", "of", "to", "in", "for", "on",
+        "with", "by", "from", "at", "is", "are", "be", "as", "it",
+        "its", "this", "that", "also", "both", "all", "any", "can",
+        "set", "get", "use", "per", "via", "new", "add", "own",
+        "handles", "handle", "agent", "operations", "manage", "find",
     }
 )
 
-_EMAIL_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "email",
-        "emails",
-        "mail",
-        "inbox",
-        "attachment",
-        "attachments",
-        "gmail",
-        "compose",
-        "reply",
-        "forward",
-        "recipient",
-        "cc",
-        "bcc",
-        "smtp",
-    }
-)
 
-# Local-file keywords that imply the Files agent is needed
-_FILES_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "zip",
-        "unzip",
-        "archive",
-        "compress",
-        "extract",
-        "folder",
-        "folders",
-        "file",
-        "files",
-        "rename",
-        "duplicate",
-        "duplicates",
-        "organise",
-        "organize",
-        "disk",
-        "drive",   # also matches local drives
-        "storage",
-        "document",
-        "documents",
-        "downloads",
-        "desktop",
-        "pdf",
-    }
-)
+def _build_keyword_map() -> Dict[str, FrozenSet[str]]:
+    """
+    Extract significant words from each agent's description in the registry
+    and return a dict: {agent_name → frozenset of keywords}.
+    Called lazily the first time the fallback is needed.
+    """
+    from src.agent.workflows.agent_registry import AGENT_REGISTRY
+    keyword_map: Dict[str, FrozenSet[str]] = {}
+    for name, info in AGENT_REGISTRY.items():
+        desc = info.get("description", "")
+        # Split on non-alpha chars, lowercase, remove stop-words and short tokens
+        words = frozenset(
+            w for w in re.findall(r"[a-z]{3,}", desc.lower())
+            if w not in _STOP_WORDS
+        )
+        keyword_map[name] = words
+        logger.debug("Router keyword map [%s]: %s", name, sorted(words))
+    return keyword_map
+
+
+_KEYWORD_MAP: Optional[Dict[str, FrozenSet[str]]] = None
+
+
+def _get_keyword_map() -> Dict[str, FrozenSet[str]]:
+    global _KEYWORD_MAP
+    if _KEYWORD_MAP is None:
+        _KEYWORD_MAP = _build_keyword_map()
+    return _KEYWORD_MAP
+
+
+# ---------------------------------------------------------------------------
+# LLM prompt builder — fully driven by the registry
+# ---------------------------------------------------------------------------
+
+def _build_routing_prompt(command: str) -> str:
+    """
+    Construct a routing prompt that lists every registered agent and its
+    capabilities, then asks the LLM to return a JSON array of needed agents.
+    """
+    from src.agent.workflows.agent_registry import AGENT_REGISTRY
+
+    agent_lines = "\n".join(
+        f'  "{name}": {info["description"]}'
+        for name, info in AGENT_REGISTRY.items()
+    )
+    valid_names = json.dumps(list(AGENT_REGISTRY.keys()))
+
+    return f"""\
+You are a command router for a multi-agent AI system.
+
+Available agents:
+{agent_lines}
+
+Your job: read the user command and return a JSON array of agent names that are \
+needed to fully complete it.
+
+Rules:
+- Only use names from this list: {valid_names}
+- Return [] (empty array) if no agent is needed (pure conversation / small talk)
+- Return multiple agents when the command spans more than one agent's capabilities
+- Return agents in the order they should logically execute
+- Output ONLY the JSON array — no explanation, no markdown, no extra text
+
+Examples:
+  "how are you?" → []
+  "send an email to bob" → ["email"]
+  "zip my Downloads folder" → ["files"]
+  "zip the report and upload it to Drive" → ["files", "drive"]
+  "zip folder, upload to Drive, then mail me" → ["files", "drive", "email"]
+
+Command: {command}
+Answer:"""
 
 
 # ---------------------------------------------------------------------------
@@ -94,83 +125,76 @@ def detect_agents_needed(command: str) -> Optional[List[str]]:
     """
     Analyse *command* and return the list of agents required.
 
-    Uses an LLM to understand natural language intent, with a keyword-based
-    fallback if the LLM is unavailable.
-
     Returns:
-        ["drive", "email"]  — if the command needs BOTH agents.
-        None                — single-agent task; let the normal flow handle it.
+        List of agent names (e.g. ["drive", "email"], ["files"]) — agents needed.
+        None — no agent needed; treat as conversational.
     """
+    from src.agent.workflows.agent_registry import registered_agents
+
+    valid = set(registered_agents())
+
     # ── LLM-based detection ─────────────────────────────────────────────────
     try:
         from src.agent.llm.llm_parser import get_llm_client
         llm = get_llm_client()
-        client = llm.client  # underlying openai.OpenAI instance
-        prompt = (
-            "You are a command router. Given a user command, decide which agents "
-            "are needed.\n\n"
-            "AGENTS:\n"
-            "  DRIVE  — Google Drive file operations (upload, download, list files, "
-            "create documents, share)\n"
-            "  EMAIL  — Gmail operations (read emails, send mail, reply, count, "
-            "search inbox)\n\n"
-            "Reply with EXACTLY ONE of these four words:\n"
-            "  BOTH     — command requires both Drive AND Email\n"
-            "  DRIVE    — command requires only Drive\n"
-            "  EMAIL    — command requires only Email\n"
-            "  NEITHER  — unrelated to either agent\n\n"
-            f"Command: {command}\n"
-            "Answer:"
-        )
-        response = client.chat.completions.create(
+
+        prompt = _build_routing_prompt(command)
+        response = llm.client.chat.completions.create(
             model=llm.model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=5,
+            max_tokens=30,
             temperature=0,
         )
-        verdict = response.choices[0].message.content.strip().upper()
-        if verdict == "BOTH":
-            logger.info("Router [LLM]: multi-agent — drive + email")
-            return ["drive", "email"]
-        if verdict == "DRIVE":
-            logger.info("Router [LLM]: single-agent — drive only")
-            return ["drive"]
-        if verdict == "EMAIL":
-            logger.info("Router [LLM]: single-agent — email only")
-            return ["email"]
-        # NEITHER or unrecognised
-        logger.info("Router [LLM]: neither agent needed — %s", verdict)
-        return None
+        raw = response.choices[0].message.content.strip()
+
+        # Parse JSON array, be tolerant of trailing punctuation
+        parsed = json.loads(raw)
+        if not isinstance(parsed, list):
+            raise ValueError(f"Expected list, got: {type(parsed)}")
+
+        # Validate every name against the live registry
+        agents = [a.lower() for a in parsed if a.lower() in valid]
+
+        if not agents:
+            logger.info("Router [LLM]: no agents needed — conversational")
+            return None
+
+        logger.info("Router [LLM]: %s", agents)
+        return agents
+
     except Exception as exc:
         logger.warning("Router LLM classification failed (%s), falling back to keywords", exc)
 
-    # ── Keyword fallback ────────────────────────────────────────────────────
+    # ── Keyword fallback (dynamic — built from registry descriptions) ────────
+    kmap = _get_keyword_map()
     lower = command.lower()
-    words = set(re.findall(r"[a-z]+", lower))
-    has_drive = bool(_DRIVE_KEYWORDS & words)
-    has_email = bool(_EMAIL_KEYWORDS & words)
-    if has_drive and has_email:
-        logger.info("Router [keywords]: multi-agent — drive + email")
-        return ["drive", "email"]
-    if has_drive:
-        logger.info("Router [keywords]: single-agent — drive only")
-        return ["drive"]
-    if has_email:
-        logger.info("Router [keywords]: single-agent — email only")
-        return ["email"]
-    return None
+    cmd_words = set(re.findall(r"[a-z]{3,}", lower))
+
+    matched: List[str] = [
+        agent for agent, keywords in kmap.items()
+        if keywords & cmd_words
+    ]
+
+    if not matched:
+        return None
+
+    logger.info("Router [keywords]: %s", matched)
+    return matched if len(matched) > 0 else None
 
 
 def describe_routing(command: str) -> dict:
-    """Return a debug-friendly dict showing the routing decision."""
+    """Return a debug-friendly dict showing the routing decision (for testing/logging)."""
+    kmap = _get_keyword_map()
     lower = command.lower()
-    words = set(re.findall(r"[a-z]+", lower))
-    drive_hits = sorted(_DRIVE_KEYWORDS & words)
-    email_hits = sorted(_EMAIL_KEYWORDS & words)
+    cmd_words = set(re.findall(r"[a-z]{3,}", lower))
+    keyword_hits = {
+        agent: sorted(keywords & cmd_words)
+        for agent, keywords in kmap.items()
+        if keywords & cmd_words
+    }
     agents = detect_agents_needed(command)
     return {
         "command": command,
-        "drive_keywords_matched": drive_hits,
-        "email_keywords_matched": email_hits,
-        "routing_decision": agents or "single-agent",
+        "keyword_hits_per_agent": keyword_hits,
+        "routing_decision": agents or [],
     }

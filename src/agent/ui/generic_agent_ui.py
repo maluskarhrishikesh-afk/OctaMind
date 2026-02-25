@@ -17,12 +17,7 @@ from datetime import datetime
 _PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-try:
-    from src.agent.memory.agent_memory import get_agent_memory
-    MEMORY_AVAILABLE = True
-except Exception:
-    MEMORY_AVAILABLE = False
-
+# Skills are stateless executors — memory belongs to Personal Assistants only.
 try:
     from src.agent.core.agent_manager import get_agent_manager
     MANAGER_AVAILABLE = True
@@ -192,15 +187,7 @@ def _handle_conversation(msg: str, agent_type: str, agent_name: str, agent_id: s
 
     # Memory/Remember queries
     if any(w in m for w in ["remember", "recall", "do you know", "did we", "have we", "earlier", "before", "previous"]):
-        if MEMORY_AVAILABLE:
-            try:
-                memory = get_agent_memory(agent_id)
-                remembered = memory.remember(msg)
-                return f"🧠 **Searching my memory...**\n\n{remembered}"
-            except Exception:
-                pass
-        # Fallback if memory not available
-        return "🤔 I'm checking my memory systems... I do maintain episodic and semantic memory, so I should remember our interactions!"
+        return "🤔 I’m still learning your preferences! Tell me what you’d like me to remember, and I’ll do my best to help."
 
     # Greetings
     greetings = ["hi", "hello", "hey", "howdy", "good morning", "good afternoon",
@@ -355,19 +342,6 @@ def main():
         with st.spinner(f"{meta['icon']} {agent_name} is thinking..."):
             reply = _handle_conversation(
                 user_input, agent_type, agent_name, agent_id)
-
-            # Store interaction in memory
-            if MEMORY_AVAILABLE:
-                try:
-                    memory = get_agent_memory(agent_id)
-                    memory.add_interaction(
-                        command=user_input,
-                        action="chat",
-                        result={"response": reply},
-                        metadata={"agent_type": agent_type},
-                    )
-                except Exception:
-                    pass
 
         st.session_state.chat_messages.append(
             {"role": "assistant", "content": reply})

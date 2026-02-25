@@ -125,12 +125,7 @@ def _show_whatsapp_guide() -> None:
 
 
 # ── Optional integrations ─────────────────────────────────────────────────────
-try:
-    from src.agent.memory.agent_memory import get_agent_memory
-    MEMORY_AVAILABLE = True
-except Exception:
-    MEMORY_AVAILABLE = False
-
+# Skills are stateless executors — memory belongs to Personal Assistants only.
 try:
     from src.agent.core.agent_manager import get_agent_manager
     AGENT_MANAGER_AVAILABLE = True
@@ -355,26 +350,6 @@ def main() -> None:  # noqa: C901
     if "pending_command" not in st.session_state:
         st.session_state.pending_command = None
 
-    if "interaction_count" not in st.session_state:
-        st.session_state.interaction_count = 0
-
-    if "last_consolidation_check" not in st.session_state:
-        st.session_state.last_consolidation_check = datetime.now()
-        if MEMORY_AVAILABLE:
-            try:
-                _aid = st.session_state.get("agent_id", os.getenv("AGENT_ID", "whatsapp_agent_default"))
-                memory = get_agent_memory(_aid)
-                consolidator = memory.get_consolidator()
-                if consolidator.last_consolidation:
-                    hours_since = (
-                        datetime.now() - consolidator.last_consolidation
-                    ).total_seconds() / 3600
-                    if hours_since >= 24:
-                        memory.run_consolidation()
-                        logger.info("Startup consolidation completed")
-            except Exception as e:
-                logger.error("Startup consolidation check error: %s", e)
-
     # ── Chat header + clear button ────────────────────────────────────────────
     _hdr_col, _clr_col = st.columns([11, 1])
     with _hdr_col:
@@ -443,17 +418,6 @@ def main() -> None:  # noqa: C901
                         "role": "assistant",
                         "content": convo_response,
                     })
-                    if MEMORY_AVAILABLE:
-                        try:
-                            st.session_state.interaction_count += 1
-                            memory = get_agent_memory(_aid)
-                            consolidator = memory.get_consolidator()
-                            if consolidator.should_consolidate(st.session_state.interaction_count):
-                                memory.run_consolidation()
-                                st.session_state.interaction_count = 0
-                                st.session_state.last_consolidation_check = datetime.now()
-                        except Exception as e:
-                            logger.error("Consolidation check error: %s", e)
                 else:
                     _max_ops = 100
                     if AGENT_MANAGER_AVAILABLE and _aid:
@@ -488,25 +452,6 @@ def main() -> None:  # noqa: C901
                         st.session_state.chat_messages.append(
                             {"role": "assistant", "content": final_response}
                         )
-
-                        if MEMORY_AVAILABLE:
-                            try:
-                                memory = get_agent_memory(_aid)
-                                memory.add_interaction(
-                                    command=user_command,
-                                    action=action,
-                                    result={"status": "success"},
-                                    metadata={"reasoning": result.get("reasoning", "")},
-                                    importance="High",
-                                )
-                                st.session_state.interaction_count += 1
-                                consolidator = memory.get_consolidator()
-                                if consolidator.should_consolidate(st.session_state.interaction_count):
-                                    memory.run_consolidation()
-                                    st.session_state.interaction_count = 0
-                                    st.session_state.last_consolidation_check = datetime.now()
-                            except Exception as e:
-                                logger.error("Memory storage/consolidation error: %s", e)
 
                         st.session_state.history.append({
                             "command": user_command,

@@ -38,11 +38,7 @@ from src.files import (
 
 logger = logging.getLogger("files_agent")
 
-try:
-    from src.agent.memory.agent_memory import get_agent_memory
-    MEMORY_AVAILABLE = True
-except Exception:
-    MEMORY_AVAILABLE = False
+# Skills are stateless executors — memory belongs to Personal Assistants only.
 
 # ── Path hints injected into every LLM context call ─────────────────────────
 def _path_hints() -> str:
@@ -598,16 +594,8 @@ def execute_with_llm_orchestration(
     """
     llm = get_llm_client()
 
-    memory_context = _path_hints() + "\n\n"
-    if agent_id and MEMORY_AVAILABLE:
-        try:
-            memory = get_agent_memory(agent_id)
-            memory_context += memory.get_full_context_for_llm()
-            recalled = memory.recall_for_llm(user_query)
-            if recalled:
-                memory_context += f"\n\n{recalled}"
-        except Exception as exc:
-            logger.warning("Memory load failed: %s", exc)
+    # Skills are stateless — path hints only, no memory injection
+    memory_context = _path_hints()
 
     try:
         response = llm.reason_and_act(
@@ -627,13 +615,6 @@ def execute_with_llm_orchestration(
             )
             if m:
                 artifacts_out["file_path"] = m.group(0).replace("\\", "/")
-
-        if agent_id and MEMORY_AVAILABLE:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory.add_interaction(user_query, str(response))
-            except Exception as exc:
-                logger.warning("Memory save failed: %s", exc)
 
         msg = response if isinstance(response, str) else str(response)
         return {"status": "success", "message": msg, "action": "react_response"}

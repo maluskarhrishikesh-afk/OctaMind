@@ -664,12 +664,39 @@ class GmailServiceClient:
 # Convenient module-level functions
 _client = None
 
+_AUTH_ERROR_PHRASES = (
+    "gmail authorization failed",
+    "authorization failed",
+    "run `python setup_google_auth.py`",
+    "token has expired",
+    "gmail authentication failed",
+)
+
+
+def is_gmail_authorized() -> bool:
+    """Return True if a Gmail token file exists (does not validate it online)."""
+    from src.agent.llm.provider_registry import get_google_credential_path
+    token_path = get_google_credential_path("gmail_token_path") or "config/token.json"
+    from pathlib import Path as _Path
+    return _Path(token_path).exists()
+
+
+def reset_gmail_client() -> None:
+    """Force the next call to re-initialize the Gmail client (e.g. after re-auth)."""
+    global _client
+    _client = None
+
 
 def _get_client():
-    """Get or create the Gmail client singleton"""
+    """Get or create the Gmail client singleton. Resets on auth failure so a
+    re-authorization attempt will be picked up on the next call."""
     global _client
     if _client is None:
-        _client = GmailServiceClient()
+        try:
+            _client = GmailServiceClient()
+        except Exception as exc:
+            _client = None  # ensure next call retries
+            raise exc
     return _client
 
 

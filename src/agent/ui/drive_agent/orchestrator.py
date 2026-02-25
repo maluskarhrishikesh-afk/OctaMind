@@ -31,11 +31,7 @@ from src.drive import (
 
 logger = logging.getLogger("drive_agent")
 
-try:
-    from src.agent.memory.agent_memory import get_agent_memory
-    MEMORY_AVAILABLE = True
-except Exception:
-    MEMORY_AVAILABLE = False
+# Skills are stateless executors — memory belongs to Personal Assistants only.
 
 # ── Drive tool descriptions for LLM orchestration ────────────────────────────
 # This is passed to orchestrate_mcp_tool() so the LLM picks from Drive tools
@@ -231,14 +227,8 @@ def execute_with_llm_orchestration(
         max_operations: Safety cap on bulk API operations per tool call.
     """
     try:
-        # ── Memory context ──────────────────────────────────────────────────
+        # Skills are stateless — zero memory injection
         memory_context = ""
-        if agent_id and MEMORY_AVAILABLE:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory_context = memory.get_full_context_for_llm()
-            except Exception:
-                pass
 
         # ── Tool executor used by the ReAct loop ────────────────────────────
         _ops_capped_note = ""

@@ -90,6 +90,15 @@ class TestFileBridge:
 # ── router ────────────────────────────────────────────────────────────────────
 
 class TestRouter:
+    # Force keyword-only fallback (no real LLM calls) for deterministic tests.
+    @pytest.fixture(autouse=True)
+    def mock_router_llm(self):
+        with patch(
+            "src.agent.llm.llm_parser.get_llm_client",
+            side_effect=RuntimeError("no llm in router tests"),
+        ):
+            yield
+
     def test_drive_and_email_returns_both(self):
         from src.agent.workflows.router import detect_agents_needed
         result = detect_agents_needed(
@@ -98,13 +107,15 @@ class TestRouter:
 
     def test_only_drive_keywords(self):
         from src.agent.workflows.router import detect_agents_needed
+        # keyword fallback: "drive" is in _DRIVE_KEYWORDS → returns ["drive"]
         result = detect_agents_needed("list all files in my drive folder")
-        assert result is None
+        assert result == ["drive"]
 
     def test_only_email_keywords(self):
         from src.agent.workflows.router import detect_agents_needed
+        # keyword fallback: "inbox" is in _EMAIL_KEYWORDS → returns ["email"]
         result = detect_agents_needed("show my inbox messages")
-        assert result is None
+        assert result == ["email"]
 
     def test_no_keywords(self):
         from src.agent.workflows.router import detect_agents_needed
@@ -125,12 +136,14 @@ class TestRouter:
     def test_describe_routing_both_agents(self):
         from src.agent.workflows.router import describe_routing
         info = describe_routing("download file and send email")
-        assert "drive" in info["drive_keywords_matched"] or "file" in info["drive_keywords_matched"]
+        # keyword fallback: "download" is in _DRIVE_KEYWORDS
+        assert "download" in info["drive_keywords_matched"]
         assert "email" in info["email_keywords_matched"] or "send" in info["email_keywords_matched"]
         assert info["routing_decision"] == ["drive", "email"]
 
     def test_describe_routing_single_agent(self):
         from src.agent.workflows.router import describe_routing
+        # keyword fallback: neither "list"/"my"/"files" is in drive/email keywords
         info = describe_routing("list my files")
         assert info["routing_decision"] == "single-agent"
 
@@ -292,7 +305,7 @@ class TestStepRunnerErrors:
         assert ctx.get("quota_result") == {"used": 5, "total": 15}
 
 
-# ── master_orchestrator plan_workflow ─────────────────────────────────────────
+# ── master_orchestrator plan_nl_workflow ──────────────────────────────────────
 
 class TestMasterOrchestratorPlan:
     def _fake_completion(self, content: str):
@@ -310,22 +323,21 @@ class TestMasterOrchestratorPlan:
         return mock_llm, mock_client
 
     def test_plan_workflow_success(self):
-        from src.agent.workflows.master_orchestrator import plan_workflow
+        from src.agent.workflows.master_orchestrator import plan_nl_workflow
 
+        # NLWorkflowStep uses "instruction", not "tool"/"params"
         steps_json = json.dumps([
             {
                 "step_num": 1,
                 "agent": "drive",
-                "tool": "search_files",
-                "params": {"query": "report"},
+                "instruction": "Search for the report file in Drive",
                 "output_key": "file_result",
                 "description": "Find the report",
             },
             {
                 "step_num": 2,
                 "agent": "email",
-                "tool": "send_email",
-                "params": {"to": "alice@example.com", "subject": "Report", "body": "{file_result}"},
+                "instruction": "Email the report to alice@example.com",
                 "output_key": "email_result",
                 "description": "Email the report",
             },
@@ -335,7 +347,7 @@ class TestMasterOrchestratorPlan:
             steps_json)
 
         with patch("src.agent.workflows.master_orchestrator.get_llm_client", return_value=mock_llm):
-            plan = plan_workflow("find report and email to alice")
+            plan = plan_nl_workflow("find report and email to alice")
 
         assert plan is not None
         assert len(plan.steps) == 2
@@ -344,43 +356,45 @@ class TestMasterOrchestratorPlan:
         assert set(plan.agents_needed) == {"drive", "email"}
 
     def test_plan_workflow_strips_code_fences(self):
-        from src.agent.workflows.master_orchestrator import plan_workflow
+        from src.agent.workflows.master_orchestrator import plan_nl_workflow
 
         steps_json = "```json\n" + json.dumps([
-            {"step_num": 1, "agent": "drive", "tool": "get_storage_quota",
-             "params": {}, "output_key": "quota", "description": "Check quota"}
+            {"step_num": 1, "agent": "drive",
+             "instruction": "Get the storage quota",
+             "output_key": "quota", "description": "Check quota"}
         ]) + "\n```"
         mock_llm, mock_client = self._mock_llm()
         mock_client.chat.completions.create.return_value = self._fake_completion(
             steps_json)
 
         with patch("src.agent.workflows.master_orchestrator.get_llm_client", return_value=mock_llm):
-            plan = plan_workflow("check drive storage")
+            plan = plan_nl_workflow("check drive storage")
 
         assert plan is not None
-        assert plan.steps[0].tool == "get_storage_quota"
+        assert plan.steps[0].agent == "drive"
+        assert "quota" in plan.steps[0].instruction.lower() or "storage" in plan.steps[0].instruction.lower()
 
     def test_plan_workflow_returns_none_on_invalid_json(self):
-        from src.agent.workflows.master_orchestrator import plan_workflow
+        from src.agent.workflows.master_orchestrator import plan_nl_workflow
 
         mock_llm, mock_client = self._mock_llm()
         mock_client.chat.completions.create.return_value = self._fake_completion(
             "not json at all")
 
         with patch("src.agent.workflows.master_orchestrator.get_llm_client", return_value=mock_llm):
-            plan = plan_workflow("some command")
+            plan = plan_nl_workflow("some command")
 
         assert plan is None
 
     def test_plan_workflow_returns_none_on_llm_exception(self):
-        from src.agent.workflows.master_orchestrator import plan_workflow
+        from src.agent.workflows.master_orchestrator import plan_nl_workflow
 
         mock_llm, mock_client = self._mock_llm()
         mock_client.chat.completions.create.side_effect = RuntimeError(
             "timeout")
 
         with patch("src.agent.workflows.master_orchestrator.get_llm_client", return_value=mock_llm):
-            plan = plan_workflow("anything")
+            plan = plan_nl_workflow("anything")
 
         assert plan is None
 
@@ -388,68 +402,57 @@ class TestMasterOrchestratorPlan:
 # ── master_orchestrator run_workflow ──────────────────────────────────────────
 
 class TestRunWorkflow:
-    def test_run_workflow_plan_failure_returns_error(self):
+    """run_workflow now delegates to react_workflow internally (ReAct loop)."""
+
+    def test_run_workflow_all_errors_returns_error(self):
+        """When react_workflow returns only error steps status is 'error'."""
         from src.agent.workflows.master_orchestrator import run_workflow
 
-        with patch("src.agent.workflows.master_orchestrator.plan_workflow", return_value=None):
+        error_step = {
+            "status": "error", "step": 1, "agent": "drive",
+            "description": "find file", "error": "Drive unreachable",
+        }
+        with patch("src.agent.workflows.master_orchestrator.react_workflow",
+                   return_value=([error_step], None)), \
+             patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
+            mock_fb.cleanup_all = MagicMock()
             result = run_workflow("some command")
 
         assert result["status"] == "error"
-        assert "plan" in result
         assert result["plan"] is None
 
     def test_run_workflow_executes_steps(self):
+        """When react_workflow returns success steps the result is 'success'."""
         from src.agent.workflows.master_orchestrator import run_workflow
-        from src.agent.workflows.workflow_context import WorkflowPlan, WorkflowStep
 
-        mock_step = WorkflowStep(
-            1, "drive", "get_storage_quota", {}, "quota", "Get quota")
-        mock_plan = WorkflowPlan(
-            command="check storage",
-            agents_needed=["drive"],
-            steps=[mock_step],
-        )
-        mock_step_result = {"status": "success", "step": 1, "agent": "drive",
-                            "tool": "get_storage_quota", "output_key": "quota", "result": {}}
-
-        with patch("src.agent.workflows.master_orchestrator.plan_workflow", return_value=mock_plan), \
-                patch("src.agent.workflows.master_orchestrator.run_step", return_value=mock_step_result), \
-                patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
+        success_step = {
+            "status": "success", "step": 1, "agent": "drive",
+            "description": "get quota", "result": {"used": 5},
+        }
+        with patch("src.agent.workflows.master_orchestrator.react_workflow",
+                   return_value=([success_step], "\u2705 Done")), \
+             patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
             mock_fb.cleanup_all = MagicMock()
             result = run_workflow("check storage")
 
         assert result["status"] == "success"
         assert len(result["steps"]) == 1
         assert result["elapsed"] >= 0
+        assert result["plan"] is None
+        assert result["final_answer"] == "\u2705 Done"
 
     def test_run_workflow_stops_on_step_failure(self):
+        """When react_workflow returns an error step, overall status is 'error'."""
         from src.agent.workflows.master_orchestrator import run_workflow
-        from src.agent.workflows.workflow_context import WorkflowPlan, WorkflowStep
 
-        steps = [
-            WorkflowStep(1, "drive", "search_files", {}, "found", "Step 1"),
-            WorkflowStep(2, "email", "send_email", {}, "sent", "Step 2"),
-        ]
-        mock_plan = WorkflowPlan(command="cmd", agents_needed=[
-                                 "drive", "email"], steps=steps)
-
-        fail_result = {"status": "error", "step": 1, "error": "Drive offline"}
-        success_result = {"status": "success", "step": 2, "agent": "email",
-                          "tool": "send_email", "output_key": "sent", "result": {}}
-
-        call_count = 0
-
-        def mock_run_step(step, ctx):
-            nonlocal call_count
-            call_count += 1
-            return fail_result if step.step_num == 1 else success_result
-
-        with patch("src.agent.workflows.master_orchestrator.plan_workflow", return_value=mock_plan), \
-                patch("src.agent.workflows.master_orchestrator.run_step", side_effect=mock_run_step), \
-                patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
+        fail_step = {
+            "status": "error", "step": 1, "agent": "drive",
+            "description": "search", "error": "Drive offline",
+        }
+        with patch("src.agent.workflows.master_orchestrator.react_workflow",
+                   return_value=([fail_step], None)), \
+             patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
             mock_fb.cleanup_all = MagicMock()
             result = run_workflow("cmd")
 
-        # Should have stopped after step 1 failure
-        assert call_count == 1
         assert result["status"] == "error"

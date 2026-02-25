@@ -15,11 +15,7 @@ from src.agent.llm.llm_parser import get_llm_client
 
 logger = logging.getLogger("drive_agent")
 
-try:
-    from src.agent.memory.agent_memory import get_agent_memory
-    MEMORY_AVAILABLE = True
-except Exception:
-    MEMORY_AVAILABLE = False
+# Skills are stateless executors — memory belongs to Personal Assistants only.
 
 
 def handle_conversation(
@@ -52,21 +48,10 @@ def handle_conversation(
         logger.error(f"Intent classification failed, defaulting to COMMAND: {e}")
         return None  # safe default: try the drive orchestrator
 
-    # Conversational — use LLM with memory + recall
+    # Conversational — use LLM (stateless, no memory)
     try:
+        # Skills are stateless — no memory context
         memory_context = ""
-        if agent_id and MEMORY_AVAILABLE:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory_context = memory.get_full_context_for_llm()
-                # On-demand recall: inject episodic hits if query references the past
-                recalled = memory.recall_for_llm(message)
-                if recalled:
-                    memory_context += f"\n\n{recalled}"
-                    logger.debug(
-                        f"[Memory] Injected episodic recall ({len(recalled)} chars)")
-            except Exception:
-                pass
 
         # Conversation history for short-term continuity
         conversation_history = []
@@ -86,19 +71,6 @@ def handle_conversation(
             memory_context=memory_context,
             conversation_history=conversation_history,
         )
-
-        # Record the exchange to memory
-        if agent_id and MEMORY_AVAILABLE and response:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory.add_interaction(
-                    command=message,
-                    action="conversation",
-                    result={"status": "success", "response": response[:200]},
-                    importance="Medium",
-                )
-            except Exception:
-                pass
 
         return response
     except Exception as e:

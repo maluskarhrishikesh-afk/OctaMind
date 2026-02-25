@@ -16,11 +16,7 @@ from src.agent.llm.llm_parser import get_llm_client
 
 logger = logging.getLogger("files_agent")
 
-try:
-    from src.agent.memory.agent_memory import get_agent_memory
-    MEMORY_AVAILABLE = True
-except Exception:
-    MEMORY_AVAILABLE = False
+# Skills are stateless executors — memory belongs to Personal Assistants only.
 
 
 def handle_conversation(
@@ -44,38 +40,27 @@ def handle_conversation(
         logger.error("Intent classification failed, defaulting to COMMAND: %s", e)
         return None
 
-    # Conversational path — use LLM with memory context
+    # Conversational path — use LLM (stateless, no memory)
     try:
+        # Skills are stateless — no memory context
         memory_context = ""
-        if agent_id and MEMORY_AVAILABLE:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory_context = memory.get_full_context_for_llm()
-                recalled = memory.recall_for_llm(message)
-                if recalled:
-                    memory_context += f"\n\n{recalled}"
-                    logger.debug("[Memory] Injected episodic recall (%d chars)", len(recalled))
-            except Exception as exc:
-                logger.warning("Memory load failed: %s", exc)
 
-        history = st.session_state.get("history", [])
+        conversation_history = []
+        if "chat_messages" in st.session_state:
+            for m in st.session_state.chat_messages[-10:]:
+                conversation_history.append(
+                    {"role": m["role"], "content": m["content"]})
 
-        system_prompt = (
-            f"You are {agent_name or 'Files Agent'}, an AI assistant that helps users "
-            "manage their local files, folders, and drives on their computer. "
-            "You can zip files, organise folders, search for files, analyse disk usage, "
-            "read file contents, and integrate with Gmail and Google Drive.\n\n"
-            + (f"User context:\n{memory_context}" if memory_context else "")
+        if not agent_name:
+            agent_name = os.getenv("AGENT_NAME", "Files Assistant")
+
+        response = llm.chat(
+            user_message=message,
+            agent_name=agent_name,
+            agent_type="Files Agent",
+            memory_context=memory_context,
+            conversation_history=conversation_history,
         )
-
-        response = llm.chat(message, system_prompt=system_prompt, history=history)
-
-        if agent_id and MEMORY_AVAILABLE:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory.add_interaction(message, response)
-            except Exception:
-                pass
 
         return response
     except Exception as exc:

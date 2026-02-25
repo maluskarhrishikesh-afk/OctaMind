@@ -1,0 +1,146 @@
+{
+  "f73be0ee": {
+    "plan_id": "f73be0ee",
+    "directory": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb",
+    "strategy": "by_type",
+    "created_at": "2026-02-25T17:38:12.477619",
+    "moves": [
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\archive.zip",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\Archives\\archive.zip",
+        "file": "archive.zip",
+        "category": "Archives"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\data.csv",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\Text\\data.csv",
+        "file": "data.csv",
+        "category": "Text"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\notes.txt",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\Text\\notes.txt",
+        "file": "notes.txt",
+        "category": "Text"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\photo.jpg",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\Images\\photo.jpg",
+        "file": "photo.jpg",
+        "category": "Images"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\report.pdf",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\Documents\\report.pdf",
+        "file": "report.pdf",
+        "category": "Documents"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\script.py",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\Code\\script.py",
+        "file": "script.py",
+        "category": "Code"
+      }
+    ],
+    "status": "applied",
+    "applied_at": "2026-02-25T17:38:12.539969",
+    "success": 6,
+    "errors": []
+  },
+  "502b669b": {
+    "plan_id": "502b669b",
+    "directory": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5",
+    "strategy": "by_type",
+    "created_at": "2026-02-25T17:40:32.187120",
+    "moves": [
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\archive.zip",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\Archives\\archive.zip",
+        "file": "archive.zip",
+        "category": "Archives"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\data.csv",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\Text\\data.csv",
+        "file": "data.csv",
+        "category": "Text"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\notes.txt",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\Text\\notes.txt",
+        "file": "notes.txt",
+        "category": "Text"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\photo.jpg",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\Images\\photo.jpg",
+        "file": "photo.jpg",
+        "category": "Images"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\report.pdf",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\Documents\\report.pdf",
+        "file": "report.pdf",
+        "category": "Documents"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\script.py",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\Code\\script.py",
+        "file": "script.py",
+        "category": "Code"
+      }
+    ],
+    "status": "applied",
+    "applied_at": "2026-02-25T17:40:32.243432",
+    "success": 6,
+    "errors": []
+  },
+  "1a15217c": {
+    "plan_id": "1a15217c",
+    "directory": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu",
+    "strategy": "by_type",
+    "created_at": "2026-02-25T17:43:53.267887",
+    "moves": [
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\archive.zip",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\Archives\\archive.zip",
+        "file": "archive.zip",
+        "category": "Archives"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\data.csv",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\Text\\data.csv",
+        "file": "data.csv",
+        "category": "Text"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\notes.txt",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\Text\\notes.txt",
+        "file": "notes.txt",
+        "category": "Text"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\photo.jpg",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\Images\\photo.jpg",
+        "file": "photo.jpg",
+        "category": "Images"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\report.pdf",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\Documents\\report.pdf",
+        "file": "report.pdf",
+        "category": "Documents"
+      },
+      {
+        "from": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\script.py",
+        "to": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\Code\\script.py",
+        "file": "script.py",
+        "category": "Code"
+      }
+    ],
+    "status": "applied",
+    "applied_at": "2026-02-25T17:43:53.336595",
+    "success": 6,
+    "errors": []
+  }
+}

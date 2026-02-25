@@ -1,6 +1,6 @@
 ﻿# OctaMind
 
-An AI-powered multi-agent platform for managing Gmail and Google Drive through natural language. Each agent runs as an isolated process with its own memory, personality, and context window.
+An AI-powered platform for managing Gmail, Google Drive, WhatsApp, Telegram, and your local filesystem through natural language. **Personal Assistants** have memory, personality, and context. **Skills** (Email, Drive, WhatsApp, Telegram, Files) are stateless executors that the Personal Assistant orchestrates.
 
 ---
 
@@ -11,8 +11,9 @@ An AI-powered multi-agent platform for managing Gmail and Google Drive through n
 pip install -r requirement/octaMind-requirement.txt
 
 # 2. Configure (see documentation/SETUP.md)
-#    — Add your GitHub token to .env
-#    — Place credentials.json (Google OAuth) in the project root
+#    — Add your GitHub token to config/settings.json
+#    — Place credentials.json (Google OAuth) in config/
+#    — Run python setup_google_auth.py to authorize Gmail + Drive
 
 # 3. Run
 python start.py
@@ -28,9 +29,12 @@ From the **Agent Hub** you create and launch agents. Each agent opens in its own
 
 | Agent | What it does |
 |-------|-------------|
-| **Email Agent** | Read, send, search, count, draft Gmail messages |
-| **Drive Agent** | List, search, upload, download, share Google Drive files |
-| **Multi-Agent Hub** | Cross-agent commands ("Download X and email it to Y") |
+| **Email Agent** | Read, send, search, count, draft, schedule Gmail messages (47 tools) |
+| **Drive Agent** | List, search, upload, download, share, organise Google Drive files (37 tools) |
+| **WhatsApp Agent** | Send/read messages, schedule, auto-reply, contacts, analytics (36 tools) |
+| **Telegram Agent** | Send/read messages, schedule, polls, media, analytics (38 tools) |
+| **Files Agent** | Browse, copy, zip, organise, search your local filesystem (48 tools) |
+| **Personal Assistant** | Cross-agent commands ("Download X and email it to Y", "Zip folder and upload to Drive") |
 
 All agents understand **natural language** — no commands to memorise.
 
@@ -45,6 +49,7 @@ OctaMind/
 ├── credentials.json            # Google OAuth credentials (do not commit)
 ├── token.json                  # OAuth token (auto-generated)
 ├── .env                        # GITHUB_TOKEN (do not commit)
+├── agents.json                 # Registry of all created agents
 │
 ├── src/
 │   ├── agent/
@@ -55,14 +60,20 @@ OctaMind/
 │   │   │   ├── dashboard/      # Agent Hub UI
 │   │   │   ├── email_agent/    # Email Agent UI + orchestrator
 │   │   │   ├── drive_agent/    # Drive Agent UI + orchestrator
-│   │   │   └── multi_agent/    # Multi-Agent Hub UI
+│   │   │   ├── whatsapp_agent/ # WhatsApp Agent UI + orchestrator
+│   │   │   ├── telegram_agent/ # Telegram Agent UI + orchestrator
+│   │   │   ├── files_agent/    # Files Agent UI + orchestrator
+│   │   │   └── multi_agent/    # Personal Assistant Hub UI
 │   │   └── workflows/          # Multi-agent workflow planner + executor
 │   ├── email/                  # Gmail API service layer
-│   └── drive/                  # Google Drive API service layer
+│   ├── drive/                  # Google Drive API service layer
+│   ├── whatsapp/               # Meta WhatsApp Cloud API + webhook server
+│   └── telegram/               # Telegram Bot API + long-poll thread
 │
+├── memory/                     # Per-PA cognitive memory (Personal Assistants only; Skills are stateless)
 ├── tests/                      # Unit + integration tests
 ├── documentation/              # Developer documentation
-└── architecture/               # Architecture deep-dives
+└── docs/                       # Public-facing website (index.html)
 ```
 
 ---
@@ -71,16 +82,19 @@ OctaMind/
 
 | File | Contents |
 |------|----------|
-| [documentation/SETUP.md](documentation/SETUP.md) | Gmail OAuth credentials + GitHub Models token |
-| [documentation/ARCHITECTURE.md](documentation/ARCHITECTURE.md) | How the system works (routing, ReAct, memory) |
-| [documentation/AGENTS.md](documentation/AGENTS.md) | What each agent can do + example commands |
-| [documentation/TOOL_REFERENCE.md](documentation/TOOL_REFERENCE.md) | Every tool — parameters, defaults, example prompts |
-| [documentation/IMPLEMENTATION_STATUS.md](documentation/IMPLEMENTATION_STATUS.md) | What's implemented, what's not, known limits |
-| [architecture/memory-system.md](architecture/memory-system.md) | Full memory architecture reference |
+| [documentation/setup/SETUP.md](documentation/setup/SETUP.md) | Gmail OAuth credentials + GitHub Models token |
+| [documentation/setup/EMAIL_SETUP.md](documentation/setup/EMAIL_SETUP.md) | Gmail + Drive OAuth setup |
+| [documentation/setup/WHATSAPP_SETUP.md](documentation/setup/WHATSAPP_SETUP.md) | WhatsApp Business API + webhook setup |
+| [documentation/setup/TELEGRAM_SETUP.md](documentation/setup/TELEGRAM_SETUP.md) | Telegram Bot token setup |
+| [documentation/architecture/ARCHITECTURE.md](documentation/architecture/ARCHITECTURE.md) | How the system works (routing, ReAct, memory) |
+| [documentation/reference/AGENTS.md](documentation/reference/AGENTS.md) | What each agent can do + example commands |
+| [documentation/reference/TOOL_REFERENCE.md](documentation/reference/TOOL_REFERENCE.md) | Every tool — parameters, defaults, example prompts |
+| [documentation/status/IMPLEMENTATION_STATUS.md](documentation/status/IMPLEMENTATION_STATUS.md) | What’s implemented, what’s not, known limits |
+| [documentation/architecture/memory-system.md](documentation/architecture/memory-system.md) | Full memory architecture reference |
 
 ---
 
 ## Logs
 
-Three log files are written to the project root and **auto-truncated on every start**:
-`drive_agent.log` · `email_agent.log` · `multi_agent.log`
+Log files are written to the project root and **auto-truncated on every start**:
+`email_agent.log` · `drive_agent.log` · `whatsapp_agent.log` · `telegram_agent.log` · `files_agent.log` · `personal_assistant.log`

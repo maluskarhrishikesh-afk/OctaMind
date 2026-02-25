@@ -1,0 +1,29 @@
+[
+  {
+    "id": "323db041",
+    "directory": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb",
+    "days_old": 30,
+    "destination": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpg_scr5jb\\Archive",
+    "description": "Auto-archive files older than 30 days",
+    "created_at": "2026-02-25T17:38:12.587958",
+    "active": true
+  },
+  {
+    "id": "c2106caf",
+    "directory": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5",
+    "days_old": 30,
+    "destination": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpdlffead5\\Archive",
+    "description": "Auto-archive files older than 30 days",
+    "created_at": "2026-02-25T17:40:32.292860",
+    "active": true
+  },
+  {
+    "id": "f610d2bd",
+    "directory": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu",
+    "days_old": 30,
+    "destination": "C:\\Users\\malus\\AppData\\Local\\Temp\\tmpzv9ek4xu\\Archive",
+    "description": "Auto-archive files older than 30 days",
+    "created_at": "2026-02-25T17:43:53.391746",
+    "active": true
+  }
+]

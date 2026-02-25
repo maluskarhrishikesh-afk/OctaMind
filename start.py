@@ -26,7 +26,7 @@ def _port_in_use(port: int) -> bool:
 def _truncate_logs(root: str) -> None:
     """Truncate all *.log files in the project root so each run starts fresh."""
     import glob
-    log_names = ["drive_agent.log", "email_agent.log", "multi_agent.log"]
+    log_names = ["drive_agent.log", "email_agent.log", "personal_assistant.log", "calendar_agent.log"]
     for name in log_names:
         path = os.path.join(root, name)
         try:
@@ -55,23 +55,16 @@ def main():
         webbrowser.open('http://localhost:8501')
         return
 
-    print("Starting OctaMind dashboard on http://localhost:8501 ...")
+    print("Starting OctaMind channels...")
 
-    env = os.environ.copy()
-    env['PYTHONPATH'] = root
-
-    # Launch Streamlit dashboard as a background process
-    subprocess.Popen(
-        [
-            venv_python, '-m', 'streamlit', 'run',
-            os.path.join('src', 'agent', 'ui', 'agent_dashboard.py'),
-            '--server.port', '8501',
-            '--server.headless', 'true',
-        ],
-        cwd=root,
-        env=env,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == 'win32' else 0,
-    )
+    # Each channel knows how to launch itself; adding a new channel only requires
+    # a registry entry — no changes needed here.
+    os.environ.setdefault('PYTHONPATH', root)   # ensure subprocesses inherit it
+    from src.agent.hub.channel_registry import start_all_channels
+    start_all_channels()
+    # Note: the memory consolidation runner is started inside the Streamlit
+    # process (dashboard/app.py _startup) — not here, since this launcher
+    # process exits within seconds of spawning Streamlit.
 
     # Wait for Streamlit to be ready (up to 15 seconds)
     for i in range(15):

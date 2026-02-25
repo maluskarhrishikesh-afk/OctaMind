@@ -19,12 +19,29 @@ import pytest
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _make_llm(token: str = "fake-token"):
-    """Construct a GitHubModelsLLM with a mocked OpenAI client."""
-    with patch.dict(os.environ, {"GITHUB_TOKEN": token}), \
-            patch("src.agent.llm.llm_parser.OpenAI"):
+@pytest.fixture(autouse=True)
+def reset_llm_singleton():
+    """Reset the module-level _llm_client singleton between tests."""
+    import src.agent.llm.llm_parser as m
+    m._llm_client = None
+    yield
+    m._llm_client = None
+
+
+def _make_llm():
+    """
+    Construct a GitHubModelsLLM with build_client fully mocked.
+    Returns an LLM whose .client is a MagicMock so tests can wire
+    completions without touching any real provider.
+    """
+    mock_client = MagicMock()
+    with patch(
+        "src.agent.llm.provider_registry.build_client",
+        return_value=(mock_client, "gpt-4o-mini", "openai_compatible"),
+    ):
         from src.agent.llm.llm_parser import GitHubModelsLLM
-        return GitHubModelsLLM()
+        llm = GitHubModelsLLM()
+    return llm
 
 
 def _fake_completion(content: str):
@@ -39,18 +56,20 @@ def _fake_completion(content: str):
 # ── GitHubModelsLLM.__init__ ──────────────────────────────────────────────────
 
 class TestGitHubModelsLLMInit:
-    def test_raises_without_github_token(self):
-        env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
-        with patch.dict(os.environ, env, clear=True), \
-                patch("src.agent.llm.llm_parser.OpenAI"):
+    def test_raises_without_valid_token(self):
+        """build_client raises ValueError when no token → propagates."""
+        with patch(
+            "src.agent.llm.provider_registry.build_client",
+            side_effect=ValueError("GITHUB_TOKEN not set"),
+        ):
             from src.agent.llm.llm_parser import GitHubModelsLLM
             with pytest.raises(ValueError, match="GITHUB_TOKEN"):
                 GitHubModelsLLM()
 
     def test_initialises_with_valid_token(self):
         llm = _make_llm()
-        assert llm.token == "fake-token"
         assert llm.model == "gpt-4o-mini"
+        assert llm.provider_type == "openai_compatible"
 
 
 # ── orchestrate_mcp_tool ──────────────────────────────────────────────────────
@@ -157,10 +176,11 @@ class TestOrchestrateMcpTool:
 class TestGetLlmClient:
     def test_returns_github_models_llm_instance(self):
         import src.agent.llm.llm_parser as mod
-        # Reset singleton so the test creates a fresh one
         mod._llm_client = None
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "tok"}), \
-                patch("src.agent.llm.llm_parser.OpenAI"):
+        with patch(
+            "src.agent.llm.provider_registry.build_client",
+            return_value=(MagicMock(), "gpt-4o-mini", "openai_compatible"),
+        ):
             client = mod.get_llm_client()
         from src.agent.llm.llm_parser import GitHubModelsLLM
         assert isinstance(client, GitHubModelsLLM)
@@ -168,8 +188,10 @@ class TestGetLlmClient:
     def test_caches_singleton(self):
         import src.agent.llm.llm_parser as mod
         mod._llm_client = None
-        with patch.dict(os.environ, {"GITHUB_TOKEN": "tok"}), \
-                patch("src.agent.llm.llm_parser.OpenAI"):
+        with patch(
+            "src.agent.llm.provider_registry.build_client",
+            return_value=(MagicMock(), "gpt-4o-mini", "openai_compatible"),
+        ):
             c1 = mod.get_llm_client()
             c2 = mod.get_llm_client()
         assert c1 is c2

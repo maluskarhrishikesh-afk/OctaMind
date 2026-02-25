@@ -100,26 +100,45 @@ def get_gmail_service():
                 creds = None
 
         if not creds or not creds.valid:
+            # ── Step 1: try to refresh an expired token ─────────────────────
             if creds and creds.expired and creds.refresh_token:
                 try:
                     creds.refresh(Request())
+                    with open(TOKEN_PATH, 'w') as token:
+                        token.write(creds.to_json())
                     print("Refreshed OAuth 2.0 token")
                 except Exception as e:
-                    print(f"Error refreshing token: {e}")
-                    creds = None
-            else:
+                    print(f"Refresh token expired or revoked ({e}). "
+                          "Removing stale token and re-running OAuth flow...")
+                    try:
+                        Path(TOKEN_PATH).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    creds = None  # fall through to full OAuth flow below
+
+            # ── Step 2: full OAuth flow (first-time or after refresh failure) ─
+            if not creds or not creds.valid:
                 try:
+                    if not Path(CREDENTIALS_PATH).exists():
+                        raise FileNotFoundError(
+                            f"credentials.json not found at '{CREDENTIALS_PATH}'. "
+                            "Download it from Google Cloud Console → APIs & Services → Credentials "
+                            "and place it in the config/ folder."
+                        )
+                    print("Opening browser for Google authorization...")
                     flow = InstalledAppFlow.from_client_secrets_file(
                         CREDENTIALS_PATH, SCOPES)
                     creds = flow.run_local_server(port=0)
-
-                    # Save credentials for next run
                     with open(TOKEN_PATH, 'w') as token:
                         token.write(creds.to_json())
-                    print("Created new OAuth 2.0 credentials")
+                    print(f"Authorization complete. Token saved to {TOKEN_PATH}")
                 except Exception as e:
-                    print(f"OAuth error: {e}")
-                    creds = None
+                    print(f"OAuth flow failed: {e}")
+                    raise Exception(
+                        f"Gmail authorization failed: {e}\n"
+                        "Run `python setup_google_auth.py` from the project root "
+                        "to complete Google authorization."
+                    )
 
     # Try Application Default Credentials (ADC)
     if not creds:
@@ -130,6 +149,9 @@ def get_gmail_service():
         except Exception as e:
             print(f"ADC error: {e}")
             raise Exception(
-                "All authentication methods failed. Please set up Gmail API credentials.")
+                "Gmail authentication failed. No valid credentials found. "
+                "Please run `python setup_google_auth.py` from the project root "
+                "to authorise Gmail access."
+            )
 
     return build('gmail', 'v1', credentials=creds)

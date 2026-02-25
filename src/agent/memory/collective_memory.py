@@ -118,7 +118,7 @@ def get_collective_context(
                 if len(own_content) > _MAX_CHARS_OWN:
                     own_content = "...\n" + own_content[-_MAX_CHARS_OWN:]
                 if own_content.strip():
-                    sections.append("### ⚡ Multi-Agent Hub — My own workflow history")
+                    sections.append("### ⚡ Personal Assistant — My own workflow history")
                     sections.append(own_content.strip())
                     sections.append("")
             except Exception:

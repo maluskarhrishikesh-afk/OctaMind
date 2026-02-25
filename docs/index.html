@@ -681,8 +681,8 @@
 
         .agents-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
             max-width: 1000px;
             margin: 0 auto;
         }
@@ -691,7 +691,7 @@
             background: var(--card-bg);
             border: 1px solid var(--border-dim);
             border-radius: var(--radius);
-            padding: 32px 24px;
+            padding: 18px 14px 14px;
             text-align: center;
             transition: all 0.3s;
             cursor: default;
@@ -704,36 +704,90 @@
         }
 
         .agent-card:hover {
-            transform: translateY(-6px);
+            transform: translateY(-4px);
             border-color: var(--border);
-            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.3);
         }
 
         .agent-icon {
-            font-size: 2.8rem;
-            margin-bottom: 16px;
-        }
-
-        .agent-name {
-            font-size: 1rem;
-            font-weight: 700;
-            color: #fff;
+            font-size: 1.8rem;
             margin-bottom: 8px;
         }
 
+        .agent-name {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+
         .agent-desc {
-            font-size: 0.82rem;
+            font-size: 0.75rem;
             color: var(--muted);
-            line-height: 1.6;
+            line-height: 1.5;
+            display: none; /* hidden — detail is in the abilities panel */
+        }
+
+        /* ── Abilities expandable ─────────────────────────── */
+        .abilities-details {
+            margin-top: 8px;
+            text-align: left;
+        }
+
+        .abilities-link {
+            display: inline-block;
+            font-size: 0.7rem;
+            color: var(--pink-light);
+            cursor: pointer;
+            list-style: none;
+            text-align: center;
+            width: 100%;
+            user-select: none;
+            transition: opacity 0.2s;
+        }
+
+        .abilities-link::-webkit-details-marker { display: none; }
+        .abilities-link::marker { display: none; }
+
+        .abilities-link:hover { opacity: 0.75; }
+
+        .abilities-list {
+            list-style: none;
+            margin: 6px 0 0;
+            padding: 0;
+            text-align: left;
+            animation: fadeIn 0.15s ease;
+        }
+
+        .abilities-list li {
+            font-size: 0.7rem;
+            color: var(--muted);
+            padding: 2px 0 2px 14px;
+            position: relative;
+            line-height: 1.45;
+        }
+
+        .abilities-list li::before {
+            content: '▸';
+            position: absolute;
+            left: 0;
+            color: var(--pink);
+            font-size: 0.6rem;
+            top: 3px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-4px); }
+            to   { opacity: 1; transform: translateY(0);    }
         }
 
         .agent-badge {
             position: absolute;
-            top: 14px;
-            right: 14px;
-            padding: 3px 10px;
+            top: 10px;
+            right: 10px;
+            padding: 2px 7px;
             border-radius: 100px;
-            font-size: 0.65rem;
+            font-size: 0.58rem;
             font-weight: 700;
             letter-spacing: 0.5px;
         }
@@ -1551,7 +1605,7 @@
         <div class="section-header reveal">
             <div class="section-tag">Agent Types</div>
             <h2>Agents for every<br><em>service you use</em></h2>
-            <p class="section-sub">Email, Drive, WhatsApp, and Files agents are live today. More services on the way.</p>
+            <p class="section-sub">Email, Drive, WhatsApp, Telegram, and Files agents are live today. More services on the way.</p>
         </div>
 
         <div class="agents-grid">
@@ -1559,43 +1613,123 @@
                 <span class="agent-badge badge-live">LIVE</span>
                 <div class="agent-icon">📧</div>
                 <div class="agent-name">Email Agent</div>
-                <div class="agent-desc">Send, read, delete, search, label, schedule, summarize, and fully automate your Gmail inbox.</div>
+                <details class="abilities-details">
+                    <summary class="abilities-link">✨ What can I do?</summary>
+                    <ul class="abilities-list">
+                        <li>Read &amp; search your emails</li>
+                        <li>Send emails &amp; replies</li>
+                        <li>Delete, label &amp; organise</li>
+                        <li>Schedule emails for later</li>
+                        <li>Spot urgent &amp; unread messages</li>
+                        <li>Extract to-dos from email threads</li>
+                    </ul>
+                </details>
             </div>
             <div class="agent-card active reveal">
                 <span class="agent-badge badge-live">LIVE</span>
                 <div class="agent-icon">📁</div>
                 <div class="agent-name">Google Drive</div>
-                <div class="agent-desc">List, search, upload, download, share and organize Drive files — including cross-agent handoff to email.</div>
+                <details class="abilities-details">
+                    <summary class="abilities-link">✨ What can I do?</summary>
+                    <ul class="abilities-list">
+                        <li>Browse, upload &amp; download files</li>
+                        <li>Share files with anyone</li>
+                        <li>Find &amp; remove duplicate files</li>
+                        <li>Organise folders automatically</li>
+                        <li>Check storage usage &amp; reports</li>
+                        <li>Email files directly from Drive</li>
+                    </ul>
+                </details>
             </div>
             <div class="agent-card active reveal">
                 <span class="agent-badge badge-live">LIVE</span>
                 <div class="agent-icon">💬</div>
-                <div class="agent-name">WhatsApp Agent</div>
-                <div class="agent-desc">Send and read messages, search conversations, schedule messages, manage contacts, and set auto-replies.</div>
+                <div class="agent-name">WhatsApp</div>
+                <details class="abilities-details">
+                    <summary class="abilities-link">✨ What can I do?</summary>
+                    <ul class="abilities-list">
+                        <li>Send &amp; read WhatsApp messages</li>
+                        <li>Schedule messages for later</li>
+                        <li>Set up auto-replies</li>
+                        <li>Manage &amp; search contacts</li>
+                        <li>Summarise long conversations</li>
+                        <li>Forward messages to email</li>
+                    </ul>
+                </details>
             </div>
             <div class="agent-card active reveal">
                 <span class="agent-badge badge-live">LIVE</span>
-                <div class="agent-icon">🗂️</div>
+                <div class="agent-icon">�</div>
+                <div class="agent-name">Telegram</div>
+                <details class="abilities-details">
+                    <summary class="abilities-link">✨ What can I do?</summary>
+                    <ul class="abilities-list">
+                        <li>Send &amp; receive Telegram messages</li>
+                        <li>Schedule messages for later</li>
+                        <li>Create polls &amp; pin messages</li>
+                        <li>Summarise chats &amp; find urgent messages</li>
+                        <li>Forward messages to email</li>
+                        <li>Send photos &amp; documents</li>
+                    </ul>
+                </details>
+            </div>
+            <div class="agent-card active reveal">
+                <span class="agent-badge badge-live">LIVE</span>
+                <div class="agent-icon">�🗂️</div>
                 <div class="agent-name">Files Agent</div>
-                <div class="agent-desc">Manage your local filesystem — zip, copy, search, organise by type or date, find duplicates, and monitor disk usage.</div>
+                <details class="abilities-details">
+                    <summary class="abilities-link">✨ What can I do?</summary>
+                    <ul class="abilities-list">
+                        <li>Browse &amp; search your computer</li>
+                        <li>Copy, move &amp; delete files</li>
+                        <li>Zip &amp; unzip folders</li>
+                        <li>Find duplicate files</li>
+                        <li>Sort files by type or date</li>
+                        <li>Check how much disk space is used</li>
+                    </ul>
+                </details>
             </div>
             <div class="agent-card active reveal">
                 <span class="agent-badge badge-live">LIVE</span>
                 <div class="agent-icon">🔧</div>
                 <div class="agent-name">Custom Agent</div>
-                <div class="agent-desc">Define your own agent with a custom role, personality, knowledge base, and natural language prompt.</div>
+                <details class="abilities-details">
+                    <summary class="abilities-link">✨ What can I do?</summary>
+                    <ul class="abilities-list">
+                        <li>Build your own AI assistant</li>
+                        <li>Give it a name &amp; personality</li>
+                        <li>Define its focus &amp; role</li>
+                        <li>Works with any task you describe</li>
+                    </ul>
+                </details>
             </div>
             <div class="agent-card reveal">
                 <span class="agent-badge badge-soon">Soon</span>
                 <div class="agent-icon">📅</div>
                 <div class="agent-name">Calendar</div>
-                <div class="agent-desc">Create events, view schedule, set reminders, reschedule, and export ICS files.</div>
+                <details class="abilities-details">
+                    <summary class="abilities-link">✨ What can I do?</summary>
+                    <ul class="abilities-list">
+                        <li>Create &amp; reschedule events</li>
+                        <li>View your daily schedule</li>
+                        <li>Set reminders &amp; alerts</li>
+                        <li>Export calendar files (.ics)</li>
+                    </ul>
+                </details>
             </div>
             <div class="agent-card reveal">
                 <span class="agent-badge badge-soon">Soon</span>
                 <div class="agent-icon">💼</div>
                 <div class="agent-name">Slack Agent</div>
-                <div class="agent-desc">Send messages, list channels, manage notifications, and search workspace conversations.</div>
+                <details class="abilities-details">
+                    <summary class="abilities-link">✨ What can I do?</summary>
+                    <ul class="abilities-list">
+                        <li>Send &amp; read Slack messages</li>
+                        <li>Browse &amp; search channels</li>
+                        <li>Manage notifications</li>
+                        <li>Search your whole workspace</li>
+                    </ul>
+                </details>
             </div>
         </div>
     </section>
@@ -1681,7 +1815,7 @@
         <div class="section-header reveal">
             <div class="section-tag">Architecture</div>
             <h2>Modular, clean<br><em>&amp; extensible</em></h2>
-            <p class="section-sub">Five isolated Streamlit processes. Each agent gets its own window and port. Zero coupling between agents — and zero coupling to any external platform.</p>
+            <p class="section-sub">Isolated Streamlit processes — one per agent. Each gets its own window and port. Zero coupling between agents — and zero coupling to any external platform.</p>
         </div>
 
         <div class="arch-diagram reveal">
@@ -1692,21 +1826,26 @@
                 </div>
             </div>
             <div class="arch-arrow">↓&nbsp;&nbsp;spawns isolated sub-process per agent&nbsp;&nbsp;↓</div>
-            <div class="arch-row" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr;">
+            <div class="arch-row" style="grid-template-columns: 1fr 1fr 1fr 1fr 1fr 1fr;">
                 <div class="arch-node">
                     <div class="arch-node-icon">📧</div>
                     <div class="arch-node-title">Email Agent</div>
-                    40+ actions<br>Gmail API
+                    47 actions<br>Gmail API
                 </div>
                 <div class="arch-node">
                     <div class="arch-node-icon">📁</div>
                     <div class="arch-node-title">Drive Agent</div>
-                    25+ actions<br>Drive API
+                    37 actions<br>Drive API
                 </div>
                 <div class="arch-node">
                     <div class="arch-node-icon">💬</div>
                     <div class="arch-node-title">WhatsApp</div>
-                    20+ actions<br>WA Business API
+                    36 actions<br>WA Business API
+                </div>
+                <div class="arch-node">
+                    <div class="arch-node-icon">📨</div>
+                    <div class="arch-node-title">Telegram</div>
+                    38 actions<br>Telegram Bot API
                 </div>
                 <div class="arch-node">
                     <div class="arch-node-icon">🗂️</div>
@@ -1735,6 +1874,7 @@
             <div class="tech-pill"><span class="tech-logo">📧</span> Gmail API</div>
             <div class="tech-pill"><span class="tech-logo">�</span> Drive API</div>
             <div class="tech-pill"><span class="tech-logo">💬</span> WhatsApp Business API</div>
+            <div class="tech-pill"><span class="tech-logo">📨</span> Telegram Bot API</div>
             <div class="tech-pill"><span class="tech-logo">�🔑</span> OAuth 2.0</div>
             <div class="tech-pill"><span class="tech-logo">🧪</span> Pytest</div>
             <div class="tech-pill"><span class="tech-logo">📦</span> GitHub Models</div>
@@ -1763,6 +1903,7 @@
                     <li class="done"><span class="check-done">✓</span> Email agent — 40+ actions</li>
                     <li class="done"><span class="check-done">✓</span> Google Drive agent</li>
                     <li class="done"><span class="check-done">✓</span> WhatsApp agent</li>
+                    <li class="done"><span class="check-done">✓</span> Telegram agent</li>
                     <li class="done"><span class="check-done">✓</span> Files agent (local FS)</li>
                     <li class="done"><span class="check-done">✓</span> Multi-agent workflows</li>
                     <li class="done"><span class="check-done">✓</span> Persistent 6-layer memory</li>

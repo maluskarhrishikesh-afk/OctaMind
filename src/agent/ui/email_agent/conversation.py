@@ -16,12 +16,7 @@ from src.agent.llm.llm_parser import get_llm_client
 
 logger = logging.getLogger("email_agent")
 
-# Optional memory integration
-try:
-    from src.agent.memory.agent_memory import get_agent_memory
-    MEMORY_AVAILABLE = True
-except Exception:
-    MEMORY_AVAILABLE = False
+# Skills are stateless executors — memory belongs to Personal Assistants only.
 
 
 def handle_conversation(
@@ -54,20 +49,8 @@ def handle_conversation(
 
     # For conversational messages, use LLM
     try:
-        # Get memory context if available
+        # Skills are stateless — no memory context
         memory_context = ""
-        if agent_id and MEMORY_AVAILABLE:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory_context = memory.get_full_context_for_llm()
-                # On-demand recall: inject episodic hits so the LLM can answer
-                recalled = memory.recall_for_llm(message)
-                if recalled:
-                    memory_context += f"\n\n{recalled}"
-                    logger.debug(
-                        f"[Memory] Injected episodic recall ({len(recalled)} chars)")
-            except Exception:
-                pass
 
         # Get conversation history from session state
         conversation_history = []
@@ -89,24 +72,6 @@ def handle_conversation(
             memory_context=memory_context,
             conversation_history=conversation_history,
         )
-
-        # Record conversational interaction to memory
-        if agent_id and MEMORY_AVAILABLE and response:
-            try:
-                memory = get_agent_memory(agent_id)
-                memory.add_interaction(
-                    command=message,
-                    action="conversation",
-                    result={'status': 'success',
-                            'message': 'Natural conversation'},
-                    metadata={'response_preview': response[:100] if len(
-                        response) > 100 else response},
-                    importance="Low",
-                )
-                logger.debug("Recorded conversational interaction to memory")
-            except Exception as mem_error:
-                logger.error(
-                    f"Failed to record conversation to memory: {str(mem_error)}")
 
         return response
 
