@@ -607,22 +607,34 @@ def build_report(
         ]))
         story.append(sn_table)
 
+        # Engine indicator
+        engine = sn.get("sentiment_engine", "keyword")
+        engine_label = (
+            "✓ LLM-classified (context-aware, handles sarcasm and nuance)"
+            if engine == "llm" else
+            "⚠ Keyword NLP fallback (LLM unavailable)"
+        )
+        story.append(Spacer(1, 0.1 * cm))
+        story.append(Paragraph(f"Analysis engine: {engine_label}", st["body_small"]))
+
         # Top headlines
-        story.append(Spacer(1, 0.2 * cm))
+        story.append(Spacer(1, 0.15 * cm))
         story.append(Paragraph("Recent Headlines (sample):", st["bold"]))
         for item in (sn.get("news_items") or [])[:8]:
             label = item.get("sentiment", "Neutral")
             icon  = "▲" if label == "Positive" else ("▼" if label == "Negative" else "–")
             pub   = item.get("published", "")
+            conf  = item.get("llm_confidence")
+            conf_str = f" [{conf:.0%}]" if conf is not None else ""
             story.append(Paragraph(
-                f"  {icon} [{pub}] {item.get('title', '')}  <font color='grey'>({item.get('publisher','')})</font>",
+                f"  {icon} [{pub}] {item.get('title', '')}{conf_str}  "
+                f"<font color='grey'>({item.get('publisher','')})</font>",
                 st["body_small"]
             ))
 
         story.append(Spacer(1, 0.15 * cm))
         story.append(Paragraph(
-            "Sentiment is computed using keyword-based NLP with recency-weighting. "
-            "It is indicative only and may not capture nuance, sarcasm, or complex financial language.",
+            sn.get("note", "Indicative only."),
             st["body_small"]
         ))
 

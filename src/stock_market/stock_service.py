@@ -19,6 +19,7 @@ Requires: pip install yfinance
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import datetime, timedelta
@@ -387,82 +388,220 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
 
 def pattern_detection(symbol: str, period: str = "3mo") -> Dict[str, Any]:
     """
-    Detect support/resistance, trend direction, and basic candlestick patterns
-    (doji, hammer, engulfing, shooting star).
+    Detect support/resistance, trend direction, candlestick patterns,
+    pivot points, 52-week levels, VWAP, and Volume Profile (POC/Value Area).
+
+    Calculations
+    ------------
+    Classic S&R     : rolling min(lows[-20]), max(highs[-20])
+
+    Pivot Points    : Classic daily pivot from previous session OHLC
+        P  = (H + L + C) / 3
+        R1 = 2P − L,  R2 = P + (H − L),  R3 = H + 2(P − L)
+        S1 = 2P − H,  S2 = P − (H − L),  S3 = L − 2(H − P)
+
+    52-Week H/L     : from yfinance info (fiftyTwoWeekHigh/Low)
+
+    VWAP (5-day)    : Σ(typical_price × volume) / Σ(volume)
+                      typical_price = (H + L + C) / 3 per hourly bar
+                      Uses 5-day hourly bars; acts as a rolling multi-day VWAP
+                      (not a single-session reset VWAP — noted for expert review)
+
+    Volume Profile  : Divides price range into 20 equal buckets.
+                      Sums volume traded in each bucket over the period.
+                      POC  = price level with highest volume concentration.
+                      Value Area = price range containing 70% of total volume
+                                   (expanded outward from POC — standard VA method).
 
     Args:
         symbol: Ticker symbol.
-        period: Historical period (default "3mo").
+        period: Historical period for S&R + patterns (default "3mo").
 
-    Returns detected patterns, support, resistance, and trend.
+    Returns detected patterns, support, resistance, pivot points,
+    VWAP, volume profile, and 52-week levels.
     """
+    import math as _math
+
     try:
         t = _ticker(symbol)
         hist = t.history(period=period)
         if hist.empty or len(hist) < 20:
             return {"status": "error", "symbol": symbol.upper(), "message": "Insufficient data."}
 
-        closes = list(hist["Close"].dropna())
-        highs  = list(hist["High"].dropna())
-        lows   = list(hist["Low"].dropna())
-        opens  = list(hist["Open"].dropna())
+        closes  = list(hist["Close"].dropna())
+        highs   = list(hist["High"].dropna())
+        lows    = list(hist["Low"].dropna())
+        opens   = list(hist["Open"].dropna())
+        volumes = list(hist["Volume"].dropna()) if "Volume" in hist.columns else []
 
-        # Support & Resistance (rolling 20-period min/max)
-        lookback = min(20, len(closes))
-        support    = round(min(lows[-lookback:]), 4)
+        # ── Classic S&R (rolling 20-period min/max) ────────────────────────────
+        lookback   = min(20, len(closes))
+        support    = round(min(lows[-lookback:]),  4)
         resistance = round(max(highs[-lookback:]), 4)
         latest     = closes[-1]
 
-        # Trend (SMA 20 direction)
+        # ── Pivot Points (Classic daily formula) ───────────────────────────────
+        # Computed from the second-to-last bar ("previous session")
+        pivot_points: Dict[str, Any] = {}
+        if len(highs) >= 2:
+            ph = highs[-2]
+            pl = lows[-2]
+            pc = closes[-2]
+            P  = (ph + pl + pc) / 3
+            pivot_points = {
+                "pivot": round(P,                    4),
+                "r1":    round(2 * P - pl,            4),
+                "r2":    round(P + (ph - pl),         4),
+                "r3":    round(ph + 2 * (P - pl),     4),
+                "s1":    round(2 * P - ph,            4),
+                "s2":    round(P - (ph - pl),         4),
+                "s3":    round(pl - 2 * (ph - P),     4),
+            }
+
+        # ── 52-Week High / Low ─────────────────────────────────────────────────
+        w52_high: Optional[float] = None
+        w52_low:  Optional[float] = None
+        try:
+            info     = t.info
+            w52_high = _safe_float(info.get("fiftyTwoWeekHigh"))
+            w52_low  = _safe_float(info.get("fiftyTwoWeekLow"))
+        except Exception:
+            pass
+
+        # ── VWAP — 5-day hourly rolling ────────────────────────────────────────
+        # typical_price = (H + L + C) / 3
+        # VWAP = Σ(TP × Volume) / Σ(Volume)
+        # NOTE: This is a 5-day rolling VWAP, NOT a single-day VWAP that resets
+        # at market open. Suitable for a multi-day trend reference.
+        vwap_5d: Optional[float] = None
+        try:
+            intra = t.history(period="5d", interval="1h")
+            if not intra.empty and "Volume" in intra.columns:
+                ic = list(intra["Close"].dropna())
+                ih = list(intra["High"].dropna())
+                il = list(intra["Low"].dropna())
+                iv = list(intra["Volume"].dropna())
+                n  = min(len(ic), len(ih), len(il), len(iv))
+                if n > 0:
+                    total_vol = sum(iv[:n])
+                    if total_vol > 0:
+                        vwap_5d = round(
+                            sum(((ih[i] + il[i] + ic[i]) / 3) * iv[i] for i in range(n)) / total_vol,
+                            4,
+                        )
+        except Exception:
+            pass
+
+        # ── Volume Profile (POC + Value Area) ─────────────────────────────────
+        # Bucket the price range into 20 equal-width bins.
+        # Sum volume per bucket. POC = max-volume bucket.
+        # Value Area = 70% of total volume centred on POC (standard VA algo).
+        poc:              Optional[float] = None
+        value_area_high:  Optional[float] = None
+        value_area_low:   Optional[float] = None
+        if volumes and len(volumes) >= len(closes):
+            vols    = volumes[:len(closes)]
+            p_min   = min(lows)
+            p_max   = max(highs)
+            n_buckets = 20
+            bucket_sz = (p_max - p_min) / n_buckets if p_max != p_min else 1.0
+
+            vol_buckets = [0.0] * n_buckets
+            for i, cp in enumerate(closes):
+                idx = min(int((cp - p_min) / bucket_sz), n_buckets - 1)
+                vol_buckets[idx] += vols[i]
+
+            poc_idx = vol_buckets.index(max(vol_buckets))
+            poc     = round(p_min + (poc_idx + 0.5) * bucket_sz, 4)
+
+            total_v  = sum(vol_buckets)
+            target_v = total_v * 0.70
+            va_vol   = vol_buckets[poc_idx]
+            lo_idx, hi_idx = poc_idx, poc_idx
+
+            while va_vol < target_v and (lo_idx > 0 or hi_idx < n_buckets - 1):
+                up_vol   = vol_buckets[hi_idx + 1] if hi_idx < n_buckets - 1 else 0.0
+                down_vol = vol_buckets[lo_idx - 1] if lo_idx > 0         else 0.0
+                if up_vol >= down_vol:
+                    hi_idx += 1
+                    va_vol += vol_buckets[hi_idx]
+                else:
+                    lo_idx -= 1
+                    va_vol += vol_buckets[lo_idx]
+
+            value_area_high = round(p_min + (hi_idx + 1) * bucket_sz, 4)
+            value_area_low  = round(p_min +  lo_idx      * bucket_sz, 4)
+
+        # ── Trend (SMA-20 slope) ───────────────────────────────────────────────
         sma20_now  = sum(closes[-20:]) / 20
         sma20_prev = sum(closes[-21:-1]) / 20 if len(closes) >= 21 else sma20_now
-        trend = "uptrend" if sma20_now > sma20_prev else ("downtrend" if sma20_now < sma20_prev else "sideways")
+        if   sma20_now > sma20_prev * 1.001:
+            trend = "uptrend"
+        elif sma20_now < sma20_prev * 0.999:
+            trend = "downtrend"
+        else:
+            trend = "sideways"
 
+        # ── Candlestick Patterns ───────────────────────────────────────────────
         patterns: List[str] = []
-        # Check last candle(s)
         if len(closes) >= 2:
             o, c, h, l = opens[-1], closes[-1], highs[-1], lows[-1]
-            body  = abs(c - o)
+            body   = abs(c - o)
             range_ = h - l if h != l else 0.0001
 
-            # Doji: very small body
             if body / range_ < 0.1:
                 patterns.append("Doji — indecision candle")
 
-            # Hammer (bullish): small body, long lower shadow, in downtrend
             lower_shadow = min(o, c) - l
             upper_shadow = h - max(o, c)
             if lower_shadow > 2 * body and upper_shadow < body and trend == "downtrend":
                 patterns.append("Hammer — potential bullish reversal")
-
-            # Shooting Star (bearish): long upper shadow, small body, in uptrend
             if upper_shadow > 2 * body and lower_shadow < body and trend == "uptrend":
                 patterns.append("Shooting Star — potential bearish reversal")
 
-            # Bullish Engulfing
-            if len(closes) >= 2:
-                o_prev, c_prev = opens[-2], closes[-2]
-                if c_prev < o_prev and c > o and c > o_prev and o < c_prev:
-                    patterns.append("Bullish Engulfing — buy signal")
+            o_prev, c_prev = opens[-2], closes[-2]
+            if c_prev < o_prev and c > o and c > o_prev and o < c_prev:
+                patterns.append("Bullish Engulfing — momentum shift")
+            if c_prev > o_prev and c < o and c < o_prev and o > c_prev:
+                patterns.append("Bearish Engulfing — momentum shift")
 
-            # Bearish Engulfing
-            if len(closes) >= 2:
-                o_prev, c_prev = opens[-2], closes[-2]
-                if c_prev > o_prev and c < o and c < o_prev and o > c_prev:
-                    patterns.append("Bearish Engulfing — sell pressure signal")
-
-        price_position = (
-            "near resistance" if latest > resistance * 0.97 else
-            "near support"    if latest < support * 1.03    else
-            "mid-range"
-        )
+        # ── Price position context ─────────────────────────────────────────────
+        tags = []
+        if resistance and latest > resistance * 0.97:
+            tags.append("near 20d resistance")
+        elif support and latest < support * 1.03:
+            tags.append("near 20d support")
+        if pivot_points.get("r1") and latest >= pivot_points["r1"]:
+            tags.append("above pivot R1")
+        elif pivot_points.get("s1") and latest <= pivot_points["s1"]:
+            tags.append("below pivot S1")
+        if vwap_5d:
+            tags.append("above VWAP" if latest >= vwap_5d else "below VWAP")
+        if w52_high and abs(latest - w52_high) / w52_high < 0.03:
+            tags.append("near 52W high")
+        if w52_low and abs(latest - w52_low) / w52_low < 0.03:
+            tags.append("near 52W low")
+        price_position = ", ".join(tags) if tags else "mid-range"
 
         return {
             "status":          "success",
             "symbol":          symbol.upper(),
             "trend":           trend,
+            # Classic rolling S&R
             "support":         support,
             "resistance":      resistance,
+            # Classic pivot levels
+            "pivot_points":    pivot_points,
+            # 52-week extremes
+            "week_52_high":    w52_high,
+            "week_52_low":     w52_low,
+            # VWAP
+            "vwap_5d":         vwap_5d,
+            # Volume Profile
+            "volume_poc":      poc,
+            "value_area_high": value_area_high,
+            "value_area_low":  value_area_low,
+            # Close + position summary
             "latest_close":    round(latest, 4),
             "price_position":  price_position,
             "patterns":        patterns if patterns else ["No strong candlestick pattern detected"],
@@ -630,43 +769,115 @@ def portfolio_suggestions(symbols: List[str]) -> Dict[str, Any]:
 
 # ── Tool: sentiment_analysis ─────────────────────────────────────────────────────
 
+def _keyword_score_headline(title: str, pos_words: set, neg_words: set,
+                             negation_words: set, intensifier_words: set) -> tuple:
+    """
+    Score a single headline using keyword NLP.
+    Returns (item_score, label) where item_score ∈ [-1, +1].
+    """
+    raw_words = re.findall(r"\b\w+\b", title.lower())
+    pos_score = 0.0
+    neg_score = 0.0
+    for idx, word in enumerate(raw_words):
+        context        = raw_words[max(0, idx - 3):idx]
+        is_negated     = any(w in negation_words   for w in context)
+        is_intensified = any(w in intensifier_words for w in raw_words[max(0, idx - 2):idx])
+        intensity      = 1.5 if is_intensified else 1.0
+        if word in pos_words:
+            if is_negated:
+                neg_score += 1.0 * intensity
+            else:
+                pos_score += 1.0 * intensity
+        elif word in neg_words:
+            if is_negated:
+                pos_score += 0.5 * intensity
+            else:
+                neg_score += 1.0 * intensity
+    total = pos_score + neg_score
+    score = round((pos_score - neg_score) / total, 3) if total > 0 else 0.0
+    label = "Positive" if score > 0.10 else ("Negative" if score < -0.10 else "Neutral")
+    return score, label
+
+
+def _llm_classify_headlines(titles: List[str]) -> Optional[List[Dict]]:
+    """
+    Classify a list of news headlines using the configured LLM in one batch call.
+
+    Sends all titles in a single prompt asking for JSON output:
+    [{"index": 0, "label": "Positive|Negative|Neutral", "confidence": 0.0-1.0}, ...]
+
+    Returns the list on success, None on any failure (caller falls back to keywords).
+    """
+    try:
+        from src.agent.llm.llm_parser import get_llm_client
+        llm = get_llm_client()
+
+        numbered = "\n".join(f"{i}. {t}" for i, t in enumerate(titles))
+        prompt = (
+            "You are a financial news sentiment classifier. "
+            "Classify each headline as Positive, Negative, or Neutral from the perspective of "
+            "the company being mentioned. Consider the full headline including nuance and context.\n\n"
+            "Headlines:\n"
+            f"{numbered}\n\n"
+            "Respond ONLY with a JSON array, one object per headline:\n"
+            '[{"index": 0, "label": "Positive", "confidence": 0.85}, ...]\n'
+            "Labels must be exactly: Positive, Negative, or Neutral. No other text."
+        )
+        resp = llm.client.chat.completions.create(
+            model=llm.model,
+            messages=[
+                {"role": "system", "content": "Return ONLY valid JSON array. No markdown, no explanation."},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=0.0,
+            max_tokens=600,
+            timeout=20,
+        )
+        raw = resp.choices[0].message.content.strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw).strip()
+        parsed = json.loads(raw)
+        if isinstance(parsed, list) and len(parsed) == len(titles):
+            return parsed
+        return None
+    except Exception as exc:
+        logger.warning("[sentiment_analysis] LLM classification failed: %s — using keyword fallback", exc)
+        return None
+
+
 def sentiment_analysis(symbol: str) -> Dict[str, Any]:
     """
-    Analyse recent news headlines for a stock and compute a sentiment score.
+    Analyse recent news headlines for a stock.
 
-    Algorithm
-    ---------
-    1. Fetch up to 15 recent news items from yfinance.
+    Sentiment Engine (two-tier)
+    ---------------------------
+    PRIMARY — LLM classification (OpenAI/configured model):
+      All headlines are sent in ONE batch call to the LLM.
+      The model classifies each headline as Positive / Negative / Neutral
+      taking context, nuance, and sarcasm into account.
+      Returns confidence per headline.
 
-    2. For each headline:
-       a. Tokenise to lowercase words.
-       b. Check for negation context: if one of ["not","no","never","without",
-          "fails","disappoint","miss"] appears within 3 words before a
-          POSITIVE keyword → flip that keyword's contribution to negative.
-       c. Check for intensifiers: "significantly", "sharply", "dramatically",
-          "substantially", "hugely" within 2 words before any keyword → 1.5×.
-       d. Count positive_score and negative_score (with flips/weights).
-       e. item_score = (pos_score − neg_score) / (pos_score + neg_score)
-          Range [−1, +1].  Neutral when both = 0.
+    FALLBACK — Keyword NLP (when LLM unavailable or errors):
+      Rule-based scoring with:
+      • Negation handling (3-word look-back: "not", "no", "never", ...)
+      • Intensifier weighting (1.5× for "significantly", "sharply", ...)
+      Degraded but always available.
 
-    3. Recency decay applied to each item's score:
-       age_days ≤ 7  → weight 1.0
-       age_days ≤ 14 → weight 0.8
-       age_days > 14 → weight 0.6
-
-    4. Publisher reliability boost: Reuters, Bloomberg, WSJ, Financial Times,
-       CNBC, Forbes, Barron's → weight × 1.3.
-
-    5. Weighted aggregate score = Σ(item_score × total_weight) / Σ(weights).
-       Threshold: > +0.10 → Positive; < −0.10 → Negative; else Neutral.
+    Both tiers
+    ----------
+    3. Recency decay applied per item:
+       age ≤ 7d → 1.0×,  ≤ 14d → 0.8×,  >14d → 0.6×
+    4. Publisher reliability boost:
+       Reuters/Bloomberg/WSJ/FT/CNBC/Barron's/Forbes → 1.3×
+    5. Weighted aggregate = Σ(score × weight) / Σ(weight)
+       > +0.10 → Positive;  < −0.10 → Negative;  else Neutral
 
     Args:
         symbol: Ticker symbol.
 
-    Returns news items, individual sentiments, and aggregate score.
+    Returns news items, sentiments, aggregate score, and which engine was used.
     """
     POSITIVE_WORDS = {
-        # Earnings / growth
         "beat", "beats", "growth", "profit", "profits", "record", "surge", "surges",
         "soar", "soars", "gain", "gains", "bull", "bullish", "upgrade", "upgrades",
         "strong", "stronger", "robust", "positive", "innovative", "innovation",
@@ -676,34 +887,30 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
         "milestone", "optimistic", "rally", "rallies", "accelerate", "accelerates",
         "improve", "improves", "improvement", "rebound", "rebounds", "advance",
         "advances", "boost", "boosts", "excellent", "exceptional", "impressive",
-        "increase", "increases", "higher", "upbeat", "buoyant", "strong",
-        "overweight", "buy", "top", "outperformance", "upward", "upside",
-        "record-high", "all-time-high", "winning", "win", "wins", "profit",
-        "bonus", "benefits", "surplus", "revenue-beat", "guidance-raise",
-        "better-than-expected", "ahead", "returns", "inflow", "inflows",
-        "cash-flow", "demand", "resurgence", "adoption", "momentum",
+        "increase", "increases", "higher", "upbeat", "buoyant",
+        "overweight", "top", "outperformance", "upward", "upside",
+        "winning", "win", "wins", "bonus", "benefits", "surplus",
+        "ahead", "returns", "inflow", "inflows", "demand", "resurgence", "adoption", "momentum",
     }
     NEGATIVE_WORDS = {
-        # Losses / risk
         "miss", "misses", "loss", "losses", "decline", "declines", "fall", "falls",
         "drop", "drops", "cut", "cuts", "layoff", "layoffs", "downgrade", "downgrades",
         "weak", "weaker", "negative", "lawsuit", "lawsuits", "recall", "recalls",
         "fraud", "penalty", "penalties", "fine", "fines", "ban", "bans",
         "warning", "warnings", "risk", "risks", "concern", "concerns", "below",
         "missed", "resign", "resigns", "investigate", "investigation",
-        "crisis", "debt", "default", "disappointing", "disappoint",
-        "disappoints", "shrink", "shrinks", "contraction", "contractions",
-        "underperform", "underperforms", "bearish", "bear", "bearish",
-        "downside", "downward", "underweight", "sell", "short",
+        "crisis", "debt", "default", "disappointing", "disappoint", "disappoints",
+        "shrink", "shrinks", "contraction", "contractions",
+        "underperform", "underperforms", "bearish", "bear",
+        "downside", "downward", "underweight",
         "slump", "slumps", "plunge", "plunges", "crash", "crashes",
-        "recession", "slowdown", "weak", "sluggish", "volatile", "volatility",
-        "uncertainty", "uncertain", "headwind", "headwinds", "pressure",
-        "pressures", "halt", "halts", "suspended", "suspension", "charges",
-        "charge", "impairment", "write-off", "write-down", "shortfall",
-        "miss", "below-expectations", "guidance-cut", "downward-revision",
+        "recession", "slowdown", "sluggish", "volatile", "volatility",
+        "uncertainty", "uncertain", "headwind", "headwinds", "pressure", "pressures",
+        "halt", "halts", "suspended", "suspension", "charges", "charge",
+        "impairment", "write-off", "write-down", "shortfall",
         "outflow", "outflows", "deficit", "probe", "subpoena",
     }
-    NEGATION_WORDS = {"not", "no", "never", "without", "fails", "fail", "despite", "lack", "lacks"}
+    NEGATION_WORDS    = {"not", "no", "never", "without", "fails", "fail", "despite", "lack", "lacks"}
     INTENSIFIER_WORDS = {"significantly", "sharply", "dramatically", "substantially", "hugely",
                          "massively", "enormously", "considerably", "strongly", "greatly"}
     TRUSTED_PUBLISHERS = {"reuters", "bloomberg", "wsj", "wall street journal", "financial times",
@@ -719,46 +926,54 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
                 "message": "No recent news found.",
                 "overall_sentiment": "Neutral", "aggregate_score": 0.0,
                 "positive_headlines": 0, "negative_headlines": 0, "neutral_headlines": 0,
-                "news_items": [],
+                "news_items": [], "sentiment_engine": "none",
             }
 
+        batch = news[:15]
+        titles = [(item.get("title") or "").strip() for item in batch]
         now_ts = datetime.utcnow().timestamp()
+
+        # ── Step 1: Try LLM batch classification (one API call) ───────────────
+        llm_results = _llm_classify_headlines(titles)
+        sentiment_engine = "llm" if llm_results is not None else "keyword"
+
+        # Build index → {label, confidence} from LLM results
+        llm_map: Dict[int, Dict] = {}
+        if llm_results:
+            for r in llm_results:
+                try:
+                    llm_map[int(r["index"])] = {
+                        "label":      r.get("label", "Neutral"),
+                        "confidence": float(r.get("confidence", 0.5)),
+                    }
+                except (KeyError, TypeError, ValueError):
+                    pass
+
+        # ── Step 2: Keyword scores always computed (numeric signal) ───────────
         scored_items = []
+        for idx, item in enumerate(batch):
+            title = titles[idx]
 
-        for item in news[:15]:
-            title = (item.get("title") or "").strip()
-            raw_words = re.findall(r"\b\w+\b", title.lower())
+            # Always compute keyword score for numeric value
+            kw_score, kw_label = _keyword_score_headline(
+                title, POSITIVE_WORDS, NEGATIVE_WORDS, NEGATION_WORDS, INTENSIFIER_WORDS
+            )
 
-            pos_score = 0.0
-            neg_score = 0.0
+            # Primary label: LLM if available, else keyword
+            if idx in llm_map:
+                label      = llm_map[idx]["label"]
+                confidence = llm_map[idx]["confidence"]
+                # For numeric score: blend LLM direction with keyword magnitude
+                llm_sign   = 1.0 if label == "Positive" else (-1.0 if label == "Negative" else 0.0)
+                item_score = round(llm_sign * confidence, 3)
+            else:
+                label      = kw_label
+                confidence = None
+                item_score = kw_score
 
-            for idx, word in enumerate(raw_words):
-                # look-back window (up to 3 positions)
-                context_start = max(0, idx - 3)
-                context = raw_words[context_start:idx]
-
-                is_negated    = any(w in NEGATION_WORDS       for w in context)
-                is_intensified = any(w in INTENSIFIER_WORDS   for w in raw_words[max(0, idx - 2):idx])
-                intensity = 1.5 if is_intensified else 1.0
-
-                if word in POSITIVE_WORDS:
-                    if is_negated:
-                        neg_score += 1.0 * intensity  # flip
-                    else:
-                        pos_score += 1.0 * intensity
-                elif word in NEGATIVE_WORDS:
-                    if is_negated:
-                        pos_score += 0.5 * intensity  # partial flip (negated negative = weakly positive)
-                    else:
-                        neg_score += 1.0 * intensity
-
-            total = pos_score + neg_score
-            item_score = round((pos_score - neg_score) / total, 3) if total > 0 else 0.0
-            label = "Positive" if item_score > 0.10 else ("Negative" if item_score < -0.10 else "Neutral")
-
-            # Recency decay
+            # ── Recency decay ─────────────────────────────────────────────────
             ts = item.get("providerPublishTime") or item.get("content", {}).get("pubDate")
-            pub_date_str = ""
+            pub_date_str   = ""
             recency_weight = 1.0
             if ts:
                 try:
@@ -768,13 +983,13 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
                 except (TypeError, ValueError):
                     pass
 
-            # Publisher boost
-            publisher = (item.get("publisher") or "").lower()
+            # ── Publisher reliability boost ───────────────────────────────────
+            publisher  = (item.get("publisher") or "").lower()
             pub_weight = 1.3 if any(p in publisher for p in TRUSTED_PUBLISHERS) else 1.0
 
             total_weight = recency_weight * pub_weight
 
-            scored_items.append({
+            entry: Dict[str, Any] = {
                 "title":          title,
                 "publisher":      item.get("publisher", ""),
                 "sentiment":      label,
@@ -783,10 +998,13 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
                 "weight":         round(total_weight, 2),
                 "published":      pub_date_str,
                 "url":            item.get("link", "") or item.get("clickThroughUrl", {}).get("url", ""),
-            })
+            }
+            if confidence is not None:
+                entry["llm_confidence"] = round(confidence, 3)
+            scored_items.append(entry)
 
-        # Weighted aggregate
-        total_w  = sum(i["weight"] for i in scored_items)
+        # ── Step 3: Weighted aggregate ────────────────────────────────────────
+        total_w   = sum(i["weight"] for i in scored_items)
         agg_score = round(
             sum(i["score"] * i["weight"] for i in scored_items) / total_w, 3
         ) if total_w > 0 else 0.0
@@ -796,6 +1014,14 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
         neg_count = sum(1 for i in scored_items if i["sentiment"] == "Negative")
         neu_count = len(scored_items) - pos_count - neg_count
 
+        engine_note = (
+            "Sentiment classified by LLM (context-aware, handles nuance and sarcasm); "
+            "numeric score uses LLM direction × confidence. Recency decay and publisher "
+            "reliability weighting applied."
+        ) if sentiment_engine == "llm" else (
+            "LLM unavailable — keyword NLP fallback used (negation/intensifier aware). Indicative only."
+        )
+
         return {
             "status":              "success",
             "symbol":              symbol.upper(),
@@ -804,11 +1030,9 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
             "positive_headlines":  pos_count,
             "negative_headlines":  neg_count,
             "neutral_headlines":   neu_count,
+            "sentiment_engine":    sentiment_engine,
             "news_items":          scored_items,
-            "note": (
-                "Sentiment is keyword-based NLP with negation handling, recency decay, "
-                "and publisher reliability weighting. Indicative only."
-            ),
+            "note":                engine_note,
         }
     except Exception as exc:
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}

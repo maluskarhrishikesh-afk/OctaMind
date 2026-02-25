@@ -472,7 +472,36 @@ quality_score = moat_score × 0.50 + value_sub_score × 0.25 + safety_sub_score 
 
 **Source file:** `src/stock_market/stock_service.py` → `sentiment_analysis()`
 
-### 4.1 Word Scoring
+### 4.1 Sentiment Engine — Two-Tier Architecture
+
+**PRIMARY: LLM Classification (OpenAI / configured model)**
+
+All headlines are sent in a single batch API call.  The model receives a numbered
+list of headlines and returns a JSON array:
+
+```json
+[{"index": 0, "label": "Positive", "confidence": 0.87}, ...]
+```
+
+Advantages over keywords:
+- Understands negation, sarcasm, and irony in context
+- Handles macro news ("Fed pauses hikes" → positive for equities)
+- Confidence score per classification
+- Full sentence context rather than individual words
+
+Numeric score when LLM is used:
+```
+llm_sign   = +1.0 (Positive) | -1.0 (Negative) | 0.0 (Neutral)
+item_score = llm_sign × confidence
+```
+
+Temperature = 0.0 (deterministic).  Timeout = 20s.  Fails gracefully to keyword fallback.
+
+**FALLBACK: Keyword NLP** (used when LLM unavailable or errors)
+
+See Section 4.2 onwards. The fallback is always available with zero latency.
+
+### 4.2 Keyword Word Scoring (Fallback)
 
 For each headline title, words are tokenised as lowercase alphanumeric tokens.
 
@@ -487,7 +516,7 @@ item_score = (pos_score − neg_score) / (pos_score + neg_score)   if total > 0
 
 Range: [−1, +1].
 
-### 4.2 Negation Handling
+### 4.3 Negation Handling (Fallback)
 
 Context window: 3 words before the keyword.
 
@@ -500,13 +529,13 @@ appears in the 3-word look-back:
 The asymmetry (full flip for positive, half-flip for negative) reflects that "not bad"
 is weakly positive but "not good" is strongly negative in financial context.
 
-### 4.3 Intensifier Weighting
+### 4.4 Intensifier Weighting (Fallback)
 
 Words `{"significantly", "sharply", "dramatically", "substantially", "hugely",
 "massively", "enormously", "considerably", "strongly", "greatly"}` appearing within
 2 words before a keyword multiply that keyword's contribution by **1.5×**.
 
-### 4.4 Recency Decay
+### 4.5 Recency Decay (both tiers)
 
 Each news item's score is multiplied by a recency weight based on the item's
 `providerPublishTime` Unix timestamp.
@@ -517,14 +546,14 @@ Each news item's score is multiplied by a recency weight based on the item's
 | 8–14                | 0.80   |
 | > 14                | 0.60   |
 
-### 4.5 Publisher Reliability
+### 4.6 Publisher Reliability (both tiers)
 
 News from trusted financial publishers receives a **1.3× boost**:
 
 > Reuters, Bloomberg, WSJ/Wall Street Journal, Financial Times/FT,
 > CNBC, Barron's, Forbes, MarketWatch
 
-### 4.6 Aggregate Score
+### 4.7 Aggregate Score (both tiers)
 
 ```
 total_weight  = Σ recency_weight × publisher_weight  for all items
@@ -546,7 +575,7 @@ NLP model (e.g. finBERT) would improve accuracy. The threshold 0.10 is heuristic
 
 **Source file:** `src/stock_market/stock_service.py` → `pattern_detection()`
 
-### 5.1 Support & Resistance
+### 5.1 Classic Support & Resistance
 
 Rolling min/max of the last 20 periods:
 
@@ -555,11 +584,78 @@ support    = min(lows[-20:])
 resistance = max(highs[-20:])
 ```
 
-**Expert note:** This is the simplest form of S&R. Real technical analysts use cluster
-zones, pivot points, Fibonacci retracements. Future improvement: pivot points formula
-`P = (H + L + C) / 3`.
+**Expert note:** This is the simplest form of S&R. See 5.2 for richer levels.
 
-### 5.2 Trend Direction
+### 5.2 Pivot Points (Classic Daily)
+
+Based on the **previous session's** High, Low, Close.
+
+```
+P  = (H + L + C) / 3          ← Pivot
+R1 = 2P − L
+R2 = P + (H − L)
+R3 = H + 2×(P − L)
+S1 = 2P − H
+S2 = P − (H − L)
+S3 = L − 2×(H − P)
+```
+
+R1/R2/R3 = resistance levels.  S1/S2/S3 = support levels.
+Pivot (P) is the primary reference level: price above P is generally considered bullish.
+
+**Expert note:** Classic pivots are the most widely used by prop desks and retail traders.
+Fibonacci pivots (`R1 = P + 0.382×(H-L)`) and Woodie pivots (`P = (H+L+2C)/4`) are
+alternatives — expert review invited on preference.
+
+### 5.3 52-Week High / Low
+
+Fetched directly from `yfinance Ticker.info` fields `fiftyTwoWeekHigh` / `fiftyTwoWeekLow`.
+These represent the highest and lowest traded prices over the trailing 52 weeks.
+
+### 5.4 VWAP (Volume-Weighted Average Price)
+
+```
+typical_price_i = (High_i + Low_i + Close_i) / 3
+
+VWAP = Σ(typical_price_i × Volume_i) / Σ(Volume_i)
+```
+
+Computed over **5-day hourly bars** (fetched with `period="5d", interval="1h"`).
+
+**Important note for expert review:** This is a *multi-day rolling VWAP*, NOT a
+single-session VWAP that resets at market open each day. Single-session VWAP requires
+intraday tick or minute data. The 5-day VWAP serves as a medium-term trend reference:
+- Price consistently above 5D VWAP → generally bullish momentum
+- Price crossing below 5D VWAP → caution signal
+
+For single-session VWAP, we would need `period="1d", interval="1m"` and compute daily.
+
+### 5.5 Volume Profile & Point of Control (POC)
+
+**Algorithm:**
+
+1. Divide the full price range `[min(lows), max(highs)]` into **20 equal-width buckets**.
+2. For each daily bar, assign its volume to the bucket containing that day's close price.
+3. **POC** = midpoint of the bucket with the highest total volume.
+4. **Value Area** = the contiguous range around POC containing **70% of total volume**.
+   - Start at POC bucket.
+   - At each step, expand upward or downward by one bucket, choosing whichever
+     has more volume (standard VA expansion algorithm).
+   - Stop when cumulative volume in range ≥ 70% of total.
+5. **VAH** (Value Area High) = top of the high-side bucket.
+   **VAL** (Value Area Low) = bottom of the low-side bucket.
+
+**Interpretation:**
+- POC = price level where the most trading occurred over the period (high-value area).
+- Price within Value Area = consensus range.
+- Price outside Value Area = potential mean-reversion zone (informational only).
+
+**Expert note:** 20 buckets over 3 months is a coarse resolution. Market Profile analysis
+typically uses 30-minute TPO (Time Price Opportunity) charts. Volume Profile buckets should
+ideally be based on intraday data at 15-minute resolution for precision.
+Expert calibration on bucket count and timeframe welcome.
+
+### 5.6 Trend Direction
 
 ```
 sma20_now  = mean(close[-20:])
@@ -572,7 +668,7 @@ else:                                  trend = "Sideways"
 
 The 0.1% threshold prevents noise from triggering trend changes.
 
-### 5.3 Candlestick Patterns
+### 5.7 Candlestick Patterns
 
 Detected on the most recent candle using standard candlestick geometry.
 
