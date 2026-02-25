@@ -104,6 +104,16 @@ def _create_pa_dialog() -> None:
             "title": "Habit Tracker",
             "description": "Build better habits. Track daily completions, monitor streaks, get weekly reports, and receive motivating analytics.",
         },
+        "browser": {
+            "icon": "🌐",
+            "title": "Web Browser",
+            "description": "Browse any website, search the web, extract article text, find links, download files, and get instant page summaries — all without leaving the app.",
+        },
+        "stock_market": {
+            "icon": "📈",
+            "title": "Stock Market Analysis",
+            "description": "Real-time quotes, technical indicators (RSI, MACD, Bollinger), risk scoring, pattern detection, portfolio analysis, news sentiment, and market overview. Informational only — no buy/sell.",
+        },
     }
 
     try:

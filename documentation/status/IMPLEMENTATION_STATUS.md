@@ -2,7 +2,8 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
-Last updated: 2026-02-25 (added Scheduler, File Organizer, Habit Tracker agents)
+Last updated: 2026-02-25 (added Browser Agent, Stock Market Analysis Agent)  
+Previous: 2026-02-25 (added Scheduler, File Organizer, Habit Tracker agents)
 
 ---
 
@@ -156,11 +157,43 @@ Completely new agent. No overlap with Calendar or Files agents.
 **Data stores:** `data/habits.json` (definitions), `data/habit_logs.json` (daily logs)  
 **No credentials required** for all 8 core tools; Calendar integration requires Calendar auth.
 
+### Browser Agent — 10 Tools
+HTTP-only web browsing. No credentials, no API keys, no headless browser required.
+
+| Category | Tools | Status |
+|----------|-------|--------|
+| Page access | browse_url, extract_text, summarize_page | ✅ |
+| Search | search_web | ✅ |
+| Inspection | get_page_links, get_page_title, get_page_metadata, find_on_page | ✅ |
+| Data extraction | extract_structured_data | ✅ |
+| Downloads | download_file_from_url | ✅ |
+
+**Registry key:** `browser`  
+**Service:** `src/browser/browser_service.py`  
+**Backend:** `urllib.request` (stdlib) + optional `beautifulsoup4` + `requests`  
+**No credentials required.** No JavaScript execution — public HTTP pages only.
+
+### Stock Market Analysis Agent — 10 Tools
+Read-only analysis. No buy/sell, no brokerage integration.
+
+| Category | Tools | Status |
+|----------|-------|--------|
+| Market data | get_quote, get_historical_data, market_overview | ✅ |
+| Technical analysis | technical_analysis (RSI, MACD, Bollinger, SMA), pattern_detection | ✅ |
+| Risk analysis | risk_score (volatility, Beta, VaR 95%, Sharpe) | ✅ |
+| Portfolio | portfolio_analysis, portfolio_suggestions | ✅ |
+| Intelligence | sentiment_analysis, compare_stocks | ✅ |
+
+**Registry key:** `stock_market`  
+**Service:** `src/stock_market/stock_service.py`  
+**Data source:** `yfinance` (Yahoo Finance public API) — free, no API key required.  
+**No credentials required.** All indicators computed in pure Python (no ML dependencies).
+
 ### Personal Assistant Hub
 - [x] Drive-only command routing → Drive Agent direct
 - [x] Email-only command routing → Email Agent direct
 - [x] NL-based cross-agent workflow planner (`plan_nl_workflow`) for combined commands
-- [x] Agent capability registry (`agent_registry.py`) — ~10 tokens per agent, scales to N agents; **8 agents registered**: drive, email, whatsapp, files, calendar, scheduler, file_organizer, habit_tracker
+- [x] Agent capability registry (`agent_registry.py`) — ~10 tokens per agent, scales to N agents; **10 agents registered**: drive, email, whatsapp, files, calendar, scheduler, file_organizer, habit_tracker, browser, stock_market
 - [x] Planning context: ~80 tokens for 8 agents (vs ~8,000 tokens in old flat-tool-list design)
 - [x] Natural-language step format: orchestrator issues plain-English instructions, no tool signatures
 - [x] Sequential multi-agent execution via `nl_step_runner.py` — each sub-agent runs its own full ReAct loop
@@ -176,6 +209,8 @@ Completely new agent. No overlap with Calendar or Files agents.
 - [x] **Scheduler agent** registered in `agent_registry.py` — intelligent scheduling, focus blocks, insights
 - [x] **File Organizer agent** registered in `agent_registry.py` — approval-workflow file organization
 - [x] **Habit Tracker agent** registered in `agent_registry.py` — habit tracking, streaks, weekly reports
+- [x] **Browser agent** registered in `agent_registry.py` — web browsing, search, text extraction, downloads
+- [x] **Stock Market Analysis agent** registered in `agent_registry.py` — quotes, technicals, risk, sentiment
 
 ### UI
 - [x] Streamlit chat UI for Drive Agent (port 8502)

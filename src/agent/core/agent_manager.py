@@ -161,6 +161,18 @@ class AgentManager:
             'icon': '✅',
             'capabilities': ['add_habit', 'log_completion', 'streaks', 'weekly_report', 'analytics', 'calendar_sync']
         },
+        'browser': {
+            'name': 'Browser Agent',
+            'description': 'Browse the web, search for information, extract page text, list links, download files, and summarise any URL',
+            'icon': '🌐',
+            'capabilities': ['browse_url', 'search_web', 'extract_text', 'get_page_links', 'get_page_title', 'get_page_metadata', 'find_on_page', 'extract_structured_data', 'download_file', 'summarize_page']
+        },
+        'stock_market': {
+            'name': 'Stock Market Analysis Agent',
+            'description': 'Real-time quotes, technical analysis, risk scoring, pattern detection, portfolio analysis, sentiment, and market overview. Read-only — no buy/sell.',
+            'icon': '📈',
+            'capabilities': ['get_quote', 'get_historical_data', 'technical_analysis', 'risk_score', 'pattern_detection', 'portfolio_analysis', 'portfolio_suggestions', 'sentiment_analysis', 'compare_stocks', 'market_overview']
+        },
         'custom': {
             'name': 'Custom Agent',
             'description': 'Build your own agent with custom capabilities',

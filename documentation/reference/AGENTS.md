@@ -648,6 +648,103 @@ Step 2: send_email_with_attachment → attachment_path: "{downloaded_file}"
 
 ---
 
+## Browser Agent (Web Browsing)
+
+**Orchestrator:** `src/agent/ui/browser_agent/orchestrator.py`  
+**Service layer:** `src/browser/browser_service.py`  
+**Setup Guide:** [BROWSER_AGENT_SETUP.md](BROWSER_AGENT_SETUP.md)  
+**Dependencies:** `beautifulsoup4`, `requests` (optional but recommended) — no API keys required
+
+### What It Can Do
+
+| Category | Example commands |
+|----------|----------------|
+| **Browse** | "Open https://news.ycombinator.com" · "What does the Python docs say about decorators?" |
+| **Search** | "Search for latest AI news" · "Look up Python string formatting" |
+| **Extract** | "Read the full article at [URL]" · "Get the text from this page" |
+| **Links** | "What links are on hacker news?" · "List all URLs on this page" |
+| **Metadata** | "What is the description of openai.com?" · "Page metadata for github.com" |
+| **Find** | "Does the page mention 'pricing'?" · "Find where it talks about fees" |
+| **Structured** | "Extract tables from Wikipedia's stock market page" |
+| **Download** | "Download the PDF from [URL] to data/downloads/report.pdf" |
+| **Summarise** | "Summarise https://arxiv.org/abs/xxxx" |
+
+### Tools Available
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `browse_url` | `url`, `max_chars=3000` | Fetch readable content from any URL |
+| `search_web` | `query`, `num_results=5` | DuckDuckGo web search |
+| `extract_text` | `url`, `max_chars=5000` | Clean long-form text extraction |
+| `get_page_links` | `url`, `internal_only=False` | All hyperlinks on a page |
+| `get_page_title` | `url` | Page `<title>` tag |
+| `get_page_metadata` | `url` | Meta description, og:tags, keywords |
+| `find_on_page` | `url`, `search_term`, `context_chars=200` | Phrase search within page |
+| `extract_structured_data` | `url` | HTML tables and lists |
+| `download_file_from_url` | `url`, `save_path` | Download binary/text file |
+| `summarize_page` | `url`, `max_words=200` | Extractive page summary |
+
+### Limitations
+
+- JavaScript-heavy single-page apps (SPAs) may return minimal content (HTTP-only, no JS engine)
+- Login-required pages are not accessible
+- Some sites block automated requests (returns HTTP 403)
+
+---
+
+## Stock Market Analysis Agent
+
+**Orchestrator:** `src/agent/ui/stock_agent/orchestrator.py`  
+**Service layer:** `src/stock_market/stock_service.py`  
+**Setup Guide:** [STOCK_AGENT_SETUP.md](STOCK_AGENT_SETUP.md)  
+**Dependencies:** `yfinance` — free, no API key required  
+**Scope:** READ-ONLY analysis. No buy/sell, no order placement, no brokerage integration.
+
+### What It Can Do
+
+| Category | Example commands |
+|----------|----------------|
+| **Quotes** | "What is Apple's stock price?" · "TSLA quote" · "How is Amazon trading?" |
+| **History** | "6 months of AAPL prices" · "MSFT historical data for 1 year" |
+| **Technical** | "Technical analysis for NVDA" · "Is Tesla overbought?" · "MACD for SPY" |
+| **Risk** | "How risky is TSLA?" · "Risk score for Amazon" · "Volatility of NVDA" |
+| **Patterns** | "Chart patterns for AAPL" · "Support and resistance for NFLX" |
+| **Portfolio** | "Analyse my portfolio: AAPL MSFT JPM JNJ" · "How diversified is my holding?" |
+| **Suggestions** | "Any issues with my portfolio?" · "Rebalancing hints for AAPL TSLA META" |
+| **Sentiment** | "News sentiment for Tesla" · "What are people saying about Apple?" |
+| **Compare** | "Compare AAPL vs GOOGL vs MSFT" · "Side-by-side: TSLA vs RIVN" |
+| **Market** | "How is the market today?" · "Market overview" · "Is the S&P500 up?" |
+
+### Tools Available
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `get_quote` | `symbol` | Price, change, P/E, market cap, sector |
+| `get_historical_data` | `symbol`, `period="1mo"`, `interval="1d"` | OHLCV bars |
+| `technical_analysis` | `symbol`, `period="6mo"` | RSI, MACD, Bollinger, SMA |
+| `risk_score` | `symbol`, `period="1y"` | Volatility, Beta, VaR, Sharpe, 1-10 score |
+| `pattern_detection` | `symbol`, `period="3mo"` | Support/resistance, trend, candlesticks |
+| `portfolio_analysis` | `symbols: list`, `period="1y"` | Sector allocation, correlation, diversification |
+| `portfolio_suggestions` | `symbols: list` | Rebalancing hints, concentration warnings |
+| `sentiment_analysis` | `symbol` | NLP sentiment on latest news headlines |
+| `compare_stocks` | `symbols: list` | Side-by-side metric table |
+| `market_overview` | `indices: list` | SPY/QQQ/DIA/IWM/VIX snapshot + mood |
+
+### Technical Indicators
+
+| Indicator | Bullish | Neutral | Bearish |
+|-----------|---------|---------|---------|
+| RSI | < 30 (oversold) | 30–70 | > 70 (overbought) |
+| MACD histogram | > 0 | ≈ 0 | < 0 |
+| Bollinger | Below lower band | Mid-range | Above upper band |
+| Price vs SMA | Above | — | Below |
+
+### Disclaimer
+
+All output is informational and educational only. Not financial advice. Always consult a qualified financial advisor before making investment decisions.
+
+---
+
 ## Agent Memory
 
 Every agent (Email, Drive, WhatsApp, Telegram, Files, or any custom agent) maintains its own memory folder at `memory/<agent_id>/`. Memory is loaded as context for every LLM call, so agents remember past interactions, user preferences, and learned patterns.

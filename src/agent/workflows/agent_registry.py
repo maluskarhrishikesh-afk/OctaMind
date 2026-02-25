@@ -119,6 +119,28 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
         "module": "src.agent.ui.habit_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
+    "browser": {
+        "description": (
+            "Browser agent. Handles: browse any URL, search the web (DuckDuckGo), "
+            "extract clean page text, list hyperlinks, get page title and metadata, "
+            "find a phrase on a page, extract structured tables/lists, "
+            "download files from URLs, and summarise page content. "
+            "Completely new — no overlap with existing agents."
+        ),
+        "module": "src.agent.ui.browser_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
+    "stock_market": {
+        "description": (
+            "Stock Market Analysis agent (READ-ONLY — no buy/sell). Handles: "
+            "real-time stock quotes, historical OHLCV data, technical analysis (RSI/MACD/Bollinger), "
+            "risk scoring (volatility/Beta/VaR/Sharpe), candlestick pattern detection, "
+            "portfolio diversification analysis, portfolio rebalancing suggestions, "
+            "news sentiment analysis, side-by-side stock comparison, and broad market overview."
+        ),
+        "module": "src.agent.ui.stock_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
 }
 
 

@@ -73,6 +73,22 @@ _SKILL_ABILITIES: dict[str, list[str]] = {
         "📊 Weekly & 30/60/90-day analytics",
         "📅 Schedule habits on Google Calendar",
     ],
+    "browser": [
+        "🌐 Browse any URL and read page content",
+        "🔍 Search the web via DuckDuckGo",
+        "📄 Extract clean article text",
+        "🔗 List all links on a page",
+        "⬇️ Download files from URLs",
+        "📝 Summarise any web page",
+    ],
+    "stock_market": [
+        "💹 Real-time stock quotes & data",
+        "📊 Technical analysis: RSI, MACD, Bollinger",
+        "⚠️ Risk scoring: volatility, Beta, VaR",
+        "🕯️ Candlestick pattern detection",
+        "🗂️ Portfolio diversification analysis",
+        "📰 News sentiment scoring",
+    ],
 }
 _DEFAULT_ABILITIES = [
     "🔧 Custom-configured skill",
