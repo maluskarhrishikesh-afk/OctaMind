@@ -95,35 +95,23 @@ class AgentManager:
     """Manages agent configurations and lifecycle"""
 
     AGENT_TYPES = {
-        'gmail': {
-            'name': 'Gmail Agent',
-            'description': 'Manage emails, send messages, and organize inbox',
+        'email': {
+            'name': 'Email Agent',
+            'description': 'Read, send and organise your Gmail inbox with smart summaries, follow-up reminders, and search',
             'icon': '📧',
-            'capabilities': ['send', 'list', 'delete', 'count', 'search']
+            'capabilities': ['send', 'list', 'delete', 'count', 'search', 'summarize']
         },
-        'google_drive': {
+        'drive': {
             'name': 'Google Drive Agent',
-            'description': 'Manage files, folders, and shared documents',
+            'description': 'Browse and manage Google Drive — upload, share, organise folders, and find any file instantly',
             'icon': '📁',
-            'capabilities': ['upload', 'download', 'list', 'share', 'organize']
-        },
-        'slack': {
-            'name': 'Slack Agent',
-            'description': 'Send messages, manage channels, and collaborate',
-            'icon': '💬',
-            'capabilities': ['send_message', 'create_channel', 'list_messages']
+            'capabilities': ['upload', 'download', 'list', 'share', 'organize', 'search']
         },
         'calendar': {
             'name': 'Calendar Agent',
-            'description': 'Schedule meetings, manage events, and set reminders',
+            'description': 'Manage Google Calendar — create and update events, find free slots, get daily agendas, and set reminders',
             'icon': '📅',
-            'capabilities': ['create_event', 'list_events', 'delete_event']
-        },
-        'stock_market': {
-            'name': 'Stock Market Agent',
-            'description': 'Track stocks, analyse market trends, and monitor portfolio',
-            'icon': '📈',
-            'capabilities': ['track_price', 'market_trends', 'portfolio', 'news', 'alerts']
+            'capabilities': ['create_event', 'list_events', 'delete_event', 'find_slots', 'reminders']
         },
         'whatsapp': {
             'name': 'WhatsApp Agent',
@@ -169,7 +157,7 @@ class AgentManager:
         },
         'stock_market': {
             'name': 'Stock Market Analysis Agent',
-            'description': 'Real-time quotes, technical analysis, risk scoring, pattern detection, portfolio analysis, sentiment, and market overview. Read-only — no buy/sell.',
+            'description': 'Real-time quotes, technical analysis (RSI/MACD/Bollinger), risk scoring, pattern detection, portfolio analysis, sentiment — read-only, no buy/sell',
             'icon': '📈',
             'capabilities': ['get_quote', 'get_historical_data', 'technical_analysis', 'risk_score', 'pattern_detection', 'portfolio_analysis', 'portfolio_suggestions', 'sentiment_analysis', 'compare_stocks', 'market_overview']
         },

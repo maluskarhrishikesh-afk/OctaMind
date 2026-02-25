@@ -41,10 +41,10 @@ def show_create_agent_form() -> None:
     _CHANNEL_TYPES = {"telegram", "whatsapp"}
     _skill_types = [(k, v) for k, v in agent_types.items() if k not in _CHANNEL_TYPES]
 
-    # Compact 3-column grid of skill type cards
-    type_cols = st.columns(3)
+    # Compact 4-column grid of skill type cards
+    type_cols = st.columns(4)
     for idx, (type_key, type_info) in enumerate(_skill_types):
-        with type_cols[idx % 3]:
+        with type_cols[idx % 4]:
             is_sel = st.session_state.create_selected_type == type_key
             bg = "rgba(233,30,140,0.14)" if is_sel else "rgba(255,255,255,0.03)"
             border = "rgba(233,30,140,0.7)" if is_sel else "rgba(255,255,255,0.08)"

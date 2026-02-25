@@ -629,10 +629,12 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
-        cols = st.columns(3)
+        cols = st.columns(4)
         agent_types = manager.get_agent_types()
-        for idx, (key, info) in enumerate(agent_types.items()):
-            with cols[idx % 3]:
+        _CHANNEL_SKIP = {"telegram", "whatsapp"}
+        skill_items = [(k, v) for k, v in agent_types.items() if k not in _CHANNEL_SKIP]
+        for idx, (key, info) in enumerate(skill_items):
+            with cols[idx % 4]:
                 st.markdown(
                     f"""
                     <div style="background:rgba(233,30,140,0.08);border:1px solid rgba(233,30,140,0.2);
