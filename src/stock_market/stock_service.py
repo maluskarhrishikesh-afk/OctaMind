@@ -241,8 +241,35 @@ def technical_analysis(symbol: str, period: str = "6mo") -> Dict[str, Any]:
 
 def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
     """
-    Compute risk metrics: annualised volatility, Beta, simplified VaR (95%),
-    Sharpe ratio (risk-free 4.5%), and a composite 1-10 risk score.
+    Compute risk metrics for a stock.
+
+    Calculated metrics
+    ------------------
+    Annual Volatility   = daily_std × √252 × 100
+                          Measures price dispersion; higher = more uncertainty.
+
+    Beta vs SPY         = Cov(stock_returns, SPY_returns) / Var(SPY_returns)
+                          >1 → amplifies market moves; <1 → more stable than market.
+
+    VaR 95% (daily)     = -(μ − 1.645 × σ_daily) × 100
+                          Parametric; represents worst expected daily loss 95% of time.
+
+    Sharpe Ratio        = (annualised_return − risk_free) / annual_volatility
+                          Risk-free rate: 4.5% p.a.  >1 = good; <0 = losing vs risk-free.
+
+    Max Drawdown        = (peak_price − trough_price) / peak_price × 100
+                          Maximum observed loss from a historical peak to a trough.
+
+    Sortino Ratio       = (annualised_return − risk_free) / downside_deviation
+                          Like Sharpe but penalises only negative-return volatility.
+                          downside_deviation = std(min(r, 0)) × √252
+
+    Calmar Ratio        = annualised_return / |max_drawdown|
+                          Return earned per unit of maximum drawdown risk.
+
+    Composite Risk Score (1–10)
+                        = weighted(vol_score×40% + beta_score×30% + var_score×30%)
+                          where each component is linearly scaled to [1, 10].
 
     Args:
         symbol: Ticker symbol.
@@ -296,11 +323,39 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
         rf_daily = 0.045 / 252
         sharpe = round((mean_ret - rf_daily) / daily_vol * math.sqrt(252), 3) if daily_vol > 0 else None
 
-        # Composite risk score 1-10
-        vol_score  = min(10, max(1, round(annual_vol / 5)))  # 50% ann vol → 10
+        # ── Max Drawdown ────────────────────────────────────────────────────────
+        # Walk through close prices; track running peak and measure drawdowns.
+        peak = closes[0]
+        max_dd = 0.0
+        for price in closes:
+            if price > peak:
+                peak = price
+            dd = (peak - price) / peak
+            if dd > max_dd:
+                max_dd = dd
+        max_drawdown_pct = round(max_dd * 100, 2)
+
+        # ── Sortino Ratio ───────────────────────────────────────────────────────
+        # Downside deviation uses only returns below zero (target return = 0).
+        negative_returns = [r for r in returns if r < 0]
+        sortino = None
+        if negative_returns:
+            downside_var = sum(r ** 2 for r in negative_returns) / len(returns)
+            downside_dev_annual = math.sqrt(downside_var) * math.sqrt(252)
+            if downside_dev_annual > 0:
+                annual_excess = (annual_return / 100) - 0.045  # above risk-free
+                sortino = round(annual_excess / downside_dev_annual, 3)
+
+        # ── Calmar Ratio ────────────────────────────────────────────────────────
+        calmar = None
+        if max_drawdown_pct > 0:
+            calmar = round((annual_return / 100) / (max_drawdown_pct / 100), 3)
+
+        # Composite risk score 1-10 (40% vol, 30% beta, 30% VaR)
+        vol_score  = min(10, max(1, round(annual_vol / 5)))      # 50% ann vol → score 10
         beta_score = min(10, max(1, round((beta or 1.0) * 3.5)))
         var_score  = min(10, max(1, round(var_95 / 1.5)))
-        composite  = round((vol_score + beta_score + var_score) / 3, 1)
+        composite  = round(vol_score * 0.40 + beta_score * 0.30 + var_score * 0.30, 1)
 
         risk_level = (
             "Very Low"   if composite < 2.5 else
@@ -311,15 +366,18 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
         )
 
         return {
-            "status":           "success",
-            "symbol":           symbol.upper(),
+            "status":                "success",
+            "symbol":                symbol.upper(),
             "annual_volatility_pct": annual_vol,
             "annual_return_pct":     annual_return,
-            "beta":             beta,
-            "var_95_daily_pct": var_95,
-            "sharpe_ratio":     sharpe,
-            "risk_score":       composite,
-            "risk_level":       risk_level,
+            "beta":                  beta,
+            "var_95_daily_pct":      var_95,
+            "sharpe_ratio":          sharpe,
+            "sortino_ratio":         sortino,
+            "max_drawdown_pct":      max_drawdown_pct,
+            "calmar_ratio":          calmar,
+            "risk_score":            composite,
+            "risk_level":            risk_level,
         }
     except Exception as exc:
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}
@@ -576,8 +634,31 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
     """
     Analyse recent news headlines for a stock and compute a sentiment score.
 
-    Uses yfinance news feed + simple keyword-based NLP (no external NLP library required).
-    A compound score in [-1, +1] is reported with a label: Positive / Neutral / Negative.
+    Algorithm
+    ---------
+    1. Fetch up to 15 recent news items from yfinance.
+
+    2. For each headline:
+       a. Tokenise to lowercase words.
+       b. Check for negation context: if one of ["not","no","never","without",
+          "fails","disappoint","miss"] appears within 3 words before a
+          POSITIVE keyword → flip that keyword's contribution to negative.
+       c. Check for intensifiers: "significantly", "sharply", "dramatically",
+          "substantially", "hugely" within 2 words before any keyword → 1.5×.
+       d. Count positive_score and negative_score (with flips/weights).
+       e. item_score = (pos_score − neg_score) / (pos_score + neg_score)
+          Range [−1, +1].  Neutral when both = 0.
+
+    3. Recency decay applied to each item's score:
+       age_days ≤ 7  → weight 1.0
+       age_days ≤ 14 → weight 0.8
+       age_days > 14 → weight 0.6
+
+    4. Publisher reliability boost: Reuters, Bloomberg, WSJ, Financial Times,
+       CNBC, Forbes, Barron's → weight × 1.3.
+
+    5. Weighted aggregate score = Σ(item_score × total_weight) / Σ(weights).
+       Threshold: > +0.10 → Positive; < −0.10 → Negative; else Neutral.
 
     Args:
         symbol: Ticker symbol.
@@ -585,47 +666,131 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
     Returns news items, individual sentiments, and aggregate score.
     """
     POSITIVE_WORDS = {
-        "beat", "beats", "growth", "profit", "record", "surge", "soar", "gain", "bull",
-        "upgrade", "strong", "positive", "innovative", "launch", "expand", "exceed",
-        "raised", "raise", "outperform", "recovery", "partnership", "dividend",
-        "breakthrough", "milestone", "optimistic", "rally", "accelerate",
+        # Earnings / growth
+        "beat", "beats", "growth", "profit", "profits", "record", "surge", "surges",
+        "soar", "soars", "gain", "gains", "bull", "bullish", "upgrade", "upgrades",
+        "strong", "stronger", "robust", "positive", "innovative", "innovation",
+        "launch", "launches", "expand", "expansion", "exceed", "exceeds",
+        "raised", "raise", "outperform", "outperforms", "recovery", "recovers",
+        "partnership", "partnerships", "dividend", "dividends", "breakthrough",
+        "milestone", "optimistic", "rally", "rallies", "accelerate", "accelerates",
+        "improve", "improves", "improvement", "rebound", "rebounds", "advance",
+        "advances", "boost", "boosts", "excellent", "exceptional", "impressive",
+        "increase", "increases", "higher", "upbeat", "buoyant", "strong",
+        "overweight", "buy", "top", "outperformance", "upward", "upside",
+        "record-high", "all-time-high", "winning", "win", "wins", "profit",
+        "bonus", "benefits", "surplus", "revenue-beat", "guidance-raise",
+        "better-than-expected", "ahead", "returns", "inflow", "inflows",
+        "cash-flow", "demand", "resurgence", "adoption", "momentum",
     }
     NEGATIVE_WORDS = {
-        "miss", "misses", "loss", "decline", "fall", "drop", "cut", "layoff", "downgrade",
-        "weak", "negative", "lawsuit", "recall", "fraud", "penalty", "fine", "ban",
-        "warning", "risk", "concern", "below", "missed", "resign", "investigate",
-        "crisis", "debt", "default", "warning", "disappointing",
+        # Losses / risk
+        "miss", "misses", "loss", "losses", "decline", "declines", "fall", "falls",
+        "drop", "drops", "cut", "cuts", "layoff", "layoffs", "downgrade", "downgrades",
+        "weak", "weaker", "negative", "lawsuit", "lawsuits", "recall", "recalls",
+        "fraud", "penalty", "penalties", "fine", "fines", "ban", "bans",
+        "warning", "warnings", "risk", "risks", "concern", "concerns", "below",
+        "missed", "resign", "resigns", "investigate", "investigation",
+        "crisis", "debt", "default", "disappointing", "disappoint",
+        "disappoints", "shrink", "shrinks", "contraction", "contractions",
+        "underperform", "underperforms", "bearish", "bear", "bearish",
+        "downside", "downward", "underweight", "sell", "short",
+        "slump", "slumps", "plunge", "plunges", "crash", "crashes",
+        "recession", "slowdown", "weak", "sluggish", "volatile", "volatility",
+        "uncertainty", "uncertain", "headwind", "headwinds", "pressure",
+        "pressures", "halt", "halts", "suspended", "suspension", "charges",
+        "charge", "impairment", "write-off", "write-down", "shortfall",
+        "miss", "below-expectations", "guidance-cut", "downward-revision",
+        "outflow", "outflows", "deficit", "probe", "subpoena",
     }
+    NEGATION_WORDS = {"not", "no", "never", "without", "fails", "fail", "despite", "lack", "lacks"}
+    INTENSIFIER_WORDS = {"significantly", "sharply", "dramatically", "substantially", "hugely",
+                         "massively", "enormously", "considerably", "strongly", "greatly"}
+    TRUSTED_PUBLISHERS = {"reuters", "bloomberg", "wsj", "wall street journal", "financial times",
+                          "ft", "cnbc", "barrons", "barron's", "forbes", "marketwatch"}
 
     try:
         t = _ticker(symbol)
-        news = t.news  # list of dicts with 'title', 'publisher', 'link', 'providerPublishTime'
+        news = t.news
 
         if not news:
-            return {"status": "success", "symbol": symbol.upper(), "message": "No recent news found.", "sentiment": "Neutral", "score": 0.0}
+            return {
+                "status": "success", "symbol": symbol.upper(),
+                "message": "No recent news found.",
+                "overall_sentiment": "Neutral", "aggregate_score": 0.0,
+                "positive_headlines": 0, "negative_headlines": 0, "neutral_headlines": 0,
+                "news_items": [],
+            }
 
+        now_ts = datetime.utcnow().timestamp()
         scored_items = []
+
         for item in news[:15]:
-            title = item.get("title", "") or ""
-            words = re.findall(r"\b\w+\b", title.lower())
-            pos = sum(1 for w in words if w in POSITIVE_WORDS)
-            neg = sum(1 for w in words if w in NEGATIVE_WORDS)
-            total = pos + neg
-            item_score = round((pos - neg) / total, 3) if total > 0 else 0.0
-            label = "Positive" if item_score > 0.1 else ("Negative" if item_score < -0.1 else "Neutral")
-            ts = item.get("providerPublishTime")
+            title = (item.get("title") or "").strip()
+            raw_words = re.findall(r"\b\w+\b", title.lower())
+
+            pos_score = 0.0
+            neg_score = 0.0
+
+            for idx, word in enumerate(raw_words):
+                # look-back window (up to 3 positions)
+                context_start = max(0, idx - 3)
+                context = raw_words[context_start:idx]
+
+                is_negated    = any(w in NEGATION_WORDS       for w in context)
+                is_intensified = any(w in INTENSIFIER_WORDS   for w in raw_words[max(0, idx - 2):idx])
+                intensity = 1.5 if is_intensified else 1.0
+
+                if word in POSITIVE_WORDS:
+                    if is_negated:
+                        neg_score += 1.0 * intensity  # flip
+                    else:
+                        pos_score += 1.0 * intensity
+                elif word in NEGATIVE_WORDS:
+                    if is_negated:
+                        pos_score += 0.5 * intensity  # partial flip (negated negative = weakly positive)
+                    else:
+                        neg_score += 1.0 * intensity
+
+            total = pos_score + neg_score
+            item_score = round((pos_score - neg_score) / total, 3) if total > 0 else 0.0
+            label = "Positive" if item_score > 0.10 else ("Negative" if item_score < -0.10 else "Neutral")
+
+            # Recency decay
+            ts = item.get("providerPublishTime") or item.get("content", {}).get("pubDate")
+            pub_date_str = ""
+            recency_weight = 1.0
+            if ts:
+                try:
+                    age_days = (now_ts - float(ts)) / 86400
+                    recency_weight = 1.0 if age_days <= 7 else (0.8 if age_days <= 14 else 0.6)
+                    pub_date_str = datetime.utcfromtimestamp(float(ts)).strftime("%Y-%m-%d")
+                except (TypeError, ValueError):
+                    pass
+
+            # Publisher boost
+            publisher = (item.get("publisher") or "").lower()
+            pub_weight = 1.3 if any(p in publisher for p in TRUSTED_PUBLISHERS) else 1.0
+
+            total_weight = recency_weight * pub_weight
+
             scored_items.append({
-                "title":     title,
-                "publisher": item.get("publisher", ""),
-                "sentiment": label,
-                "score":     item_score,
-                "published": datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") if ts else "",
-                "url":       item.get("link", ""),
+                "title":          title,
+                "publisher":      item.get("publisher", ""),
+                "sentiment":      label,
+                "score":          item_score,
+                "weighted_score": round(item_score * total_weight, 3),
+                "weight":         round(total_weight, 2),
+                "published":      pub_date_str,
+                "url":            item.get("link", "") or item.get("clickThroughUrl", {}).get("url", ""),
             })
 
-        scores = [i["score"] for i in scored_items]
-        avg_score = round(sum(scores) / len(scores), 3)
-        overall = "Positive" if avg_score > 0.1 else ("Negative" if avg_score < -0.1 else "Neutral")
+        # Weighted aggregate
+        total_w  = sum(i["weight"] for i in scored_items)
+        agg_score = round(
+            sum(i["score"] * i["weight"] for i in scored_items) / total_w, 3
+        ) if total_w > 0 else 0.0
+        overall = "Positive" if agg_score > 0.10 else ("Negative" if agg_score < -0.10 else "Neutral")
 
         pos_count = sum(1 for i in scored_items if i["sentiment"] == "Positive")
         neg_count = sum(1 for i in scored_items if i["sentiment"] == "Negative")
@@ -635,12 +800,15 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
             "status":              "success",
             "symbol":              symbol.upper(),
             "overall_sentiment":   overall,
-            "aggregate_score":     avg_score,
+            "aggregate_score":     agg_score,
             "positive_headlines":  pos_count,
             "negative_headlines":  neg_count,
             "neutral_headlines":   neu_count,
             "news_items":          scored_items,
-            "note":                "Sentiment is keyword-based and indicative only.",
+            "note": (
+                "Sentiment is keyword-based NLP with negation handling, recency decay, "
+                "and publisher reliability weighting. Indicative only."
+            ),
         }
     except Exception as exc:
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}
@@ -756,3 +924,256 @@ def market_overview(indices: Optional[List[str]] = None) -> Dict[str, Any]:
         }
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+# ── Tool: generate_full_report ────────────────────────────────────────────────
+
+
+def generate_full_report(
+    symbol: str,
+    output_dir: str = "data",
+    send_to_email: Optional[str] = None,
+    llm_client: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Generate a comprehensive PDF analysis report for a stock.
+
+    Pipeline (all math first, LLM last)
+    ------------------------------------
+    Step 1 — get_quote(symbol)
+    Step 2 — technical_analysis(symbol)
+    Step 3 — risk_score(symbol)
+    Step 4 — pattern_detection(symbol)
+    Step 5 — fundamental_analysis(symbol)  [Warren Buffett metrics]
+    Step 6 — sentiment_analysis(symbol)    [enhanced keyword NLP]
+    Step 7 — ONE LLM call to produce a plain-language narrative
+              (if llm_client is provided; otherwise narrative is blank)
+    Step 8 — build PDF via report_generator.build_report()
+    Step 9 — optionally: gmail_service.send_email_with_attachment()
+
+    The LLM is given ONLY pre-computed numbers and STRICTLY instructed:
+      • NO buy/sell recommendations
+      • NO price targets
+      • NO investment advice
+    This ensures SEBI compliance and factual accuracy.
+
+    Args:
+        symbol:        Ticker symbol (e.g. "AAPL", "RELIANCE.NS").
+        output_dir:    Directory in which to save the PDF (created if absent).
+        send_to_email: If set, email the PDF to this address using the Gmail agent.
+        llm_client:    Optional callable(prompt: str) -> str for narrative generation.
+                       If None, an empty narrative is used.
+
+    Returns:
+        {
+          "status":       "success" | "error",
+          "symbol":       str,
+          "pdf_path":     str,          # absolute path to saved PDF
+          "generated_at": str,          # ISO timestamp
+          "emailed_to":   str | None,
+          "sections":     list[str],    # sections included in report
+          "errors":       list[str],    # non-fatal data-fetch warnings
+        }
+    """
+    from src.stock_market.fundamental_service import fundamental_analysis
+
+    try:
+        from src.stock_market.report_generator import build_report
+    except ImportError:
+        return {
+            "status": "error",
+            "symbol": symbol.upper(),
+            "message": "reportlab is required. Run: pip install reportlab",
+        }
+
+    errors = []
+    sections_included = []
+    generated_at = datetime.utcnow().isoformat() + "Z"
+
+    # ── Step 1–6: Run all analyses (pure math, no LLM) ─────────────────────────
+    logger.info("[generate_full_report] Fetching quote for %s", symbol)
+    quote_data = get_quote(symbol)
+    if quote_data.get("status") == "success":
+        sections_included.append("market_snapshot")
+    else:
+        errors.append(f"quote: {quote_data.get('message', 'unknown error')}")
+        quote_data = {}
+
+    logger.info("[generate_full_report] Running technical analysis for %s", symbol)
+    tech_data = technical_analysis(symbol)
+    if tech_data.get("status") == "success":
+        sections_included.append("technical_analysis")
+    else:
+        errors.append(f"technical: {tech_data.get('message', 'unknown error')}")
+        tech_data = {}
+
+    logger.info("[generate_full_report] Running risk score for %s", symbol)
+    risk_data = risk_score(symbol)
+    if risk_data.get("status") == "success":
+        sections_included.append("risk_assessment")
+    else:
+        errors.append(f"risk: {risk_data.get('message', 'unknown error')}")
+        risk_data = {}
+
+    logger.info("[generate_full_report] Running pattern detection for %s", symbol)
+    pattern_data = pattern_detection(symbol)
+    if pattern_data.get("status") == "success":
+        sections_included.append("pattern_detection")
+    else:
+        errors.append(f"patterns: {pattern_data.get('message', 'unknown error')}")
+        pattern_data = {}
+
+    logger.info("[generate_full_report] Running fundamental analysis for %s", symbol)
+    fund_data = fundamental_analysis(symbol)
+    if fund_data.get("status") == "success":
+        sections_included.append("fundamental_analysis")
+    else:
+        errors.append(f"fundamentals: {fund_data.get('message', 'unknown error')}")
+        fund_data = {}
+
+    logger.info("[generate_full_report] Running sentiment analysis for %s", symbol)
+    sentiment_data = sentiment_analysis(symbol)
+    if sentiment_data.get("status") == "success":
+        sections_included.append("news_sentiment")
+    else:
+        errors.append(f"sentiment: {sentiment_data.get('message', 'unknown error')}")
+        sentiment_data = {}
+
+    # ── Step 7: ONE LLM call for plain-language narrative ──────────────────────
+    narrative = ""
+    if llm_client is not None:
+        try:
+            logger.info("[generate_full_report] Requesting LLM narrative for %s", symbol)
+            narrative = _build_narrative(
+                symbol, quote_data, fund_data, tech_data, risk_data, pattern_data, sentiment_data, llm_client
+            )
+        except Exception as exc:
+            errors.append(f"narrative_llm: {exc}")
+            narrative = ""
+
+    # ── Step 8: Build PDF ───────────────────────────────────────────────────────
+    logger.info("[generate_full_report] Building PDF for %s", symbol)
+    pdf_path = build_report(
+        symbol       = symbol,
+        quote        = quote_data,
+        fundamentals = fund_data,
+        technical    = tech_data,
+        risk         = risk_data,
+        patterns     = pattern_data,
+        sentiment    = sentiment_data,
+        narrative    = narrative,
+        output_dir   = output_dir,
+    )
+    sections_included.append("executive_summary")
+
+    # ── Step 9: Optional email ─────────────────────────────────────────────────
+    emailed_to = None
+    if send_to_email:
+        try:
+            from src.email.gmail_service import GmailService
+            gs = GmailService()
+            subject = f"OctaMind Stock Analysis: {symbol.upper()} — {datetime.utcnow().strftime('%d %b %Y')}"
+            body = (
+                f"Please find attached the OctaMind stock analysis report for {symbol.upper()}.\n\n"
+                f"DISCLAIMER: This report is for informational purposes only. It does not constitute "
+                f"financial advice or a recommendation to buy, sell, or hold any security. "
+                f"Please consult a SEBI-registered investment advisor before making any investment decision.\n\n"
+                f"Generated at: {generated_at}"
+            )
+            gs.send_email_with_attachment(
+                to=send_to_email,
+                subject=subject,
+                body=body,
+                attachment_path=pdf_path,
+            )
+            emailed_to = send_to_email
+            logger.info("[generate_full_report] Report emailed to %s", send_to_email)
+        except Exception as exc:
+            errors.append(f"email: {exc}")
+
+    return {
+        "status":       "success",
+        "symbol":       symbol.upper(),
+        "pdf_path":     pdf_path,
+        "generated_at": generated_at,
+        "emailed_to":   emailed_to,
+        "sections":     sections_included,
+        "errors":       errors,
+    }
+
+
+def _build_narrative(
+    symbol: str,
+    quote:       Dict,
+    fundamentals: Dict,
+    technical:   Dict,
+    risk:        Dict,
+    patterns:    Dict,
+    sentiment:   Dict,
+    llm_client,
+) -> str:
+    """
+    Build a plain-language summary by calling the LLM exactly once.
+
+    The prompt includes ONLY the pre-computed numbers.
+    The LLM is STRICTLY instructed NOT to recommend buying/selling
+    or provide price targets (SEBI compliance).
+
+    Args:
+        llm_client: callable(prompt: str) -> str
+
+    Returns:
+        Multi-paragraph narrative string.
+    """
+    price     = quote.get("price", "N/A")
+    currency  = quote.get("currency", "")
+    q_score   = fundamentals.get("quality_score", "N/A")
+    q_label   = fundamentals.get("quality_label", "")
+    moat      = fundamentals.get("moat_label", "N/A")
+    roe       = fundamentals.get("roe_pct", "N/A")
+    op_margin = fundamentals.get("operating_margin_pct", "N/A")
+    pe        = fundamentals.get("pe_ratio", "N/A")
+    max_dd    = risk.get("max_drawdown_pct", "N/A")
+    sharpe    = risk.get("sharpe_ratio", "N/A")
+    sortino   = risk.get("sortino_ratio", "N/A")
+    risk_lvl  = risk.get("risk_level", "N/A")
+    rsi_val   = (technical.get("rsi") or {}).get("value", "N/A")
+    rsi_sig   = (technical.get("rsi") or {}).get("signal", "N/A")
+    trend     = patterns.get("trend", "N/A")
+    overall_sent = sentiment.get("overall_sentiment", "N/A")
+    agg_sent     = sentiment.get("aggregate_score", "N/A")
+
+    prompt = f"""You are an objective financial data analyst. Write a 3–4 paragraph plain-language 
+summary of the following pre-computed analysis for {symbol.upper()}.
+
+IMPORTANT RULES — YOU MUST FOLLOW THESE WITHOUT EXCEPTION:
+1. Do NOT recommend buying, selling, or holding any stock.
+2. Do NOT give price targets or earnings forecasts.
+3. Do NOT provide investment advice of any kind.
+4. State only what the numbers show. Use hedged language ("the data suggests", "historically...").
+5. End with a clear disclaimer that this is informational only.
+
+COMPUTED DATA SUMMARY:
+- Current Price       : {price} {currency}
+- Quality Score       : {q_score}/10  ({q_label})
+- Economic Moat       : {moat}
+- ROE                 : {roe}%
+- Operating Margin    : {op_margin}%
+- P/E Ratio           : {pe}
+- Risk Level          : {risk_lvl}
+- Max Drawdown (1Y)   : {max_dd}%
+- Sharpe Ratio        : {sharpe}
+- Sortino Ratio       : {sortino}
+- RSI (14)            : {rsi_val}  [{rsi_sig}]
+- Price Trend         : {trend}
+- News Sentiment      : {overall_sent} (score {agg_sent})
+
+Write the summary now. Do not include section headers like "Executive Summary".
+Plain prose only. Be factual and concise."""
+
+    try:
+        response = llm_client(prompt)
+        return str(response).strip()
+    except Exception:
+        return ""
+

@@ -10,7 +10,9 @@ from src.stock_market.stock_service import (
     sentiment_analysis,
     compare_stocks,
     market_overview,
+    generate_full_report,
 )
+from src.stock_market.fundamental_service import fundamental_analysis
 
 __all__ = [
     "get_quote",
@@ -23,4 +25,6 @@ __all__ = [
     "sentiment_analysis",
     "compare_stocks",
     "market_overview",
+    "fundamental_analysis",
+    "generate_full_report",
 ]

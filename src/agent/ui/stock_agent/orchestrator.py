@@ -6,13 +6,15 @@ READ-ONLY market analysis — no buy/sell order functionality.
 Capabilities:
   - Real-time quotes and historical OHLCV data
   - Technical analysis (RSI, MACD, Bollinger Bands, SMA)
-  - Risk scoring (volatility, Beta, VaR, Sharpe)
+  - Risk scoring (volatility, Beta, VaR, Sharpe, Max Drawdown, Sortino, Calmar)
   - Pattern detection (support/resistance, candlestick patterns)
   - Portfolio analysis (sector allocation, correlation, diversification)
   - Portfolio suggestions (rebalancing hints, concentration warnings)
-  - News sentiment analysis (keyword NLP on latest headlines)
+  - News sentiment analysis (keyword NLP with negation/recency on latest headlines)
   - Stock comparison (side-by-side metrics)
   - Market overview (S&P500, Nasdaq, Dow, Russell, VIX)
+  - Fundamental analysis — Warren Buffett quality framework (ROE, moat, FCF, safety)
+  - Full PDF report generation (all analyses in one document, optional email delivery)
 
 Data source: yfinance (free, no API key required).
 """
@@ -77,6 +79,19 @@ _STOCK_TOOLS_DESCRIPTION = """
     - Broad market health: day change, YTD, market mood (bullish/bearish).
     - Use for: "market overview", "how is the market doing?", "market today",
       "S&P500 status", "is the market up or down?"
+
+11. **fundamental_analysis**(symbol: str)
+    - Warren Buffett-style quality analysis: ROE, ROA, margins, FCF yield, debt ratios,
+      valuation multiples (P/E, P/B, PEG, EV/EBITDA), moat score (0–10), quality score.
+    - Use for: "fundamentals of ...", "Buffett analysis of ...", "is [stock] a quality company?",
+      "moat score for ...", "financial health of ...", "balance sheet analysis"
+
+12. **generate_full_report**(symbol: str, output_dir: str = "data", send_to_email: str = None)
+    - Runs ALL analyses (quote, technical, risk, patterns, fundamentals, sentiment),
+      generates a comprehensive PDF report, optionally emails it.
+    - Use for: "generate report for ...", "full analysis PDF for ...",
+      "complete analysis of ...", "download report for ...",
+      "send analysis report of [symbol] to [email]"
 """
 
 
@@ -87,6 +102,7 @@ def _dispatch_tool(tool: str, params: Dict[str, Any]) -> Dict[str, Any]:
         get_quote, get_historical_data, technical_analysis, risk_score,
         pattern_detection, portfolio_analysis, portfolio_suggestions,
         sentiment_analysis, compare_stocks, market_overview,
+        fundamental_analysis, generate_full_report,
     )
     _MAP = {
         "get_quote":            lambda p: get_quote(**p),
@@ -99,6 +115,8 @@ def _dispatch_tool(tool: str, params: Dict[str, Any]) -> Dict[str, Any]:
         "sentiment_analysis":   lambda p: sentiment_analysis(**p),
         "compare_stocks":       lambda p: compare_stocks(**p),
         "market_overview":      lambda p: market_overview(**p),
+        "fundamental_analysis": lambda p: fundamental_analysis(**p),
+        "generate_full_report": lambda p: generate_full_report(**p),
     }
     fn = _MAP.get(tool)
     if fn is None:
@@ -146,6 +164,8 @@ Rules:
 - NEVER suggest buy/sell — this is analysis only
 - For vague "market" queries: use market_overview
 - For single stock questions: use get_quote or technical_analysis
+- For "full report", "PDF", "complete analysis": use generate_full_report
+- For "fundamentals", "Buffett", "quality", "moat": use fundamental_analysis
 - Omit optional params unless the user explicitly specified them
 """
 
