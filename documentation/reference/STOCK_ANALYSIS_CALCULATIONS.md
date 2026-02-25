@@ -173,14 +173,16 @@ Signals are noted as "above" or "below" each SMA.
 daily_returns[i] = (close[i] − close[i-1]) / close[i-1]
 
 mean_r   = mean(daily_returns)
-variance = mean((r − mean_r)² for r in daily_returns)   ← population variance
+variance = sum((r − mean_r)² for r in daily_returns) / (N − 1)   ← sample variance (N−1)
 daily_σ  = sqrt(variance)
 
 annual_σ = daily_σ × sqrt(252) × 100      (in %)
 ```
 
-**Why 252?** The US and most exchanges have ~252 trading days per year.
-Indian exchanges (NSE/BSE): ~250 trading days — minor underestimation for Indian stocks.
+**Why sample variance (N−1)?** Sample variance is the standard statistical estimator
+for a population parameter from a finite sample. Using N (population variance) slightly
+understimates variance. The difference is negligible for N~250, but using N−1 is the
+accepted convention in academic finance.
 
 ---
 
@@ -191,8 +193,8 @@ Beta measures the stock's sensitivity to broad market (S&P 500 proxied by SPY ET
 ```
 Align stock and SPY daily returns to same length N.
 
-cov(stock, SPY) = mean((stock_r[i] − mean_stock) × (SPY_r[i] − mean_SPY))
-var(SPY)        = mean((SPY_r[i] − mean_SPY)²)
+cov(stock, SPY) = sum((stock_r[i] − mean_stock) × (SPY_r[i] − mean_SPY)) / (N − 1)   ← sample
+var(SPY)        = sum((SPY_r[i] − mean_SPY)²) / (N − 1)                               ← sample
 
 Beta = cov / var
 ```
@@ -204,6 +206,16 @@ Beta = cov / var
 | 0.5–1.0    | Less volatile than market             |
 | < 0        | Inverse relationship (rare)           |
 
+**Beta 60d (Rolling):** Same formula applied to the most recent 60 trading days only.
+Shows how a stock’s market sensitivity has shifted recently vs. the 1-year baseline.
+Regime changes (e.g. sector rotation, macro events) are visible here before they show
+in the full-period beta.
+
+**Downside Beta:** Beta computed using only days when SPY’s daily return was negative.
+Captures how much the stock amplifies market downturns (tail-risk sensitivity).
+Downside Beta > 1-year Beta implies the stock falls harder than average on bad days.
+Institutional risk models (e.g. BlackRock Aladdin) isolate downside beta for this reason.
+
 **Known limitation:** Beta vs SPY is less meaningful for non-US stocks (e.g., RELIANCE.NS
 should ideally be compared against NIFTY 50 / ^NSEI). A future improvement: auto-select
 benchmark based on stock country.
@@ -212,18 +224,27 @@ benchmark based on stock country.
 
 ### 2.3 Value-at-Risk (VaR 95%)
 
-Parametric VaR assumes returns are normally distributed.
+**Parametric VaR** assumes returns are normally distributed.
 
 ```
 z₉₅ = 1.645   (95th percentile of standard normal)
 
-VaR_95_daily = −(mean_r − z₉₅ × daily_σ) × 100    (in %)
+VaR_95_parametric = −(mean_r − z₉₅ × daily_σ) × 100    (in %)
 ```
 
-**Interpretation:** "In 95% of trading days, the loss should not exceed this percentage."
+**Historical VaR** (no normality assumption; more robust in fat-tail regimes):
 
-**Known limitation:** Returns are not perfectly normal (fat tails exist). Historical VaR
-or Cornish-Fisher VaR would be more robust. Expert review invited on this choice.
+```
+sorted_returns = sort(daily_returns, ascending)
+idx            = floor(N × 0.05) − 1
+
+VaR_95_historical = −sorted_returns[idx] × 100    (in %)
+```
+
+Both are daily figures: "In 95% of trading days, the loss should not exceed this %."
+
+**Known limitation (parametric):** Returns are not perfectly normal (fat tails exist).
+Historical VaR is now provided alongside parametric as the more empirically grounded estimate.
 
 ---
 
@@ -235,10 +256,13 @@ Measures return earned per unit of total risk.
 risk_free_annual = 4.5%   (approximate Indian/US short-term rate assumption)
 risk_free_daily  = 0.045 / 252
 
-annual_return    = ((close[-1] / close[0]) ^ (252 / N) − 1) × 100
-
 Sharpe = (mean_daily_return − rf_daily) / daily_σ × sqrt(252)
 ```
+
+**Clarification:** Sharpe is based on the arithmetic mean daily return annualised
+(μ₝ₐᵢₗʸ × √252), not the CAGR-style geometric return used in `annual_return_pct`.
+Geometric annualisation and arithmetic annualisation diverge at higher volatilities;
+the arithmetic form is the standard convention in the Sharpe Ratio definition (Sharpe, 1994).
 
 | Sharpe   | Quality         |
 |----------|-----------------|
@@ -339,6 +363,14 @@ composite   = 0.40 × vol_score + 0.30 × beta_score + 0.30 × var_score
 **Expert review note:** The weighting (40/30/30) and scaling factors (/5, ×3.5, /1.5)
 are calibrated heuristically. An empirical calibration against historical risk events
 across market caps would be valuable.
+
+**On percentile normalization (expert suggestion):** A more rigorous alternative is to
+normalise each metric to its percentile rank over a reference universe (large/mid/small
+cap stocks), then composite as `0.4 × vol_percentile + 0.3 × beta_percentile + 0.3 × var_percentile`.
+This removes arbitrary scaling constants. It is not currently implemented because computing
+universe percentiles requires fetching and caching risk metrics for hundreds of reference
+stocks at query time, which is prohibitive for a real-time single-stock tool. The heuristic
+scaling is a pragmatic approximation; consider this a known limitation for institutional use.
 
 ---
 
@@ -501,6 +533,10 @@ Temperature = 0.0 (deterministic).  Timeout = 20s.  Fails gracefully to keyword 
 
 See Section 4.2 onwards. The fallback is always available with zero latency.
 
+**Compliance note:** The LLM classification model is used strictly for textual sentiment
+interpretation of news headlines and does not generate price forecasts or investment
+recommendations. Sentiment scores are descriptive indicators only.
+
 ### 4.2 Keyword Word Scoring (Fallback)
 
 For each headline title, words are tokenised as lowercase alphanumeric tokens.
@@ -628,6 +664,12 @@ intraday tick or minute data. The 5-day VWAP serves as a medium-term trend refer
 - Price consistently above 5D VWAP → generally bullish momentum
 - Price crossing below 5D VWAP → caution signal
 
+**Bar-based approximation:** This VWAP uses hourly bar typical prices, not tick-level
+transaction prices. True institutional VWAP is computed as `Σ(price_i × volume_i) / Σ(volume_i)`
+over every individual trade or minute bar. The typical-price hourly approximation is
+acceptable for directional context but differs from exchange-reported VWAP by a small
+margin depending on intraday price distribution.
+
 For single-session VWAP, we would need `period="1d", interval="1m"` and compute daily.
 
 ### 5.5 Volume Profile & Point of Control (POC)
@@ -654,6 +696,12 @@ For single-session VWAP, we would need `period="1d", interval="1m"` and compute 
 typically uses 30-minute TPO (Time Price Opportunity) charts. Volume Profile buckets should
 ideally be based on intraday data at 15-minute resolution for precision.
 Expert calibration on bucket count and timeframe welcome.
+
+**Equal-width bucket limitation:** Buckets are equal-width price intervals (e.g. a $10
+stock split into 20 × $0.50 buckets). Professional systems instead align buckets to the
+tick size or use fixed price increments (e.g. $0.25 for a mid-cap). Equal-width can
+overly compress low-priced small-cap stocks and spread high-priced stocks too thinly.
+The current implementation is satisfactory for qualitative POC/value-area context.
 
 ### 5.6 Trend Direction
 

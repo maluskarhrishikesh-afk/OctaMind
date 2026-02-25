@@ -247,30 +247,34 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
     Calculated metrics
     ------------------
     Annual Volatility   = daily_std × √252 × 100
+                          Uses sample standard deviation (N−1 denominator).
                           Measures price dispersion; higher = more uncertainty.
 
-    Beta vs SPY         = Cov(stock_returns, SPY_returns) / Var(SPY_returns)
-                          >1 → amplifies market moves; <1 → more stable than market.
+    Beta vs SPY         = Cov_sample(stock, SPY) / Var_sample(SPY)
+                          Sample covariance/variance (N−1). >1 → amplifies market;
+                          <1 → more stable than market.
 
-    VaR 95% (daily)     = -(μ − 1.645 × σ_daily) × 100
-                          Parametric; represents worst expected daily loss 95% of time.
+    Beta 60d (Rolling)  = Same formula over the most recent 60 trading days.
+                          Shows how beta has shifted from the 1-year baseline.
 
-    Sharpe Ratio        = (annualised_return − risk_free) / annual_volatility
-                          Risk-free rate: 4.5% p.a.  >1 = good; <0 = losing vs risk-free.
+    Beta Downside       = Beta computed only on days when SPY return was negative.
+                          Captures tail-risk sensitivity; favoured by institutions.
+
+    VaR 95% Parametric  = -(μ − 1.645 × σ_daily) × 100   (normality assumed)
+    VaR 95% Historical  = −5th percentile of actual daily returns × 100
+                          No normality assumption; more robust in fat-tail regimes.
+
+    Sharpe Ratio        = (mean_daily_return − rf_daily) / daily_σ × √252
+                          Uses arithmetic mean daily return annualised — NOT CAGR.
+                          Risk-free rate: 4.5% p.a.
 
     Max Drawdown        = (peak_price − trough_price) / peak_price × 100
-                          Maximum observed loss from a historical peak to a trough.
-
-    Sortino Ratio       = (annualised_return − risk_free) / downside_deviation
-                          Like Sharpe but penalises only negative-return volatility.
-                          downside_deviation = std(min(r, 0)) × √252
-
+    Sortino Ratio       = excess_annual / downside_deviation_annual
     Calmar Ratio        = annualised_return / |max_drawdown|
-                          Return earned per unit of maximum drawdown risk.
 
     Composite Risk Score (1–10)
                         = weighted(vol_score×40% + beta_score×30% + var_score×30%)
-                          where each component is linearly scaled to [1, 10].
+                          Heuristic linear scaling. See docs for expert commentary.
 
     Args:
         symbol: Ticker symbol.
@@ -292,7 +296,7 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
 
         n = len(returns)
         mean_ret = sum(returns) / n
-        variance = sum((r - mean_ret) ** 2 for r in returns) / n
+        variance = sum((r - mean_ret) ** 2 for r in returns) / (n - 1)  # sample variance
         daily_vol = math.sqrt(variance)
         annual_vol = round(daily_vol * math.sqrt(252) * 100, 2)
 
@@ -300,11 +304,16 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
         total_return = (closes[-1] / closes[0] - 1)
         annual_return = round(((1 + total_return) ** (252 / len(closes)) - 1) * 100, 2)
 
-        # VaR 95% (parametric, daily)
+        # VaR 95% — parametric (assumes normal distribution)
         z95 = 1.645
         var_95 = round(-(mean_ret - z95 * daily_vol) * 100, 3)
 
-        # Beta vs SPY
+        # VaR 95% — historical (5th percentile of actual returns; no normality assumption)
+        sorted_rets = sorted(returns)
+        hist_idx = max(0, int(len(sorted_rets) * 0.05) - 1)
+        var_95_hist = round(-sorted_rets[hist_idx] * 100, 3)
+
+        # Beta vs SPY (and derived metrics)
         spy_hist = yf.Ticker("SPY").history(period=period)
         beta = None
         if not spy_hist.empty:
@@ -316,9 +325,39 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
             r2 = spy_returns[-min_len:]
             m1 = sum(r1) / len(r1)
             m2 = sum(r2) / len(r2)
-            cov = sum((a - m1) * (b - m2) for a, b in zip(r1, r2)) / len(r1)
-            spy_var = sum((b - m2) ** 2 for b in r2) / len(r2)
+            # Sample covariance/variance (N-1) — finance convention
+            cov = sum((a - m1) * (b - m2) for a, b in zip(r1, r2)) / (len(r1) - 1)
+            spy_var = sum((b - m2) ** 2 for b in r2) / (len(r2) - 1)
             beta = round(cov / spy_var, 3) if spy_var != 0 else None
+
+            # ── Rolling Beta 60d ──────────────────────────────────────────────
+            roll_len = min(60, min_len)
+            if roll_len > 10:
+                r1_60 = r1[-roll_len:]
+                r2_60 = r2[-roll_len:]
+                m1_60 = sum(r1_60) / roll_len
+                m2_60 = sum(r2_60) / roll_len
+                cov_60 = sum((a - m1_60) * (b - m2_60) for a, b in zip(r1_60, r2_60)) / (roll_len - 1)
+                var_60 = sum((b - m2_60) ** 2 for b in r2_60) / (roll_len - 1)
+                beta_60d = round(cov_60 / var_60, 3) if var_60 != 0 else None
+            else:
+                beta_60d = None
+
+            # ── Downside Beta (negative SPY days only) ────────────────────────
+            neg_pairs = [(a, b) for a, b in zip(r1, r2) if b < 0]
+            beta_downside = None
+            if len(neg_pairs) > 10:
+                nd_n = len(neg_pairs)
+                nd_r1 = [p[0] for p in neg_pairs]
+                nd_r2 = [p[1] for p in neg_pairs]
+                nd_m1 = sum(nd_r1) / nd_n
+                nd_m2 = sum(nd_r2) / nd_n
+                nd_cov = sum((a - nd_m1) * (b - nd_m2) for a, b in zip(nd_r1, nd_r2)) / (nd_n - 1)
+                nd_var = sum((b - nd_m2) ** 2 for b in nd_r2) / (nd_n - 1)
+                beta_downside = round(nd_cov / nd_var, 3) if nd_var != 0 else None
+        else:
+            beta_60d = None
+            beta_downside = None
 
         # Sharpe ratio (risk-free = 4.5% annual)
         rf_daily = 0.045 / 252
@@ -372,7 +411,10 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
             "annual_volatility_pct": annual_vol,
             "annual_return_pct":     annual_return,
             "beta":                  beta,
+            "beta_60d":              beta_60d,
+            "beta_downside":         beta_downside,
             "var_95_daily_pct":      var_95,
+            "var_95_hist_daily_pct": var_95_hist,
             "sharpe_ratio":          sharpe,
             "sortino_ratio":         sortino,
             "max_drawdown_pct":      max_drawdown_pct,

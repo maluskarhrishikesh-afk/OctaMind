@@ -527,14 +527,18 @@ def build_report(
 
         risk_data = [
             ["Risk Metric", "Value", "Risk Metric", "Value"],
-            ["Annual Volatility",   _fmt(r.get("annual_volatility_pct"),   suffix="%"),
-             "Sharpe Ratio (1Y)",   _fmt(r.get("sharpe_ratio"),            decimals=3)],
-            ["Beta vs SPY",         _fmt(r.get("beta"),                    decimals=3),
-             "Sortino Ratio",       _fmt(r.get("sortino_ratio"),           decimals=3)],
-            ["VaR 95% (daily)",     _fmt(r.get("var_95_daily_pct"),        suffix="%"),
-             "Max Drawdown",        _fmt(r.get("max_drawdown_pct"),        suffix="%", decimals=2)],
-            ["Annual Return",       _fmt(r.get("annual_return_pct"),       suffix="%"),
-             "Calmar Ratio",        _fmt(r.get("calmar_ratio"),            decimals=3)],
+            ["Annual Volatility",      _fmt(r.get("annual_volatility_pct"),   suffix="%"),
+             "Sharpe Ratio (1Y)",      _fmt(r.get("sharpe_ratio"),            decimals=3)],
+            ["Beta vs SPY (1Y)",       _fmt(r.get("beta"),                    decimals=3),
+             "Sortino Ratio",          _fmt(r.get("sortino_ratio"),           decimals=3)],
+            ["VaR 95% Parametric",     _fmt(r.get("var_95_daily_pct"),        suffix="%"),
+             "Max Drawdown",           _fmt(r.get("max_drawdown_pct"),        suffix="%", decimals=2)],
+            ["VaR 95% Historical",     _fmt(r.get("var_95_hist_daily_pct"),   suffix="%"),
+             "Calmar Ratio",           _fmt(r.get("calmar_ratio"),            decimals=3)],
+            ["Beta 60d (Rolling)",     _fmt(r.get("beta_60d"),               decimals=3),
+             "Annual Return",          _fmt(r.get("annual_return_pct"),       suffix="%")],
+            ["Beta Downside",          _fmt(r.get("beta_downside"),           decimals=3),
+             "", ""],
         ]
         col_w = [CONTENT_W * 0.27, CONTENT_W * 0.23, CONTENT_W * 0.27, CONTENT_W * 0.23]
         story.append(_table(risk_data, col_w))
@@ -542,7 +546,9 @@ def build_report(
         story.append(Spacer(1, 0.15 * cm))
         story.append(Paragraph(
             "Risk Score Methodology: composite of normalised annual volatility (40%), "
-            "Beta vs SPY (30%), and daily VaR 95% (30%).  Score 1=low risk, 10=very high risk.",
+            "Beta vs SPY (30%), and daily VaR 95% parametric (30%).  Score 1=low risk, 10=very high risk.  "
+            "Beta 60d shows recent beta regime; Beta Downside captures tail-risk sensitivity on negative market days.  "
+            "VaR Historical uses actual return percentiles — no normality assumption.",
             st["body_small"]
         ))
 
