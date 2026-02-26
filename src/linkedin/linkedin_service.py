@@ -66,7 +66,7 @@ logger = logging.getLogger("linkedin_service")
 _API_BASE = "https://api.linkedin.com/v2"
 _AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
 _TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
-_SCOPES = "w_member_social w_organization_social r_organization_social r_liteprofile r_emailaddress"
+_SCOPES = "w_member_social openid profile email"
 
 _SCHEDULE_FILE = Path("data/linkedin_scheduled.json")
 
@@ -109,7 +109,13 @@ def _author_urn() -> str:
         return org_urn
     # Fall back to member profile
     profile = get_profile()
-    return f"urn:li:person:{profile['id']}"
+    person_id = profile.get("id") or profile.get("sub")
+    if not person_id:
+        raise ValueError(
+            f"Could not determine LinkedIn person ID. Profile response: {profile}. "
+            "Ensure 'openid profile' scopes are granted."
+        )
+    return f"urn:li:person:{person_id}"
 
 
 def _headers() -> Dict[str, str]:
@@ -193,18 +199,44 @@ def exchange_code_for_token(code: str) -> Dict[str, Any]:
 # ── Profile / Page ─────────────────────────────────────────────────────────────
 
 def get_profile() -> Dict[str, Any]:
-    """Fetch the authenticated member's basic profile."""
-    url = f"{_API_BASE}/me?projection=(id,localizedFirstName,localizedLastName,vanityName)"
-    resp = requests.get(url, headers=_headers(), timeout=15)
-    if not resp.ok:
-        return {"status": "error", "message": resp.text}
-    data = resp.json()
-    return {
-        "status": "success",
-        "id": data.get("id", ""),
-        "name": f"{data.get('localizedFirstName', '')} {data.get('localizedLastName', '')}".strip(),
-        "vanity_name": data.get("vanityName", ""),
-    }
+    """Fetch the authenticated member's basic profile.
+
+    LinkedIn API notes:
+    - /v2/me requires r_liteprofile (deprecated) or r_basicprofile scope.
+    - /v2/userinfo is the OIDC endpoint and requires ONLY a plain Bearer token
+      header (no X-Restli-Protocol-Version — that causes a 403).
+    """
+    # Try OIDC /v2/userinfo first (works with openid+profile scopes, no Restli header)
+    plain_bearer = {"Authorization": f"Bearer {_access_token()}"}
+    userinfo_resp = requests.get(f"{_API_BASE}/userinfo", headers=plain_bearer, timeout=15)
+    if userinfo_resp.ok:
+        data = userinfo_resp.json()
+        sub = data.get("sub", "")
+        return {
+            "status": "success",
+            "id": sub,
+            "sub": sub,
+            "name": data.get("name", ""),
+            "given_name": data.get("given_name", ""),
+            "family_name": data.get("family_name", ""),
+            "email": data.get("email", ""),
+            "vanity_name": "",
+        }
+    # Fall back to legacy /v2/me (requires r_liteprofile scope)
+    me_resp = requests.get(
+        f"{_API_BASE}/me?projection=(id,localizedFirstName,localizedLastName,vanityName)",
+        headers=_headers(), timeout=15
+    )
+    if me_resp.ok:
+        data = me_resp.json()
+        return {
+            "status": "success",
+            "id": data.get("id", ""),
+            "sub": data.get("id", ""),
+            "name": f"{data.get('localizedFirstName', '')} {data.get('localizedLastName', '')}".strip(),
+            "vanity_name": data.get("vanityName", ""),
+        }
+    return {"status": "error", "message": f"/v2/userinfo: {userinfo_resp.text} | /v2/me: {me_resp.text}"}
 
 
 def get_org_followers() -> Dict[str, Any]:
