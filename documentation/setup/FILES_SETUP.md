@@ -1,8 +1,8 @@
-# Files Agent — Setup & Testing Guide
+﻿# Files Agent — Setup & Testing Guide
 
 ## Overview
 
-The Files Agent is a local-file-system management agent for OctaMind. It needs **no credentials and no API setup** — it works immediately after you create a Files Agent in the Agent Hub. The only optional dependency is an LLM provider (for the AI smart features in the last section), and `send2trash` for Recycle Bin support.
+The Files Agent is a local-file-system management agent for Octa Bot. It needs **no credentials and no API setup** — it works immediately after you create a Files Agent in the Agent Hub. The only optional dependency is an LLM provider (for the AI smart features in the last section), and `send2trash` for Recycle Bin support.
 
 ---
 
@@ -50,22 +50,22 @@ Get info on C:/Windows/notepad.exe
 **Expected:** File metadata — size, dates, extension, type.
 
 ```
-Create folder C:/Users/<YourName>/Desktop/OctaMind_Test
+Create folder C:/Users/<YourName>/Desktop/Octa Bot_Test
 ```
 **Expected:** "Folder created successfully."
 
 ```
-Copy C:/Windows/notepad.exe to C:/Users/<YourName>/Desktop/OctaMind_Test/notepad_copy.exe
+Copy C:/Windows/notepad.exe to C:/Users/<YourName>/Desktop/Octa Bot_Test/notepad_copy.exe
 ```
 **Expected:** "File copied."
 
 ```
-Rename C:/Users/<YourName>/Desktop/OctaMind_Test/notepad_copy.exe to test_copy.exe
+Rename C:/Users/<YourName>/Desktop/Octa Bot_Test/notepad_copy.exe to test_copy.exe
 ```
 **Expected:** "File renamed."
 
 ```
-Move C:/Users/<YourName>/Desktop/OctaMind_Test/test_copy.exe to C:/Users/<YourName>/Desktop/
+Move C:/Users/<YourName>/Desktop/Octa Bot_Test/test_copy.exe to C:/Users/<YourName>/Desktop/
 ```
 **Expected:** "File moved."
 
@@ -155,7 +155,7 @@ Organise C:/Users/<YourName>/Downloads by date (dry run)
 **Expected:** Preview list showing YYYY/MM folder structure.
 
 ```
-Bulk rename files in C:/Users/<YourName>/Desktop/OctaMind_Test with prefix Test_
+Bulk rename files in C:/Users/<YourName>/Desktop/Octa Bot_Test with prefix Test_
 ```
 **Expected:** Preview of `Test_<original_name>` renames.
 
@@ -165,7 +165,7 @@ Move all PDF files from C:/Users/<YourName>/Downloads to C:/Users/<YourName>/Doc
 **Expected:** Preview of files that would be moved.
 
 ```
-Clean empty folders in C:/Users/<YourName>/OctaMind_Test
+Clean empty folders in C:/Users/<YourName>/Octa Bot_Test
 ```
 **Expected:** "Found X empty folders to remove" or "No empty folders."
 

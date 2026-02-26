@@ -1,4 +1,4 @@
-"""
+﻿"""
 Tests for the multi-agent workflow engine.
 
 Covers:
@@ -70,7 +70,7 @@ class TestFileBridge:
         from src.agent.workflows import file_bridge as fb
         d = fb.make_workflow_dir()
         assert d.exists()
-        assert d.name.startswith("octamind_wf_")
+        assert d.name.startswith("Octa Bot_wf_")
         d.rmdir()  # cleanup
 
     def test_file_size_mb(self, tmp_path):
@@ -185,7 +185,7 @@ class TestWorkflowContext:
 
     def test_cleanup_removes_empty_parent_dir(self, tmp_path):
         from src.agent.workflows.workflow_context import WorkflowContext
-        sub = tmp_path / "octamind_wf_testclean"
+        sub = tmp_path / "Octa Bot_wf_testclean"
         sub.mkdir()
         f = sub / "file.txt"
         f.write_bytes(b"data")

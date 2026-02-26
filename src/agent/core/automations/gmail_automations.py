@@ -162,7 +162,7 @@ def weekly_report(agent_id: str, params: Dict[str, Any]) -> str:
 
 
 def auto_categorize(agent_id: str, params: Dict[str, Any]) -> str:
-    """Apply OctaMind Gmail category labels to recent unread emails."""
+    """Apply Octa Bot Gmail category labels to recent unread emails."""
     try:
         from src.email.features.categorizer import auto_categorize_email
         service = _svc()

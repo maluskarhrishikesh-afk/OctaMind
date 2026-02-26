@@ -222,11 +222,11 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
         ics_lines = [
             'BEGIN:VCALENDAR',
             'VERSION:2.0',
-            'PRODID:-//OctaMind Email Agent//EN',
+            'PRODID:-//Octa Bot Email Agent//EN',
             'CALSCALE:GREGORIAN',
             'METHOD:PUBLISH',
             'BEGIN:VEVENT',
-            f'UID:{uid}@octamind',
+            f'UID:{uid}@Octa Bot',
             f'DTSTAMP:{now}',
             f'DTSTART:{dtstart}',
             f'DTEND:{dtend}',

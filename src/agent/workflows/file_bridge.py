@@ -6,10 +6,10 @@ to attach it. FileBridge stores the mapping and cleans up afterwards.
 
 Usage:
     # Drive step — after downloading:
-    handle = file_bridge.register("abc123", "/tmp/octamind_wf_abc/budget.xlsx")
+    handle = file_bridge.register("abc123", "/tmp/Octa Bot_wf_abc/budget.xlsx")
 
     # Email step — before attaching:
-    path = file_bridge.resolve("abc123")   # → "/tmp/octamind_wf_abc/budget.xlsx"
+    path = file_bridge.resolve("abc123")   # → "/tmp/Octa Bot_wf_abc/budget.xlsx"
 
     # After workflow completes:
     file_bridge.cleanup_handle("abc123")
@@ -30,7 +30,7 @@ _registry: Dict[str, Path] = {}
 
 def make_workflow_dir() -> Path:
     """Create a fresh temp directory for one workflow run."""
-    tmp = Path(tempfile.gettempdir()) / f"octamind_wf_{uuid.uuid4().hex[:8]}"
+    tmp = Path(tempfile.gettempdir()) / f"Octa Bot_wf_{uuid.uuid4().hex[:8]}"
     tmp.mkdir(parents=True, exist_ok=True)
     logger.debug("Created workflow temp dir: %s", tmp)
     return tmp
@@ -78,8 +78,8 @@ def cleanup_handle(handle: str) -> None:
         try:
             path.unlink()
             logger.debug("FileBridge: deleted %s", path)
-            # Remove parent dir if it's an octamind workflow dir and now empty
-            if path.parent.name.startswith("octamind_wf_"):
+            # Remove parent dir if it's an Octa Bot workflow dir and now empty
+            if path.parent.name.startswith("Octa Bot_wf_"):
                 remaining = list(path.parent.iterdir())
                 if not remaining:
                     path.parent.rmdir()

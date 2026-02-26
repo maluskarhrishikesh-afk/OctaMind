@@ -19,5 +19,16 @@
     "phone_number_id": "123456789012345",
     "verify_token": "any_secret_string_you_choose",
     "webhook_port": 9001
+  },
+
+  "linkedin": {
+    "_comment": "LinkedIn API credentials — see documentation/setup/LINKEDIN_SETUP.md",
+    "client_id": "your_linkedin_app_client_id",
+    "client_secret": "your_linkedin_app_client_secret",
+    "access_token": "your_long_lived_access_token_after_oauth",
+    "org_urn": "urn:li:organization:your_organization_id",
+    "redirect_uri": "http://localhost:8080/callback",
+    "post_as_org": true,
+    "image_gen_backend": "openai"
   }
 }

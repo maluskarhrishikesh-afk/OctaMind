@@ -1,5 +1,5 @@
 """
-OctaMind Hub API — FastAPI server.
+Octa Bot Hub API — FastAPI server.
 
 Exposes the HubProcessor as an HTTP endpoint so any external bot
 (WhatsApp, WeChat, custom integrations …) can reach the multi-agent brain.
@@ -47,7 +47,7 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(m
 _API_KEY = os.getenv("HUB_API_KEY", "")
 
 app = FastAPI(
-    title="OctaMind Hub API",
+    title="Octa Bot Hub API",
     description="Channel-agnostic multi-agent brain. Send messages from any bot.",
     version="1.0.0",
 )
@@ -70,7 +70,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="The user's text message")
     session_id: str = Field(..., description="Unique ID for the conversation (e.g. 'telegram_12345')")
     source: str = Field("api", description="Channel source: telegram | whatsapp | api | …")
-    agent_id: Optional[str] = Field("__multi_agent__", description="OctaMind agent ID to use")
+    agent_id: Optional[str] = Field("__multi_agent__", description="Octa Bot agent ID to use")
     agent_name: Optional[str] = Field("Personal Assistant", description="Display name of the agent")
 
 

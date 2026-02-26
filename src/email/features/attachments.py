@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 logger = logging.getLogger("email_agent.features.attachments")
 
 # Default download directory
-DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads" / "OctaMind_Attachments"
+DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads" / "Octa Bot_Attachments"
 
 
 class AttachmentManager:
@@ -73,7 +73,7 @@ class AttachmentManager:
             message_id: Gmail message ID containing the attachment
             attachment_id: The attachment ID from list_attachments
             filename: Suggested filename (optional)
-            save_path: Directory to save to (defaults to ~/Downloads/OctaMind_Attachments)
+            save_path: Directory to save to (defaults to ~/Downloads/Octa Bot_Attachments)
         """
         try:
             attachment = self.gmail_service.users().messages().attachments().get(

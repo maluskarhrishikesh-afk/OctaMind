@@ -41,7 +41,7 @@ from ..whatsapp_auth import get_verify_token, get_access_token
 from .message_store import store_inbound_message
 
 if _FASTAPI_AVAILABLE:
-    app = FastAPI(title="OctaMind WhatsApp Webhook", version="1.0.0")
+    app = FastAPI(title="Octa Bot WhatsApp Webhook", version="1.0.0")
 else:
     app = None  # type: ignore
 

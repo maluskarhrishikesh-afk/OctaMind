@@ -1,6 +1,6 @@
-# WhatsApp Agent — Setup & Testing Guide
+﻿# WhatsApp Agent — Setup & Testing Guide
 
-This guide walks you through setting up the OctaMind WhatsApp Agent from
+This guide walks you through setting up the Octa Bot WhatsApp Agent from
 scratch using the **Meta WhatsApp Cloud API** (the official Business API).
 
 ---
@@ -10,12 +10,12 @@ scratch using the **Meta WhatsApp Cloud API** (the official Business API).
 1. [Architecture Overview](#architecture-overview)
 2. [Step 1 — Create a Meta Developer App](#step-1--create-a-meta-developer-app)
 3. [Step 2 — Get Your Credentials](#step-2--get-your-credentials)
-4. [Step 3 — Configure OctaMind](#step-3--configure-octamind)
+4. [Step 3 — Configure Octa Bot](#step-3--configure-Octa Bot)
 5. [Step 4 — Install Python Dependencies](#step-4--install-python-dependencies)
 6. [Step 5 — Start the Webhook Server](#step-5--start-the-webhook-server)
 7. [Step 6 — Expose the Webhook with ngrok](#step-6--expose-the-webhook-with-ngrok)
 8. [Step 7 — Register the Webhook in Meta Console](#step-7--register-the-webhook-in-meta-console)
-9. [Step 8 — Create a WhatsApp Agent in OctaMind](#step-8--create-a-whatsapp-agent-in-octamind)
+9. [Step 8 — Create a WhatsApp Agent in Octa Bot](#step-8--create-a-whatsapp-agent-in-Octa Bot)
 10. [Step 9 — Add Test Recipients](#step-9--add-test-recipients)
 11. [Testing Each Tool Category](#testing-each-tool-category)
 12. [Production Migration (Optional)](#production-migration-optional)
@@ -36,12 +36,12 @@ Your Phone (WhatsApp)
                                                     whatsapp_messages.json
                                                               │
                                                               ▼
-  Meta Cloud API ◄──── OctaMind Agent ◄──── WhatsApp Agent UI
+  Meta Cloud API ◄──── Octa Bot Agent ◄──── WhatsApp Agent UI
   (sends messages)      (reads store)         (Streamlit, port 850x)
 ```
 
 **Key points:**
-- **Outbound messages** go directly: OctaMind → Meta API → recipient
+- **Outbound messages** go directly: Octa Bot → Meta API → recipient
 - **Inbound messages** arrive via webhook: Meta → your webhook server → local JSON store
 - The local `data/whatsapp_messages.json` file is the single source of truth for message history
 - The webhook server runs as a parallel process (port 9001 by default)
@@ -56,7 +56,7 @@ Your Phone (WhatsApp)
 
 3. Select **Business** as the app type.
 
-4. Fill in the app name (e.g. "OctaMind WhatsApp") and your business email, then click **Create App**.
+4. Fill in the app name (e.g. "Octa Bot WhatsApp") and your business email, then click **Create App**.
 
 5. From the app dashboard, click **Add a Product** and select **WhatsApp**.
 
@@ -92,11 +92,11 @@ You now have a WhatsApp Business Platform app.  Meta automatically provisions a 
 
 ### 2c. Verify Token (you create this)
 
-Make up any secret string to use as your webhook verify token (example: `octamind_secret_2025`).  You'll enter this both here and in Meta console.
+Make up any secret string to use as your webhook verify token (example: `Octa Bot_secret_2025`).  You'll enter this both here and in Meta console.
 
 ---
 
-## Step 3 — Configure OctaMind
+## Step 3 — Configure Octa Bot
 
 Open `config/settings.json` and fill in the `whatsapp` section:
 
@@ -105,7 +105,7 @@ Open `config/settings.json` and fill in the `whatsapp` section:
   "whatsapp": {
     "access_token": "EAAxxxxxxxxxx...",
     "phone_number_id": "123456789012345",
-    "verify_token": "octamind_secret_2025",
+    "verify_token": "Octa Bot_secret_2025",
     "webhook_port": 9001
   }
 }
@@ -187,7 +187,7 @@ Copy the HTTPS URL (e.g. `https://abc123def456.ngrok-free.app`) — you'll need 
 
 3. Fill in:
    - **Callback URL**: `https://abc123def456.ngrok-free.app/webhook`
-   - **Verify Token**: the same string you put in `settings.json` (e.g. `octamind_secret_2025`)
+   - **Verify Token**: the same string you put in `settings.json` (e.g. `Octa Bot_secret_2025`)
 
 4. Click **Verify and Save**.
 
@@ -199,9 +199,9 @@ Copy the HTTPS URL (e.g. `https://abc123def456.ngrok-free.app`) — you'll need 
 
 ---
 
-## Step 8 — Create a WhatsApp Agent in OctaMind
+## Step 8 — Create a WhatsApp Agent in Octa Bot
 
-1. Start the OctaMind Agent Hub:
+1. Start the Octa Bot Agent Hub:
    ```bash
    streamlit run src/agent/ui/dashboard/app.py
    ```
@@ -231,7 +231,7 @@ The Meta sandbox allows you to send messages to up to **5 registered test phone 
 
 4. Each number will receive a verification code — they must opt in.
 
-5. Once registered, you can send messages to these numbers via OctaMind.
+5. Once registered, you can send messages to these numbers via Octa Bot.
 
 > 💡 For production (sending to any number), you need to:
 > - Complete Meta Business Verification
@@ -451,7 +451,7 @@ To send to any WhatsApp number (not just 5 test recipients):
    ```
    INFO: Inbound WhatsApp: from=919876543210 type=text body=Hello...
    ```
-3. In the OctaMind WhatsApp agent, type: `show unread messages`
+3. In the Octa Bot WhatsApp agent, type: `show unread messages`
 4. The message you just sent should appear.
 
 ### Log files

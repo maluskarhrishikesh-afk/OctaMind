@@ -1,5 +1,5 @@
 """
-OctaMind Multi-Agent Workflow Engine.
+Octa Bot Multi-Agent Workflow Engine.
 
 Enables multiple agents (Email, Drive, …) to collaborate on a single
 natural-language command typed in the dedicated Multi-Agent chat window.

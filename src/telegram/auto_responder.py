@@ -87,7 +87,7 @@ def maybe_auto_reply(stored_message: Dict[str, Any]) -> None:
 
 def _send_welcome(chat_id: int | str) -> None:
     """Send a welcome message identifying the PA this bot belongs to."""
-    pa_name = "OctaMind Assistant"
+    pa_name = "Octa Bot Assistant"
     try:
         pa_id_env = os.environ.get("PA_ID", "").strip()
         if pa_id_env:
@@ -98,7 +98,7 @@ def _send_welcome(chat_id: int | str) -> None:
     except Exception:
         pass
     welcome = (
-        f"👋 Hi! I'm *{pa_name}*, your OctaMind AI assistant.\n\n"
+        f"👋 Hi! I'm *{pa_name}*, your Octa Bot AI assistant.\n\n"
         "Send me any message and I'll get right to work. 😊"
     )
     try:

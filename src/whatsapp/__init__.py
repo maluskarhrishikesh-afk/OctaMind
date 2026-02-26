@@ -1,5 +1,5 @@
 """
-WhatsApp agent package for OctaMind.
+WhatsApp agent package for Octa Bot.
 
 Exports all public tool functions so orchestrators and tests can import
 from a single ``src.whatsapp`` namespace.

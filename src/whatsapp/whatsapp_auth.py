@@ -77,7 +77,7 @@ def get_verify_token() -> str:
     tok = os.getenv("WHATSAPP_VERIFY_TOKEN")
     if tok:
         return tok
-    return _load_settings().get("whatsapp", {}).get("verify_token", "octamind_webhook")
+    return _load_settings().get("whatsapp", {}).get("verify_token", "Octa Bot_webhook")
 
 
 def get_webhook_port() -> int:

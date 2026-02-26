@@ -247,7 +247,7 @@ class FollowupTracker:
 
         # Build reminder email body
         body_lines = [
-            "📌 Follow-up Reminder from OctaMind",
+            "📌 Follow-up Reminder from Octa Bot",
             "=" * 40,
             f"Original email: {subject}",
             f"From: {sender}",

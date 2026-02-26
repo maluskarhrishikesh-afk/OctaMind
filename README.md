@@ -1,4 +1,4 @@
-﻿# OctaMind
+﻿# Octa Bot
 
 An AI-powered platform for managing Gmail, Google Drive, WhatsApp, Telegram, and your local filesystem through natural language. **Personal Assistants** have memory, personality, and context. **Skills** (Email, Drive, WhatsApp, Telegram, Files) are stateless executors that the Personal Assistant orchestrates.
 
@@ -8,7 +8,7 @@ An AI-powered platform for managing Gmail, Google Drive, WhatsApp, Telegram, and
 
 ```bash
 # 1. Install dependencies
-pip install -r requirement/octaMind-requirement.txt
+pip install -r requirement/Octa Bot-requirement.txt
 
 # 2. Configure (see documentation/SETUP.md)
 #    — Add your GitHub token to config/settings.json
@@ -43,7 +43,7 @@ All agents understand **natural language** — no commands to memorise.
 ## Project Structure
 
 ```
-OctaMind/
+Octa Bot/
 ├── start.py                    # Launch entry point
 ├── stop.py                     # Stop all running agents
 ├── credentials.json            # Google OAuth credentials (do not commit)

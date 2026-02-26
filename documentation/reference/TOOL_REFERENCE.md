@@ -1,6 +1,6 @@
-# Tool Reference
+﻿# Tool Reference
 
-Complete reference for every tool available in OctaMind. All tools are invoked by natural language — you never call them directly.
+Complete reference for every tool available in Octa Bot. All tools are invoked by natural language — you never call them directly.
 
 ---
 

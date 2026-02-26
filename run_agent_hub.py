@@ -13,7 +13,7 @@ from pathlib import Path
 def main():
     """Launch the agent dashboard"""
     project_root = Path(__file__).parent
-    dashboard_path = project_root / "src" / "agent" / "ui" / "agent_dashboard.py"
+    dashboard_path = project_root / "src" / "agent" / "ui" / "dashboard" / "app.py"
 
     # Use virtual environment python if available
     venv_python = project_root / ".venv" / "Scripts" / "python.exe"

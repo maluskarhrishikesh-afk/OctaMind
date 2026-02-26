@@ -1,5 +1,5 @@
 """
-Telegram agent package for OctaMind.
+Telegram agent package for Octa Bot.
 
 Exports all public tool functions so orchestrators and tests can import
 from a single ``src.telegram`` namespace.

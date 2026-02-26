@@ -1,5 +1,5 @@
 """
-Dark-theme CSS for the OctaMind Agent Hub dashboard.
+Dark-theme CSS for the Octa Bot Agent Hub dashboard.
 Call inject_css() once at the top of main() to apply global styles.
 """
 import streamlit as st
@@ -8,7 +8,7 @@ import streamlit as st
 DARK_THEME_CSS = """
 <style>
 /* ============================================================
-   OctaMind — Global Dark Theme  (v2 — modern, elegant)
+   Octa Bot — Global Dark Theme  (v2 — modern, elegant)
    ============================================================ */
 
 /* App background */

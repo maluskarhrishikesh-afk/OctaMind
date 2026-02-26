@@ -18,28 +18,19 @@ from pathlib import Path
 
 import streamlit as st
 
-from ..dashboard.styles import inject_agent_css
-from .helpers import _logo_b64, _logo_icon, _logo_path, _logo_pinkraven, _start_browser_watchdog, get_running_agents
+from src.agent.ui.dashboard.styles import inject_agent_css
+from src.agent.ui.personal_assistant.helpers import _logo_b64, _logo_icon, _logo_path, _logo_pinkraven, _start_browser_watchdog, get_running_agents
 from src.agent.hub.pa_manager import load_assistants, create_assistant, delete_assistant
 
 # ── Logging ───────────────────────────────────────────────────────────────────
-logger = logging.getLogger("personal_assistant")
-logger.setLevel(logging.DEBUG)
-
-_log_dir = Path(__file__).parent.parent.parent.parent.parent / "logs"
-_log_dir.mkdir(exist_ok=True)
-_log_file = _log_dir / "personal_assistant.log"
-_file_handler = logging.FileHandler(_log_file, encoding="utf-8", mode="a")
-_file_handler.setLevel(logging.DEBUG)
-_console_handler = logging.StreamHandler()
-_console_handler.setLevel(logging.INFO)
-_formatter = logging.Formatter(
-    "[%(asctime)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S"
+# Logging is initialised in main() once the PA name is known so the log file
+# is named after the actual PA (e.g. logs/Alice.log).  The import is at
+# module level so the logger object is available for module-level code.
+from src.agent.logging.log_manager import (
+    setup_pa_logging, bind_correlation, new_correlation_id,
+    bind_request, new_request_id,
 )
-_file_handler.setFormatter(_formatter)
-_console_handler.setFormatter(_formatter)
-logger.addHandler(_file_handler)
-logger.addHandler(_console_handler)
+logger = logging.getLogger("personal_assistant")
 
 sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..")
@@ -125,7 +116,7 @@ def _show_multi_agent_guide() -> None:
 ## ⚡ What can your Personal Assistant do?
 
 Your Personal Assistant lets you give **combined Drive + Email commands** in a single
-sentence. OctaMind automatically plans which agents to use and in what order.
+sentence. Octa Bot automatically plans which agents to use and in what order.
 
 ---
 
@@ -1006,7 +997,7 @@ def _render_pa_configure(pa: dict) -> None:
             help="Automatically reply to inbound Telegram messages using the AI.",
         )
         _default_persona = (
-            f"You are {fresh['name']}, a friendly AI assistant built with OctaMind. "
+            f"You are {fresh['name']}, a friendly AI assistant built with Octa Bot. "
             "Keep replies concise (2-3 sentences max) and conversational."
         )
         new_persona = st.text_area(
@@ -1154,8 +1145,14 @@ def main() -> None:
     else:
         assistants = all_assistants
 
+    # ── Initialise unified logging for this PA process ────────────────────────
+    # Done once per Streamlit worker (idempotent).  Log file: logs/<name>.log
+    _pa_log_name = single_pa["name"] if single_pa else "personal_assistant"
+    setup_pa_logging(_pa_log_name)
+    bind_correlation(new_correlation_id())   # fresh correlation for this page load
+
     st.set_page_config(
-        page_title=f"{single_pa['name']} — OctaMind" if single_pa else "Personal Assistants — OctaMind",
+        page_title=f"{single_pa['name']} — Octa Bot" if single_pa else "Personal Assistants — Octa Bot",
         page_icon=_logo_icon(),
         layout="wide",
     )
@@ -1204,7 +1201,7 @@ def main() -> None:
           <div style="display:flex;align-items:center;gap:18px;margin-bottom:16px;">
             <img src="{_logo_b64()}" style="width:72px;height:72px;border-radius:18px;object-fit:cover;box-shadow:0 4px 15px rgba(124,58,237,0.4);">
             <div style="flex:1;">
-              <div style="font-size:2.4rem;font-weight:900;line-height:1.1;background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">OctaMind</div>
+              <div style="font-size:2.4rem;font-weight:900;line-height:1.1;background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Octa Bot</div>
               <div style="font-size:1.05rem;color:#c4b5fd;margin-top:6px;font-weight:600;">
                 🤖 Personal Assistants &nbsp;•&nbsp; {pa_subtitle}
               </div>
@@ -1300,3 +1297,7 @@ def main() -> None:
 
     with all_tabs[-1]:
         _render_pa_settings()
+
+
+if __name__ == "__main__":
+    main()

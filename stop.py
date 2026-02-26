@@ -1,6 +1,6 @@
-"""
-OctaMind — Stop Launcher
-Gracefully shuts down all OctaMind processes (dashboard + all agent windows).
+﻿"""
+Octa Bot — Stop Launcher
+Gracefully shuts down all Octa Bot processes (dashboard + all agent windows).
 Bundled to stop.exe via PyInstaller.
 """
 import os
@@ -51,7 +51,7 @@ def main():
     root = _project_root()
     state_file = os.path.join(root, 'running_agents.json')
 
-    print("Stopping OctaMind...")
+    print("Stopping Octa Bot...")
 
     # 1. Kill all tracked agent processes from running_agents.json
     if os.path.exists(state_file):
@@ -84,7 +84,7 @@ def main():
             if s.connect_ex(('localhost', port)) == 0:
                 _kill_port(port)
 
-    print("OctaMind stopped. You can close this window.")
+    print("Octa Bot stopped. You can close this window.")
 
 
 if __name__ == '__main__':

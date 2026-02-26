@@ -39,7 +39,7 @@ logger = logging.getLogger("workflows")
 # Multi-Agent ReAct loop
 # ---------------------------------------------------------------------------
 
-_MAX_REACT_ITERATIONS = 8
+_MAX_REACT_ITERATIONS = 12
 
 
 def _react_system_prompt() -> str:
@@ -98,8 +98,16 @@ def react_workflow(
         (steps_results, final_answer_text)
     """
     llm = get_llm_client()
+    # Resolve user email and inject it so the LLM can use the literal address
+    _react_user_email = ctx.get("__user_email__") if hasattr(ctx, "get") else None
+    _email_ctx_line = (
+        f"\nAuthenticated user email (use this literal address whenever the user says "
+        f"'email me', 'send to me', 'send it to me', etc.): {_react_user_email}"
+        if _react_user_email else ""
+    )
+
     messages: List[Dict[str, str]] = [
-        {"role": "system", "content": _react_system_prompt()},
+        {"role": "system", "content": _react_system_prompt() + _email_ctx_line},
         {"role": "user",   "content": f"User request: {command}"},
     ]
 
@@ -116,8 +124,7 @@ def react_workflow(
                 model=llm.model,
                 messages=messages,
                 temperature=0.2,
-                max_tokens=800,
-                timeout=40,
+            max_tokens=1200,
             )
             raw = _strip_code_fences(response.choices[0].message.content.strip())
         except Exception as exc:

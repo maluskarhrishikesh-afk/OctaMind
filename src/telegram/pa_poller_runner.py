@@ -25,22 +25,12 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 # ── Logging ───────────────────────────────────────────────────────────────────
-_log_dir = _ROOT / "logs"
-_log_dir.mkdir(exist_ok=True)
-
+# Headless process — stdout/stderr are DEVNULL; use the unified log manager
+# which writes to logs/<pa_id>.log.  console=False prevents a StreamHandler
+# on a null stream (silent crash risk on Windows).
 pa_id = os.environ.get("PA_ID", "")
-_log_file = _log_dir / f"tg_pa_{pa_id or 'unknown'}.log"
-
-# This process runs headless (stdout/stderr → DEVNULL from the parent).
-# Log only to the file; a StreamHandler on a DEVNULL/NoneType stdout causes
-# silent crashes on Windows when there is no attached console.
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
-    handlers=[
-        logging.FileHandler(_log_file, encoding="utf-8"),
-    ],
-)
+from src.agent.logging.log_manager import setup_pa_logging, bind_correlation, new_correlation_id  # noqa: E402
+setup_pa_logging(pa_id or "unknown", console=False)
 logger = logging.getLogger("pa_telegram_poller")
 
 

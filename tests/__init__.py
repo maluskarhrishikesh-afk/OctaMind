@@ -1,5 +1,5 @@
-"""
-Tests package for OctaMind project
+﻿"""
+Tests package for Octa Bot project
 
 This package contains all test files organized by functionality.
 """

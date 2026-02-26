@@ -1,4 +1,4 @@
-"""
+﻿"""
 Google OAuth Re-Authorization Script
 =====================================
 Run this script interactively whenever your Gmail or Drive token expires:
@@ -105,7 +105,7 @@ def _authorize(scopes: list, token_path: Path, label: str) -> bool:
 
     # Full OAuth flow
     print(f"\n🔐 {label}: opening browser for Google authorization...")
-    print("   Sign in with the Google account you want OctaMind to access.\n")
+    print("   Sign in with the Google account you want Octa Bot to access.\n")
     try:
         flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), scopes)
         creds = flow.run_local_server(port=0)
@@ -121,7 +121,7 @@ def _authorize(scopes: list, token_path: Path, label: str) -> bool:
 
 def main():
     print("=" * 60)
-    print("  OctaMind — Google OAuth Setup")
+    print("  Octa Bot — Google OAuth Setup")
     print("=" * 60)
     print(f"  Credentials : {CREDENTIALS_PATH}")
     print(f"  Gmail token : {GMAIL_TOKEN_PATH}")
@@ -135,7 +135,7 @@ def main():
 
     print()
     if gmail_ok and drive_ok:
-        print("🎉 All Google tokens are valid. Restart OctaMind and try again.")
+        print("🎉 All Google tokens are valid. Restart Octa Bot and try again.")
     else:
         print("⚠  Some tokens could not be refreshed. Check the errors above.")
 

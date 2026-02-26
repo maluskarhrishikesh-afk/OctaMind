@@ -1,4 +1,4 @@
-# Unit Tests vs E2E Tests — OctaMind Testing Guidelines
+﻿# Unit Tests vs E2E Tests — Octa Bot Testing Guidelines
 
 **Date:** 2026-02-25 (updated to cover Browser and Stock Market agents)
 
@@ -6,7 +6,7 @@
 
 ## Short Answer
 
-**For OctaMind, E2E tests justify their cost because the system's correctness lies in the LLM-orchestration layer.** Unit tests are valuable but only where they add real signal that E2E tests don't already provide cheaply.
+**For Octa Bot, E2E tests justify their cost because the system's correctness lies in the LLM-orchestration layer.** Unit tests are valuable but only where they add real signal that E2E tests don't already provide cheaply.
 
 Use both: E2E for orchestration correctness; unit tests for service-layer logic correctness.
 
@@ -217,7 +217,7 @@ def test_rsi_calculation():
 - Prompt safety — "does the File Organizer refuse to call `apply_plan` without confirmation?" Only testable E2E.
 - Integration correctness — does the full pipeline from NL → tool → response return the right shape object?
 
-## Recommendation for OctaMind
+## Recommendation for Octa Bot
 - Continue using E2E tests for orchestration and LLM-integrated flows.
 - Add focused unit tests for service/data layers (e.g., `src/habit_tracker/habit_service.py`, file-organizer plan generation logic). These tests are fast, cheap (no API calls), and catch silent regressions.
 - Aim for ~30–40 focused unit assertions covering critical logic and error paths, not thousands of trivial tests.

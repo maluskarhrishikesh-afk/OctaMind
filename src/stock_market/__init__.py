@@ -1,4 +1,4 @@
-"""Stock Market Analysis service package — OctaMind."""
+"""Stock Market Analysis service package — Octa Bot."""
 from src.stock_market.stock_service import (
     get_quote,
     get_historical_data,
@@ -11,6 +11,7 @@ from src.stock_market.stock_service import (
     compare_stocks,
     market_overview,
     generate_full_report,
+    resolve_ticker,
 )
 from src.stock_market.fundamental_service import fundamental_analysis
 
@@ -27,4 +28,5 @@ __all__ = [
     "market_overview",
     "fundamental_analysis",
     "generate_full_report",
+    "resolve_ticker",
 ]

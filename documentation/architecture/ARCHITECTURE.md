@@ -1,4 +1,4 @@
-# OctaMind — Architecture
+﻿# Octa Bot — Architecture
 
 Last updated: 2026-02-25
 

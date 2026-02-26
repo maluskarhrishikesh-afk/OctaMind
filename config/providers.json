@@ -1,5 +1,5 @@
 {
-  "_comment": "OctaMind LLM Provider Configuration. Change 'active' to switch providers at runtime.",
+  "_comment": "Octa Bot LLM Provider Configuration. Change 'active' to switch providers at runtime.",
 
   "active": "github_models",
 

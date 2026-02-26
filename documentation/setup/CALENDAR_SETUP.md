@@ -1,6 +1,6 @@
-# Calendar Agent (Google Calendar) — Setup & Testing Guide
+﻿# Calendar Agent (Google Calendar) — Setup & Testing Guide
 
-This guide walks you through connecting OctaMind to your Google Calendar and testing every feature of the Calendar Skill.
+This guide walks you through connecting Octa Bot to your Google Calendar and testing every feature of the Calendar Skill.
 
 ---
 
@@ -10,7 +10,7 @@ This guide walks you through connecting OctaMind to your Google Calendar and tes
 - [Step 1 — Google Cloud Project](#step-1--google-cloud-project)
 - [Step 2 — Enable the Calendar API](#step-2--enable-the-calendar-api)
 - [Step 3 — Add the Calendar Scope](#step-3--add-the-calendar-scope)
-- [Step 4 — Configure OctaMind](#step-4--configure-octamind)
+- [Step 4 — Configure Octa Bot](#step-4--configure-Octa Bot)
 - [Step 5 — First-Run Authentication](#step-5--first-run-authentication)
 - [Step 6 — Attach the Calendar Skill to a Personal Assistant](#step-6--attach-the-calendar-skill-to-a-personal-assistant)
 - [Testing Each Tool Category](#testing-each-tool-category)
@@ -21,7 +21,7 @@ This guide walks you through connecting OctaMind to your Google Calendar and tes
 ## Architecture Overview
 
 ```
-OctaMind Calendar Skill
+Octa Bot Calendar Skill
         │
         │  OAuth 2.0 (config/calendar_token.json)
         ▼
@@ -74,7 +74,7 @@ https://www.googleapis.com/auth/calendar
 
 ---
 
-## Step 4 — Configure OctaMind
+## Step 4 — Configure Octa Bot
 
 Open `config/settings.json` and confirm the `google` section looks like this (these paths should already be present after recent setup):
 
@@ -116,7 +116,7 @@ Expected output: `True`
 
 ## Step 6 — Attach the Calendar Skill to a Personal Assistant
 
-1. Open the **OctaMind Dashboard** (`http://localhost:8501`)
+1. Open the **Octa Bot Dashboard** (`http://localhost:8501`)
 2. Click the **Configure** tab for your Personal Assistant
 3. Under **Skills**, enable **Calendar**
 4. Click **💾 Save Changes**

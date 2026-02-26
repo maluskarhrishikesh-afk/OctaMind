@@ -101,7 +101,7 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "File Organizer agent. Approval-driven file organization: scan a folder and propose a plan "
             "(by type/date/name prefix), preview the plan, then apply only after confirmation. "
             "Also: archive old files by age, set archival policies for folders, run archival policies, "
-            "and clean up OctaMind's own data/ directory (old exports, stale plan records). "
+            "and clean up Octa Bot's own data/ directory (old exports, stale plan records). "
             "Use instead of the Files agent when the request is about ORGANIZING a whole folder or "
             "setting up ARCHIVAL RULES — it never modifies files without user approval."
         ),
@@ -136,9 +136,27 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "real-time stock quotes, historical OHLCV data, technical analysis (RSI/MACD/Bollinger), "
             "risk scoring (volatility/Beta/VaR/Sharpe), candlestick pattern detection, "
             "portfolio diversification analysis, portfolio rebalancing suggestions, "
-            "news sentiment analysis, side-by-side stock comparison, and broad market overview."
+            "news sentiment analysis, side-by-side stock comparison, broad market overview, "
+            "Warren Buffett-style fundamental analysis (moat/ROE/FCF/valuation), "
+            "and FULL PDF REPORT GENERATION — one tool that runs ALL analyses and builds a "
+            "comprehensive PDF report, with optional email delivery of the report to any address. "
+            "Use generate_full_report when the user asks for: 'full analysis', 'stock report', "
+            "'PDF report', 'send report to me', 'email me the analysis', 'complete analysis of [stock]'."
         ),
         "module": "src.agent.ui.stock_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
+    "linkedin": {
+        "description": (
+            "LinkedIn agent. Fully manages a LinkedIn page or personal profile. Handles: "
+            "publish text/image/video/article posts, AI-generate post text (tone, length, audience), "
+            "AI-generate images via DALL·E 3, schedule posts for future dates, "
+            "cancel scheduled posts, list published posts, delete posts, "
+            "get post-level analytics (impressions/clicks/likes/comments/shares/engagement), "
+            "get page-level analytics over any date range, get organisation follower count, "
+            "and manage OAuth setup (get auth URL, exchange code for token)."
+        ),
+        "module": "src.agent.ui.linkedin_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
 }

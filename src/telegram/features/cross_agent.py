@@ -1,7 +1,7 @@
 """
 Telegram cross-agent integration tools.
 
-These tools bridge the Telegram Agent with other OctaMind agents:
+These tools bridge the Telegram Agent with other Octa Bot agents:
   - Forward a Telegram message as an email (requires Email Agent)
   - Send a Google Drive file link to a Telegram chat (requires Drive Agent)
 """
@@ -43,7 +43,7 @@ def forward_to_email(
         body = (
             f"Forwarded Telegram message from {sender} at {ts}:\n\n"
             f"---\n{text}\n---\n\n"
-            "Sent via OctaMind Telegram Agent."
+            "Sent via Octa Bot Telegram Agent."
         )
         mail_subject = subject or f"Forwarded Telegram message from {sender}"
 

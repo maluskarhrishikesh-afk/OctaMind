@@ -79,103 +79,107 @@ def _moat_score(
     """
     Compute a 0–10 moat score from five quality signals.
 
-    Scoring:
-      ROE:
-        ≥ 20% → 2 pts  (exceptional capital efficiency)
-        ≥ 15% → 1 pt   (above-average)
-        < 15% → 0 pts
+    Each signal contributes 0.0–2.0 points on a gradient scale (no hard binary
+    pass/fail).  The raw total is then normalised by the number of available
+    signals so that missing data doesn't unfairly collapse the score.
 
-      Operating Margin:
-        ≥ 25% → 2 pts  (strong pricing power / moat)
-        ≥ 15% → 1 pt   (decent margins)
-        < 15% → 0 pts
+    Gradient tiers (per signal, max 2.0 pts each):
+      ROE:            ≥20% → 2.0 | ≥15% → 1.5 | ≥10% → 1.0 | ≥5% → 0.5 | <5% → 0
+      Operating Mgn:  ≥25% → 2.0 | ≥15% → 1.5 | ≥10% → 1.0 | ≥5% → 0.5 | <5% → 0
+      FCF Yield:      ≥5%  → 2.0 | ≥3%  → 1.5 | ≥1%  → 1.0 | ≥0% → 0.25| <0% → 0
+      Debt/Equity:    <0.3 → 2.0 | <0.5 → 1.5 | <1.0 → 1.0 | <2.0→ 0.5 | ≥2.0 → 0
+      Earnings Growth:≥15% → 2.0 | ≥8%  → 1.5 | ≥0%  → 0.5 | <0% → 0
 
-      FCF Yield (Free Cash Flow / Market Cap × 100):
-        ≥ 5%  → 2 pts  (attractive free cash generation)
-        ≥ 2%  → 1 pt   (moderate FCF)
-        < 2%  → 0 pts
-
-      Debt/Equity:
-        < 0.30 → 2 pts  (fortress balance sheet)
-        < 0.50 → 1 pt   (manageable debt)
-        ≥ 0.50 → 0 pts
-
-      Earnings Growth (YoY %):
-        ≥ 15% → 2 pts  (strong compounding)
-        ≥  8% → 1 pt   (steady growth)
-        < 8%  → 0 pts  (flat or declining)
+    Normalisation: final_score = (earned / (n_available × 2)) × 10
     """
-    score = 0
     breakdown: Dict[str, str] = {}
+    raw_scores: Dict[str, float] = {}
 
     # ROE
     if roe is not None:
         if roe >= 20:
-            score += 2
-            breakdown["roe"] = f"{roe:.1f}% — Excellent (≥20%)"
+            raw_scores["roe"] = 2.0; breakdown["roe"] = f"{roe:.1f}% — Excellent (≥20%)"
         elif roe >= 15:
-            score += 1
-            breakdown["roe"] = f"{roe:.1f}% — Good (≥15%)"
+            raw_scores["roe"] = 1.5; breakdown["roe"] = f"{roe:.1f}% — Good (≥15%)"
+        elif roe >= 10:
+            raw_scores["roe"] = 1.0; breakdown["roe"] = f"{roe:.1f}% — Moderate (≥10%)"
+        elif roe >= 5:
+            raw_scores["roe"] = 0.5; breakdown["roe"] = f"{roe:.1f}% — Weak (≥5%)"
         else:
-            breakdown["roe"] = f"{roe:.1f}% — Below threshold (<15%)"
+            raw_scores["roe"] = 0.0; breakdown["roe"] = f"{roe:.1f}% — Below threshold (<5%)"
     else:
         breakdown["roe"] = "N/A"
 
     # Operating Margin
     if operating_margin is not None:
         if operating_margin >= 25:
-            score += 2
-            breakdown["operating_margin"] = f"{operating_margin:.1f}% — Strong pricing power (≥25%)"
+            raw_scores["operating_margin"] = 2.0; breakdown["operating_margin"] = f"{operating_margin:.1f}% — Strong pricing power (≥25%)"
         elif operating_margin >= 15:
-            score += 1
-            breakdown["operating_margin"] = f"{operating_margin:.1f}% — Decent margin (≥15%)"
+            raw_scores["operating_margin"] = 1.5; breakdown["operating_margin"] = f"{operating_margin:.1f}% — Good margin (≥15%)"
+        elif operating_margin >= 10:
+            raw_scores["operating_margin"] = 1.0; breakdown["operating_margin"] = f"{operating_margin:.1f}% — Decent margin (≥10%)"
+        elif operating_margin >= 5:
+            raw_scores["operating_margin"] = 0.5; breakdown["operating_margin"] = f"{operating_margin:.1f}% — Thin margins (≥5%)"
         else:
-            breakdown["operating_margin"] = f"{operating_margin:.1f}% — Thin margins (<15%)"
+            raw_scores["operating_margin"] = 0.0; breakdown["operating_margin"] = f"{operating_margin:.1f}% — Very thin/negative margins (<5%)"
     else:
         breakdown["operating_margin"] = "N/A"
 
     # FCF Yield
     if fcf_yield is not None:
         if fcf_yield >= 5:
-            score += 2
-            breakdown["fcf_yield"] = f"{fcf_yield:.1f}% — Strong FCF yield (≥5%)"
-        elif fcf_yield >= 2:
-            score += 1
-            breakdown["fcf_yield"] = f"{fcf_yield:.1f}% — Moderate FCF yield (≥2%)"
+            raw_scores["fcf_yield"] = 2.0; breakdown["fcf_yield"] = f"{fcf_yield:.1f}% — Strong FCF yield (≥5%)"
+        elif fcf_yield >= 3:
+            raw_scores["fcf_yield"] = 1.5; breakdown["fcf_yield"] = f"{fcf_yield:.1f}% — Good FCF yield (≥3%)"
+        elif fcf_yield >= 1:
+            raw_scores["fcf_yield"] = 1.0; breakdown["fcf_yield"] = f"{fcf_yield:.1f}% — Moderate FCF yield (≥1%)"
+        elif fcf_yield >= 0:
+            raw_scores["fcf_yield"] = 0.25; breakdown["fcf_yield"] = f"{fcf_yield:.1f}% — Low FCF yield (≥0%)"
         else:
-            breakdown["fcf_yield"] = f"{fcf_yield:.1f}% — Low FCF yield (<2%)"
+            raw_scores["fcf_yield"] = 0.0; breakdown["fcf_yield"] = f"{fcf_yield:.1f}% — Negative FCF (<0%)"
     else:
         breakdown["fcf_yield"] = "N/A"
 
-    # Debt/Equity
+    # Debt/Equity (lower is better)
     if debt_to_equity is not None:
         if debt_to_equity < 0.30:
-            score += 2
-            breakdown["debt_to_equity"] = f"{debt_to_equity:.2f} — Fortress balance sheet (<0.30)"
+            raw_scores["debt_to_equity"] = 2.0; breakdown["debt_to_equity"] = f"{debt_to_equity:.2f} — Fortress balance sheet (<0.30)"
         elif debt_to_equity < 0.50:
-            score += 1
-            breakdown["debt_to_equity"] = f"{debt_to_equity:.2f} — Manageable debt (<0.50)"
+            raw_scores["debt_to_equity"] = 1.5; breakdown["debt_to_equity"] = f"{debt_to_equity:.2f} — Strong balance sheet (<0.50)"
+        elif debt_to_equity < 1.0:
+            raw_scores["debt_to_equity"] = 1.0; breakdown["debt_to_equity"] = f"{debt_to_equity:.2f} — Manageable debt (<1.0)"
+        elif debt_to_equity < 2.0:
+            raw_scores["debt_to_equity"] = 0.5; breakdown["debt_to_equity"] = f"{debt_to_equity:.2f} — Elevated debt (<2.0)"
         else:
-            breakdown["debt_to_equity"] = f"{debt_to_equity:.2f} — High debt (≥0.50)"
+            raw_scores["debt_to_equity"] = 0.0; breakdown["debt_to_equity"] = f"{debt_to_equity:.2f} — High debt (≥2.0)"
     else:
         breakdown["debt_to_equity"] = "N/A"
 
     # Earnings Growth
     if earnings_growth is not None:
         if earnings_growth >= 15:
-            score += 2
-            breakdown["earnings_growth"] = f"{earnings_growth:.1f}% — Strong compounding (≥15%)"
+            raw_scores["earnings_growth"] = 2.0; breakdown["earnings_growth"] = f"{earnings_growth:.1f}% — Strong compounding (≥15%)"
         elif earnings_growth >= 8:
-            score += 1
-            breakdown["earnings_growth"] = f"{earnings_growth:.1f}% — Steady growth (≥8%)"
+            raw_scores["earnings_growth"] = 1.5; breakdown["earnings_growth"] = f"{earnings_growth:.1f}% — Steady growth (≥8%)"
+        elif earnings_growth >= 0:
+            raw_scores["earnings_growth"] = 0.5; breakdown["earnings_growth"] = f"{earnings_growth:.1f}% — Flat growth (≥0%)"
         else:
-            breakdown["earnings_growth"] = f"{earnings_growth:.1f}% — Weak/negative growth (<8%)"
+            raw_scores["earnings_growth"] = 0.0; breakdown["earnings_growth"] = f"{earnings_growth:.1f}% — Declining earnings (<0%)"
     else:
         breakdown["earnings_growth"] = "N/A"
 
+    # Normalise: if some signals unavailable, scale by available max so missing data
+    # doesn't unfairly collapse the score
+    if raw_scores:
+        earned   = sum(raw_scores.values())
+        possible = len(raw_scores) * 2.0          # max possible for available signals
+        score    = round((earned / possible) * 10, 1)
+    else:
+        score = 0.0
+
     moat_label = (
-        "Wide Moat"   if score >= 8 else
-        "Narrow Moat" if score >= 5 else
+        "Wide Moat"    if score >= 7 else
+        "Narrow Moat"  if score >= 4 else
         "No Clear Moat"
     )
 
@@ -304,7 +308,9 @@ def fundamental_analysis(symbol: str) -> Dict[str, Any]:
         # ── Dividend ──────────────────────────────────────────────────────
         # Dividend Yield = Annual Dividend / Share Price
         # Buffett values consistent dividend payers as a sign of financial health
-        dividend_yield = round(_safe_float(info.get("dividendYield") or 0) * 100, 2)
+        # yfinance returns dividendYield already as a percentage decimal (0.58 = 0.58%).
+        # Do NOT multiply by 100 — it is already in display-ready form.
+        dividend_yield = round(_safe_float(info.get("dividendYield") or 0), 2)
         payout_ratio   = _pct(info.get("payoutRatio"))
 
         # ── Moat Score ────────────────────────────────────────────────────
@@ -317,42 +323,67 @@ def fundamental_analysis(symbol: str) -> Dict[str, Any]:
         )
 
         # ── Overall Quality Score (0–10) ──────────────────────────────────
-        # We build a composite quality score from moat (weighted 50%) +
-        # value attractiveness (25%) + safety (25%).
-        #
-        # Value signal: PEG < 1.5 → +2.5, PEG < 2.5 → +1, else 0
-        # Safety signal: current_ratio & debt_to_equity
+        # Composite from four pillars (max per pillar):
+        #   Moat (4 pts)   : scaled from gradient _moat_score
+        #   Growth (2 pts) : gross margin + revenue growth
+        #   Value (2 pts)  : PEG / PE — rewards reasonable valuation
+        #   Safety (2 pts) : current ratio + debt (normalised by availability)
         quality_sub = 0.0
+        growth_sub  = 0.0
         value_sub   = 0.0
         safety_sub  = 0.0
 
-        # Quality from moat (max 5)
-        quality_sub = moat["moat_score"] / 2.0
+        # Moat contribution (max 4.0)
+        quality_sub = moat["moat_score"] * 0.40  # 10-pt scale × 0.4 → max 4.0
 
-        # Value (max 2.5)
+        # Growth (max 2.0): gross margin (max 1.0) + revenue growth (max 1.0)
+        if gross_margin is not None:
+            if gross_margin >= 40:
+                growth_sub += 1.0
+            elif gross_margin >= 25:
+                growth_sub += 0.6
+            elif gross_margin >= 15:
+                growth_sub += 0.3
+            else:
+                growth_sub += 0.1
+        if revenue_growth is not None:
+            if revenue_growth >= 20:
+                growth_sub += 1.0
+            elif revenue_growth >= 12:
+                growth_sub += 0.7
+            elif revenue_growth >= 5:
+                growth_sub += 0.4
+            elif revenue_growth >= 0:
+                growth_sub += 0.2
+
+        # Value (max 2.0)
         if peg_ratio is not None:
             if peg_ratio < 1.0:
-                value_sub = 2.5
+                value_sub = 2.0
             elif peg_ratio < 1.5:
                 value_sub = 1.5
             elif peg_ratio < 2.5:
                 value_sub = 0.75
         elif pe_ratio is not None:
-            # Fallback: use P/E vs generously reasonable threshold
+            # Fallback: P/E vs generously reasonable threshold
             if pe_ratio < 15:
-                value_sub = 2.0
+                value_sub = 1.5
             elif pe_ratio < 25:
-                value_sub = 1.0
+                value_sub = 0.75
 
-        # Safety (max 2.5): current ratio + debt level
+        # Safety (max 2.0): normalise by how many safety signals are available
         safety_pts = 0.0
+        safety_max = 0.0
         if current_ratio is not None:
-            safety_pts += 1.25 if current_ratio >= 1.5 else (0.75 if current_ratio >= 1.0 else 0)
+            safety_max += 1.0
+            safety_pts += 1.0 if current_ratio >= 1.5 else (0.6 if current_ratio >= 1.0 else 0)
         if de_ratio is not None:
-            safety_pts += 1.25 if de_ratio < 0.30 else (0.75 if de_ratio < 0.50 else 0)
-        safety_sub = safety_pts
+            safety_max += 1.0
+            safety_pts += 1.0 if de_ratio < 0.30 else (0.6 if de_ratio < 0.50 else (0.3 if de_ratio < 1.0 else 0))
+        # Scale to 2.0 proportionally; use neutral 1.0 when no safety data at all
+        safety_sub = round((safety_pts / safety_max) * 2.0, 2) if safety_max > 0 else 1.0
 
-        quality_score = round(min(10.0, quality_sub + value_sub + safety_sub), 1)
+        quality_score = round(min(10.0, quality_sub + growth_sub + value_sub + safety_sub), 1)
         quality_label = (
             "High Quality"  if quality_score >= 7   else
             "Fair Quality"  if quality_score >= 4.5 else

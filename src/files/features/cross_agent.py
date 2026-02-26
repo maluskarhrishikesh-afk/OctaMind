@@ -57,7 +57,7 @@ def zip_and_email(
             }
 
         subject = subject or f"Shared: {p.name}.zip"
-        body = body or f"Please find the attached archive: {p.name}.zip\n\nSent via OctaMind Files Agent."
+        body = body or f"Please find the attached archive: {p.name}.zip\n\nSent via Octa Bot Files Agent."
 
         email_result = send_email_with_attachment(
             to=to_email,
@@ -169,7 +169,7 @@ def email_file(
             }
 
         subject = subject or f"File: {p.name}"
-        body = body or f"Please find the attached file: {p.name}\n\nSent via OctaMind Files Agent."
+        body = body or f"Please find the attached file: {p.name}\n\nSent via Octa Bot Files Agent."
 
         result = send_email_with_attachment(
             to=to_email,

@@ -1,6 +1,6 @@
-# OctaMind — Setup Guide
+﻿# Octa Bot — Setup Guide
 
-Two things need to be configured before running OctaMind:
+Two things need to be configured before running Octa Bot:
 1. **GitHub Models token** — powers the AI (LLM calls)
 2. **Google OAuth credentials** — connects to Gmail and Google Drive
 
@@ -8,7 +8,7 @@ Two things need to be configured before running OctaMind:
 
 ## 1. GitHub Models Token (LLM)
 
-OctaMind uses [GitHub Models](https://github.com/marketplace/models) as its LLM provider (free tier: 150 requests/day).
+Octa Bot uses [GitHub Models](https://github.com/marketplace/models) as its LLM provider (free tier: 150 requests/day).
 
 ### Get a Token
 1. Go to **GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)**

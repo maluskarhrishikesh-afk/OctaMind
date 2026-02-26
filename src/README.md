@@ -1,6 +1,6 @@
-# OctaMind - Source Code Structure
+﻿# Octa Bot - Source Code Structure
 
-This directory contains the organized source code for the OctaMind project.
+This directory contains the organized source code for the Octa Bot project.
 
 ## Directory Structure
 
@@ -118,7 +118,7 @@ print(response)
 
 ### Gmail Service Test:
 ```bash
-cd C:\Hrishikesh\OctaMind
+cd C:\Hrishikesh\Octa Bot
 python -m src.email.gmail_service
 ```
 

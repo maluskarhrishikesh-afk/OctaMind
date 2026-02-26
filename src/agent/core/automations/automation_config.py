@@ -71,7 +71,7 @@ GMAIL_AUTOMATIONS: Dict[str, Dict[str, Any]] = {
     },
     "auto_categorize": {
         "label": "🗂 Auto-categorize by sender domain",
-        "description": "Apply OctaMind Gmail labels to new emails automatically",
+        "description": "Apply Octa Bot Gmail labels to new emails automatically",
         "interval_minutes": 30,
         "default_params": {},
         "param_schema": {},

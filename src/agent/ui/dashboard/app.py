@@ -1,5 +1,5 @@
 """
-OctaMind Agent Hub — main Streamlit entry point.
+Octa Bot Agent Hub — main Streamlit entry point.
 """
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ import streamlit as st
 from src.agent.core.process_manager import cleanup_stale, get_agent_status
 from src.agent.core.agent_manager import get_agent_manager
 
-from .helpers import _logo_b64, _logo_icon
-from .styles import inject_css
-from .create_form import show_create_agent_form
-from .agent_card import show_agent_card
-from .configure_panel import show_configure_panel
+from src.agent.ui.dashboard.helpers import _logo_b64, _logo_icon
+from src.agent.ui.dashboard.styles import inject_css
+from src.agent.ui.dashboard.create_form import show_create_agent_form
+from src.agent.ui.dashboard.agent_card import show_agent_card
+from src.agent.ui.dashboard.configure_panel import show_configure_panel
 
-logger = logging.getLogger("octamind.dashboard")
+logger = logging.getLogger("Octa Bot.dashboard")
 
 # ---------------------------------------------------------------------------
 # One-time application startup (runs once per Streamlit worker process).
@@ -113,6 +113,15 @@ def _create_pa_dialog() -> None:
             "icon": "📈",
             "title": "Stock Market Analysis",
             "description": "Real-time quotes, technical indicators (RSI, MACD, Bollinger), risk scoring, pattern detection, portfolio analysis, news sentiment, and market overview. Informational only — no buy/sell.",
+        },
+        "linkedin": {
+            "icon": "💼",
+            "title": "LinkedIn",
+            "description": (
+                "Fully manage your LinkedIn page. Publish text, image, and video posts, "
+                "generate AI-written content and AI images, schedule posts for later, "
+                "and track page / post analytics — all from Octa."
+            ),
         },
     }
 
@@ -425,7 +434,7 @@ def _show_pa_card(pa: dict) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="OctaMind — Agent Hub",
+        page_title="Octa Bot — Agent Hub",
         page_icon=_logo_icon(),
         layout="wide",
         initial_sidebar_state="expanded",
@@ -456,7 +465,7 @@ def main() -> None:
                     <div style="font-size:1.05rem;font-weight:800;
                                 background:linear-gradient(135deg,#e91e8c 0%,#a5b4fc 100%);
                                 -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-                                background-clip:text;line-height:1.1;">OctaMind</div>
+                                background-clip:text;line-height:1.1;">Octa Bot</div>
                     <div style="font-size:0.68rem;color:#475569;font-weight:500;letter-spacing:0.05em;">AGENT HUB</div>
                 </div>
             </div>
@@ -585,7 +594,7 @@ def main() -> None:
               <div>
                 <div style="font-size:2.2rem;font-weight:900;background:linear-gradient(135deg, #e91e8c 0%, #a5b4fc 100%);
                            -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-                           line-height:1.1;">OctaMind</div>
+                           line-height:1.1;">Octa Bot</div>
                 <div style="font-size:0.95rem;color:#64748b;margin-top:4px;font-weight:500;">
                   Your AI-powered hub — one place to manage all your digital life
                 </div>
@@ -616,7 +625,7 @@ def main() -> None:
                        text-align:center;margin:32px 0;">
                 <div style="font-size:3rem;margin-bottom:16px;">👋</div>
                 <div style="font-size:1.6rem;font-weight:700;color:#e91e8c;margin-bottom:12px;">
-                  Welcome to OctaMind!
+                  Welcome to Octa Bot!
                 </div>
                 <div style="font-size:1rem;color:#a8dadc;margin-bottom:8px;">
                   You don't have any agents yet. Let's create your first one!

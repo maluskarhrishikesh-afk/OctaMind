@@ -22,19 +22,10 @@ _STATE_FILE = _PROJECT_ROOT / "running_agents.json"
 _PORT_START = 8503
 _PORT_END = 8600
 
-# Map agent type → which Streamlit script to launch
-_AGENT_SCRIPTS: Dict[str, str] = {
-    "gmail": "src/agent/ui/email_agent_ui.py",
-    "google_drive": "src/agent/ui/drive_agent_ui.py",
-    "multi_agent": "src/agent/ui/personal_assistant_ui.py",  # legacy key — kept for backward compat
-    "personal_assistant": "src/agent/ui/pa_ui.py",
-    "whatsapp": "src/agent/ui/whatsapp_agent_ui.py",
-    "files": "src/agent/ui/files_agent_ui.py",
-    "slack": "src/agent/ui/generic_agent_ui.py",
-    "calendar": "src/agent/ui/generic_agent_ui.py",
-    "stock_market": "src/agent/ui/generic_agent_ui.py",
-    "custom": "src/agent/ui/generic_agent_ui.py",
-}
+# All agent types now open the unified Personal Assistant UI.
+# Individual skill chat UIs have been removed — the PA is the single
+# interaction point for all skills.
+_PA_SCRIPT = "src/agent/ui/personal_assistant/app.py"
 
 
 def _load_state() -> Dict[str, Any]:
@@ -110,9 +101,8 @@ def start_agent(agent_id: str, agent_name: str, agent_type: str) -> Dict[str, An
         info = state[agent_id]
         return {"pid": info["pid"], "port": info["port"], "url": f"http://localhost:{info['port']}"}
 
-    # Determine which script to use
-    script = _AGENT_SCRIPTS.get(agent_type, _AGENT_SCRIPTS["custom"])
-    script_path = str(_PROJECT_ROOT / script)
+    # All agent types use the unified Personal Assistant UI
+    script_path = str(_PROJECT_ROOT / _PA_SCRIPT)
 
     port = _next_free_port()
 
@@ -121,6 +111,11 @@ def start_agent(agent_id: str, agent_name: str, agent_type: str) -> Dict[str, An
     env["AGENT_ID"] = agent_id
     env["AGENT_NAME"] = agent_name
     env["AGENT_TYPE"] = agent_type
+    env["PA_ID"] = agent_id   # personal_assistant/app.py uses PA_ID to scope to one PA
+
+    logs_dir = _PROJECT_ROOT / "logs"
+    logs_dir.mkdir(exist_ok=True)
+    stderr_log = open(logs_dir / f"pa_{agent_id}_stderr.txt", "w", encoding="utf-8")
 
     proc = subprocess.Popen(
         [
@@ -132,7 +127,7 @@ def start_agent(agent_id: str, agent_name: str, agent_type: str) -> Dict[str, An
         cwd=str(_PROJECT_ROOT),
         env=env,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=stderr_log,
     )
 
     # Persist state

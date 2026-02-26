@@ -1,9 +1,9 @@
-# Implementation Status
+﻿# Implementation Status
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
-Last updated: 2026-02-25 (added Browser Agent, Stock Market Analysis Agent)  
-Previous: 2026-02-25 (added Scheduler, File Organizer, Habit Tracker agents)
+Last updated: 2026-02-26 (fixed gross_margin_pct key in stock report executive summary; improved Analyst Verdict to include revenue growth signal; added structured per-step logging + memory capture to generate_full_report; fixed relative imports in dashboard and personal_assistant app.py; fixed start.exe launcher — now pure-stdlib, no heavy ML deps; fixed PA blank page — missing main() call and PA_ID env var)  
+Previous: 2026-02-26 (added LinkedIn Agent, enhanced PDF report cover page, fixed volume-profile bug, fixed Executive Summary article count)
 
 ---
 
@@ -187,7 +187,28 @@ Read-only analysis. No buy/sell, no brokerage integration.
 **Registry key:** `stock_market`  
 **Service:** `src/stock_market/stock_service.py`  
 **Data source:** `yfinance` (Yahoo Finance public API) — free, no API key required.  
-**No credentials required.** All indicators computed in pure Python (no ML dependencies).
+**No credentials required.** All indicators computed in pure Python (no ML dependencies).  
+**PDF Report Generation:** `generate_full_report(symbol)` runs all 10 analyses and builds a multi-page A4 PDF with cover page, Analyst Quick Snapshot, 7 analysis sections, charts, and risk tables. Output saved to `data/exports/`.
+
+### LinkedIn Agent — 17 Tools
+Fully implemented service + LLM orchestrator. Registered in agent_registry, agent_manager, and dashboard skill cards.
+
+| Category | Tools | Status |
+|----------|-------|--------|
+| Posting | create_text_post, create_image_post, create_video_post, create_article_post, delete_post, list_published_posts | ✅ |
+| AI generation | generate_ai_post_content (text via LLM), generate_ai_image (images via DALL·E 3) | ✅ |
+| Scheduling | schedule_post, list_scheduled_posts, cancel_scheduled_post | ✅ |
+| Analytics | get_post_analytics, get_page_analytics, get_org_followers | ✅ |
+| Auth / profile | get_profile, get_access_token_url, exchange_code_for_token | ✅ |
+
+**Registry key:** `linkedin`  
+**Service:** `src/linkedin/linkedin_service.py`  
+**Orchestrator:** `src/agent/ui/linkedin_agent/orchestrator.py`  
+**UI:** `src/agent/ui/linkedin_agent/app.py` (standalone Streamlit UI)  
+**Setup Guide:** `documentation/setup/LINKEDIN_SETUP.md`  
+**Credentials:** LinkedIn OAuth access_token in `config/settings.json["linkedin"]["access_token"]` — required for all posting/analytics tools.  
+**AI Text Generation:** Uses GitHub Models LLM (same as all other agents).  
+**AI Image Generation:** Uses OpenAI DALL·E 3 — requires a **separate paid OpenAI API key** (`OPENAI_API_KEY` env var or `settings.json["openai_api_key"]`). NOT provided by GitHub Models.
 
 ### Personal Assistant Hub
 - [x] Drive-only command routing → Drive Agent direct
@@ -210,7 +231,7 @@ Read-only analysis. No buy/sell, no brokerage integration.
 - [x] **File Organizer agent** registered in `agent_registry.py` — approval-workflow file organization
 - [x] **Habit Tracker agent** registered in `agent_registry.py` — habit tracking, streaks, weekly reports
 - [x] **Browser agent** registered in `agent_registry.py` — web browsing, search, text extraction, downloads
-- [x] **Stock Market Analysis agent** registered in `agent_registry.py` — quotes, technicals, risk, sentiment
+- [x] **LinkedIn agent** registered in `agent_registry.py` — available for PA workflows (text posts, AI-generated content, scheduling, analytics)
 
 ### UI
 - [x] Streamlit chat UI for Drive Agent (port 8502)
@@ -226,6 +247,16 @@ Read-only analysis. No buy/sell, no brokerage integration.
 ---
 
 ## ⚠️ Partial / Known Limitations
+
+### `create_video_post` (LinkedIn)
+- Only **uploads an existing local video file** to LinkedIn — it does NOT generate or create a video.
+- A request like "create a video about X and post it" will fail — Octa Bot cannot generate video content.
+- Workaround: Record/create the video externally, then ask "post this video: /path/to/video.mp4".
+
+### `generate_ai_image` (LinkedIn)
+- Requires a **paid OpenAI API key** with DALL·E 3 access (`OPENAI_API_KEY`).
+- Does NOT work with the GitHub Models token — DALL·E 3 is not available via GitHub Models.
+- Configure `settings.json["linkedin"]["image_gen_backend"] = "openai"` and set `OPENAI_API_KEY`.
 
 ### `reply_to_message`
 - Listed in tool description but **not wired in `_dispatch`** in `email_agent/orchestrator.py`.
@@ -243,7 +274,7 @@ Read-only analysis. No buy/sell, no brokerage integration.
 
 ### `schedule_email`
 - Scheduling is software-implemented (stored JSON, checked by a background scheduler).
-- It is **not** a native Gmail scheduled send — it relies on the OctaMind process being running at send time.
+- It is **not** a native Gmail scheduled send — it relies on the Octa Bot process being running at send time.
 - If the application is closed before the scheduled time, the email will not be sent.
 
 ### `export_to_calendar`
@@ -290,6 +321,7 @@ Read-only analysis. No buy/sell, no brokerage integration.
 
 | Issue | Impact | Status |
 |-------|--------|--------|
+| GitHub Models token expired / bad credentials | LLM calls return 401 — all AI text generation fails (LLM-classified sentiment uses keyword fallback, posts fail to generate) | Refresh token: update `config/credentials.json` with a new GitHub Models API token |
 | GitHub Models rate limit (150 req/day, 15 req/min) | All agents fail with 429 after limit | Surfaced to user with wait-time; no workaround except waiting or switching model |
 | `max_tokens=3000` vs context window | Very long tool results may exceed context; LLM truncates | No chunking implemented |
 | Memory consolidation agent | ~~Consolidation task runs on startup but output is not surfaced in UI~~ **FIXED** — `ConsolidationRunner` daemon thread boots with the dashboard and runs all agents every 24 h | Memory improves continuously even for idle agents |

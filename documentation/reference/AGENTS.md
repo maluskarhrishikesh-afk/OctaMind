@@ -1,4 +1,4 @@
-# OctaMind — Agents Reference
+﻿# Octa Bot — Agents Reference
 
 For full parameter details on every tool, see [TOOL_REFERENCE.md](TOOL_REFERENCE.md).  
 For implementation status and known limitations, see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
@@ -489,7 +489,7 @@ schedule_recurring_focus_time(title, days_of_week, start_time, duration_minutes)
 **Registry key:** `file_organizer`  
 **Data stores:** `data/organizer_pending_plans.json`, `data/organizer_archival_policies.json`  
 
-> **Different from Files Agent:** The Files Agent performs immediate actions. The File Organizer Agent uses a **conversational approval workflow** — scan → propose → preview → approve → apply. It also manages archival policies and maintains OctaMind's own `data/` directory.
+> **Different from Files Agent:** The Files Agent performs immediate actions. The File Organizer Agent uses a **conversational approval workflow** — scan → propose → preview → approve → apply. It also manages archival policies and maintains Octa Bot's own `data/` directory.
 
 ### What It Can Do
 
@@ -500,7 +500,7 @@ schedule_recurring_focus_time(title, days_of_week, start_time, duration_minutes)
 | **Apply** | "Apply plan a1b2c3d4" · "Yes, go ahead with the organisation" |
 | **Discard** | "Cancel plan X" · "Forget the organisation plan" |
 | **Archive old files** | "Archive files older than 3 months in Downloads" · "Show what would be archived" |
-| **App data cleanup** | "Clean up OctaMind data" · "What can I clean up in the app data?" |
+| **App data cleanup** | "Clean up Octa Bot data" · "What can I clean up in the app data?" |
 | **Archival policies** | "Auto-archive Downloads files older than 60 days" · "Show my archive rules" |
 | **Run policies** | "Run my archival policies" · "Apply all archive rules" |
 | **List plans** | "Show pending plans" · "What organisation plans do I have?" |
@@ -514,7 +514,7 @@ apply_plan(plan_id)                                       # MODIFIES FILES — o
 discard_plan(plan_id)                                     # remove a pending plan
 list_plans()                                              # show all pending + recently applied plans
 archive_old_files(directory, days_old, destination, dry_run)
-cleanup_app_data(dry_run)                                 # OctaMind data/ directory maintenance
+cleanup_app_data(dry_run)                                 # Octa Bot data/ directory maintenance
 set_archival_policy(directory, days_old, destination, description)
 show_archival_policies()
 run_archival_policies(dry_run)
@@ -526,7 +526,7 @@ run_archival_policies(dry_run)
 - **Never auto-applies:** the LLM is instructed never to call `apply_plan` unless the user explicitly confirms with words like "apply", "yes go ahead", "execute plan X"
 - **`dry_run=True`** is the default for all destructive operations
 - **Strategies:** `by_type` uses extension→category map; `by_date` groups to `YYYY-MM/` folders; `by_name_prefix` groups to alphabetical prefix folders
-- **`cleanup_app_data`** targets OctaMind's own `data/exports/` (files older than 30 days) and applied plan records
+- **`cleanup_app_data`** targets Octa Bot's own `data/exports/` (files older than 30 days) and applied plan records
 
 ---
 
@@ -739,9 +739,86 @@ Step 2: send_email_with_attachment → attachment_path: "{downloaded_file}"
 | Bollinger | Below lower band | Mid-range | Above upper band |
 | Price vs SMA | Above | — | Below |
 
+### PDF Report Generation
+
+Use `generate_full_report` to produce a full multi-page A4 PDF analysis:
+
+| Command example | What it does |
+|---|---|
+| "Full analysis of TCS" | Runs all 10 analyses, builds PDF, returns file path |
+| "Stock report for Reliance" | Same — triggers PDF build |
+| "Email me the AAPL report at me@example.com" | Builds PDF then emails it (requires Gmail auth) |
+
+The PDF cover page includes an **Analyst Quick Snapshot** with: Technical Signal, Risk Level, Quality Score, Sentiment, 52W Price Position, and an Analyst Verdict (BUY / HOLD / AVOID) derived from composite scoring.
+
 ### Disclaimer
 
 All output is informational and educational only. Not financial advice. Always consult a qualified financial advisor before making investment decisions.
+
+---
+
+## LinkedIn Agent
+
+**Orchestrator:** `src/agent/ui/linkedin_agent/orchestrator.py`  
+**Service layer:** `src/linkedin/linkedin_service.py`  
+**UI:** `src/agent/ui/linkedin_agent/app.py`  
+**Setup Guide:** [LINKEDIN_SETUP.md](../setup/LINKEDIN_SETUP.md)  
+**Credentials:** LinkedIn OAuth `access_token` in `config/settings.json["linkedin"]`
+
+### What It Can Do
+
+| Category | Example commands |
+|----------|----------------|
+| **Text posts** | "Post on LinkedIn about the benefits of AI automation" |
+| **Image posts** | "Generate an image and post about Octa Bot on LinkedIn" |
+| **Video posts** | "Post this video to LinkedIn: /path/to/video.mp4" *(upload only — no video generation)* |
+| **Article sharing** | "Share this article on LinkedIn: https://..." |
+| **AI content** | "Write a professional LinkedIn post about productivity tools" |
+| **AI images** | "Generate a LinkedIn banner image for a FinTech product" *(requires OpenAI DALL·E 3 key)* |
+| **Scheduling** | "Schedule a post for Monday 9 AM about team culture" |
+| **Analytics** | "How is my LinkedIn page performing this month?" |
+| **Post metrics** | "Show analytics for my last post" |
+| **OAuth setup** | "Get LinkedIn authorization URL" |
+
+### Tools Available
+
+```
+create_text_post(text, visibility)
+create_image_post(text, image_path, image_title, image_description, visibility)
+create_video_post(text, video_path, video_title, video_description, visibility)
+create_article_post(text, article_url, article_title, article_description, visibility)
+delete_post(post_id)
+list_published_posts(count)
+generate_ai_post_content(topic, tone, length, include_hashtags, target_audience)
+generate_ai_image(prompt, output_path, size)
+schedule_post(text, scheduled_time, post_type, ...)
+list_scheduled_posts()
+cancel_scheduled_post(scheduled_id)
+get_post_analytics(post_id)
+get_page_analytics(granularity, start_days_ago)
+get_org_followers()
+get_profile()
+get_access_token_url(state)
+exchange_code_for_token(code)
+```
+
+### ⚠️ Key Limitations
+
+| Limitation | Detail |
+|---|---|
+| **No video generation** | `create_video_post` uploads an existing local MP4 — it cannot generate a video from text/script |
+| **AI images need OpenAI key** | `generate_ai_image` uses DALL·E 3 which requires a **paid OpenAI API key**, not GitHub Models |
+| **LinkedIn OAuth required** | All posting/analytics tools need a valid LinkedIn `access_token` configured |
+| **Token expiry** | LinkedIn tokens expire every 60 days — re-run the OAuth flow to refresh |
+
+### Required LinkedIn API Scopes
+
+| Scope | Purpose |
+|-------|---------|
+| `w_member_social` | Post as personal profile |
+| `w_organization_social` | Post as company page |
+| `r_organization_social` | Page analytics, followers |
+| `r_liteprofile` | Profile info |
 
 ---
 

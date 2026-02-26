@@ -1,5 +1,5 @@
 """
-OctaMind LLM Provider Registry
+Octa Bot LLM Provider Registry
 ================================
 Single source of truth for all LLM backends.
 

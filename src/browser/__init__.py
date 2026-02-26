@@ -1,4 +1,4 @@
-"""Browser service package — web browsing tools for OctaMind."""
+"""Browser service package — web browsing tools for Octa Bot."""
 from src.browser.browser_service import (
     browse_url,
     search_web,

@@ -1,4 +1,4 @@
-# OctaMind — Personal Assistant Design
+﻿# Octa Bot — Personal Assistant Design
 
 *Last Updated: February 24, 2026*
 
@@ -6,7 +6,7 @@
 
 ## Core Philosophy
 
-OctaMind is a **Personal Assistant (PA)** — not a collection of independent chatbots.
+Octa Bot is a **Personal Assistant (PA)** — not a collection of independent chatbots.
 
 The PA has a single identity, a single memory, and a single brain (the Hub). It can be
 reached through different **Channels** (Telegram, WhatsApp, the dashboard, an API) and it
@@ -23,7 +23,7 @@ registry entry. Nothing else changes.
 ┌─────────────────────────────────────────────────────────────────────┐
 │                       Personal Assistant                             │
 │                                                                      │
-│   Identity: "OctaMind"  ·  memory/__multi_agent__/  ·  LLM client  │
+│   Identity: "Octa Bot"  ·  memory/__multi_agent__/  ·  LLM client  │
 └───────────────────────────────┬─────────────────────────────────────┘
                                 │
             ┌───────────────────┼────────────────────┐

@@ -112,8 +112,8 @@ class WorkflowContext:
                 if f.exists():
                     f.unlink()
                     logger.debug("Deleted temp file: %s", f)
-                # Also remove parent dir if it's an octamind temp dir and now empty
-                if f.parent.name.startswith("octamind_wf_") and not any(f.parent.iterdir()):
+                # Also remove parent dir if it's an Octa Bot temp dir and now empty
+                if f.parent.name.startswith("Octa Bot_wf_") and not any(f.parent.iterdir()):
                     f.parent.rmdir()
             except Exception as exc:
                 logger.warning("Could not delete temp file %s: %s", f, exc)

@@ -14,7 +14,12 @@ from pathlib import Path
 
 from .base import BaseChannel, ChannelStatus
 
-_ROOT = Path(__file__).parent.parent.parent.parent.parent
+# When frozen by PyInstaller, __file__ points to a temp extraction directory.
+# Use sys.executable (the .exe location) to find the real project root instead.
+if getattr(sys, 'frozen', False):
+    _ROOT = Path(sys.executable).parent
+else:
+    _ROOT = Path(__file__).parent.parent.parent.parent.parent
 
 
 class DashboardChannel(BaseChannel):
@@ -41,7 +46,7 @@ class DashboardChannel(BaseChannel):
         subprocess.Popen(
             [
                 python, "-m", "streamlit", "run",
-                str(_ROOT / "src" / "agent" / "ui" / "agent_dashboard.py"),
+                str(_ROOT / "src" / "agent" / "ui" / "dashboard" / "app.py"),
                 "--server.port", str(self.PORT),
                 "--server.headless", "true",
             ],

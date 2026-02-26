@@ -1,5 +1,5 @@
 """
-LLM Integration for OctaMind agents.
+LLM Integration for Octa Bot agents.
 
 Provider is configured via config/providers.json.
 Switch models by changing 'active' — no code changes needed.
@@ -15,7 +15,7 @@ logger.setLevel(logging.DEBUG)
 
 class GitHubModelsLLM:
     """
-    OctaMind LLM client.
+    Octa Bot LLM client.
 
     Supports any provider registered in config/providers.json:
       - openai_compatible  (GitHub Models, OpenAI, Ollama, LM Studio, llama.cpp, vLLM, …)

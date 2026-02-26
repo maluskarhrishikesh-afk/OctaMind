@@ -8,7 +8,7 @@ Skills (gmail, google_drive, files, whatsapp, telegram, calendar) are stateless
 executors and never accumulate memory, so they are intentionally excluded.
 
 Lifecycle:
-  - Starts automatically when the OctaMind application boots.
+  - Starts automatically when the Octa Bot application boots.
   - Performs an immediate first-pass consolidation on startup.
   - Then checks every 30 minutes — only consolidates if new interactions have
     arrived since the last run (avoids pointless LLM calls on idle systems).
@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 
-logger = logging.getLogger("octamind.consolidation_runner")
+logger = logging.getLogger("Octa Bot.consolidation_runner")
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
 _CHECK_INTERVAL_SECONDS = 30 * 60   # poll every 30 minutes

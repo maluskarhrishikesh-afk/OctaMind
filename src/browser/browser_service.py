@@ -1,5 +1,5 @@
 """
-Browser Service — headless web access for OctaMind.
+Browser Service — headless web access for Octa Bot.
 
 All tools use urllib from the standard library as the primary backend,
 with optional BeautifulSoup4 + requests for richer parsing when installed.

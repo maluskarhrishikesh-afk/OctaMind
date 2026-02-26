@@ -1,6 +1,6 @@
-# Email Agent (Gmail) — Setup & Testing Guide
+﻿# Email Agent (Gmail) — Setup & Testing Guide
 
-This guide walks you through connecting OctaMind to your Gmail account and testing every feature of the Email Agent.
+This guide walks you through connecting Octa Bot to your Gmail account and testing every feature of the Email Agent.
 
 ---
 
@@ -15,12 +15,12 @@ This guide walks you through connecting OctaMind to your Gmail account and testi
     - [3a. Configure the OAuth Consent Screen (first time only)](#3a-configure-the-oauth-consent-screen-first-time-only)
     - [3b. Create the OAuth Client ID](#3b-create-the-oauth-client-id)
   - [Step 4 — Place the Credentials File](#step-4--place-the-credentials-file)
-  - [Step 5 — Configure OctaMind](#step-5--configure-octamind)
+  - [Step 5 — Configure Octa Bot](#step-5--configure-Octa Bot)
   - [Step 6 — First-Run Authentication](#step-6--first-run-authentication)
     - [Trigger the consent flow](#trigger-the-consent-flow)
     - [What happens](#what-happens)
     - [Token refresh](#token-refresh)
-  - [Step 7 — Create a Gmail Agent in OctaMind](#step-7--create-a-gmail-agent-in-octamind)
+  - [Step 7 — Create a Gmail Agent in Octa Bot](#step-7--create-a-gmail-agent-in-Octa Bot)
   - [Testing Each Tool Category](#testing-each-tool-category)
     - [Reading \& Counting](#reading--counting)
     - [Sending \& Drafts](#sending--drafts)
@@ -42,7 +42,7 @@ This guide walks you through connecting OctaMind to your Gmail account and testi
 ## Architecture Overview
 
 ```
-OctaMind Email Agent
+Octa Bot Email Agent
         │
         │  OAuth 2.0 (token.json)
         ▼
@@ -57,7 +57,7 @@ OctaMind Email Agent
 
 **Key points:**
 - **No webhook is needed** — the agent polls Gmail on demand rather than receiving push events
-- **All data stays local** — OctaMind never stores emails; it calls the Gmail API at query time
+- **All data stays local** — Octa Bot never stores emails; it calls the Gmail API at query time
 - Authentication uses the standard **OAuth 2.0 "Desktop application" flow**
 - The same `credentials.json` file is shared by both the Gmail agent and the Drive agent
 - Gmail and Drive use **separate token files** (`token.json` vs `drive_token.json`)
@@ -70,7 +70,7 @@ OctaMind Email Agent
 
 2. Click the project selector at the top → **New Project**.
 
-3. Give it a name (e.g. "OctaMind") and click **Create**.
+3. Give it a name (e.g. "Octa Bot") and click **Create**.
 
 4. Make sure the new project is selected in the project selector.
 
@@ -97,7 +97,7 @@ OctaMind Email Agent
 2. Choose **External** as the user type (unless your account is part of a Google Workspace org).
 
 3. Fill in the required fields:
-   - **App name:** OctaMind (or anything you like)
+   - **App name:** Octa Bot (or anything you like)
    - **User support email:** your email address
    - **Developer contact information:** your email address
 
@@ -113,7 +113,7 @@ OctaMind Email Agent
 
 3. Set **Application type** to **Desktop application**.
 
-4. Give it a name (e.g. "OctaMind Desktop") and click **Create**.
+4. Give it a name (e.g. "Octa Bot Desktop") and click **Create**.
 
 5. A dialog appears with your Client ID and Client Secret — click **Download JSON**.
 
@@ -126,18 +126,18 @@ OctaMind Email Agent
 Rename the downloaded file to `credentials.json` and place it in the `config/` folder of the project:
 
 ```
-OctaMind/
+Octa Bot/
 ├── config/
 │   ├── credentials.json    ← place it here  ✅
 │   ├── settings.json
 │   └── ...
 ```
 
-> The fallback is the project root (`OctaMind/credentials.json`), but `config/credentials.json` is preferred and is already listed in `.gitignore`.
+> The fallback is the project root (`Octa Bot/credentials.json`), but `config/credentials.json` is preferred and is already listed in `.gitignore`.
 
 ---
 
-## Step 5 — Configure OctaMind
+## Step 5 — Configure Octa Bot
 
 Open `config/settings.json` and verify the `google` section exists (it should already be there):
 
@@ -154,8 +154,8 @@ Open `config/settings.json` and verify the `google` section exists (it should al
 | Field | Description |
 |-------|-------------|
 | `oauth_credentials_path` | Path to the `credentials.json` file you downloaded |
-| `gmail_token_path` | Where OctaMind stores the Gmail OAuth token (auto-created on first run) |
-| `drive_token_path` | Where OctaMind stores the Drive OAuth token (auto-created on first Drive run) |
+| `gmail_token_path` | Where Octa Bot stores the Gmail OAuth token (auto-created on first run) |
+| `drive_token_path` | Where Octa Bot stores the Drive OAuth token (auto-created on first Drive run) |
 
 You do not need to change these values unless you move the credentials file.
 
@@ -163,11 +163,11 @@ You do not need to change these values unless you move the credentials file.
 
 ## Step 6 — First-Run Authentication
 
-The first time any Gmail action is triggered, OctaMind opens a browser window for the OAuth consent flow.
+The first time any Gmail action is triggered, Octa Bot opens a browser window for the OAuth consent flow.
 
 ### Trigger the consent flow
 
-Start OctaMind and launch a Gmail agent (see Step 7), then send it any command — for example:
+Start Octa Bot and launch a Gmail agent (see Step 7), then send it any command — for example:
 
 ```
 How many emails do I have?
@@ -177,9 +177,9 @@ How many emails do I have?
 
 1. A browser window opens automatically showing Google's consent screen.
 2. Click your Gmail account (the one you added as a test user in Step 3a).
-3. Click **Continue** (you may see a warning that the app is unverified — click "Advanced → Go to OctaMind (unsafe)" for a personal test app).
+3. Click **Continue** (you may see a warning that the app is unverified — click "Advanced → Go to Octa Bot (unsafe)" for a personal test app).
 4. Grant the requested Gmail permissions and click **Allow**.
-5. The browser shows a success page; OctaMind saves a `token.json` file in `config/` and retries your command.
+5. The browser shows a success page; Octa Bot saves a `token.json` file in `config/` and retries your command.
 
 **Files created after authentication:**
 
@@ -197,9 +197,9 @@ Tokens refresh automatically when they expire. If the token ever becomes invalid
 
 ---
 
-## Step 7 — Create a Gmail Agent in OctaMind
+## Step 7 — Create a Gmail Agent in Octa Bot
 
-1. Start OctaMind:
+1. Start Octa Bot:
    ```bash
    python start.py
    ```
@@ -243,7 +243,7 @@ Expected: A numbered list of emails with IDs, subjects, and senders.
 
 | What to test | Example command |
 |---|---|
-| Send an email | `Send an email to yourself@gmail.com with subject "Test" saying "Hello from OctaMind"` |
+| Send an email | `Send an email to yourself@gmail.com with subject "Test" saying "Hello from Octa Bot"` |
 | Create a draft | `Create a draft to yourself@gmail.com about tomorrow's meeting` |
 | List drafts | `Show my drafts` |
 | Send a draft | `Send draft <draft_id>` |
@@ -262,7 +262,7 @@ Expected: A numbered list of emails with IDs, subjects, and senders.
 | Cancel scheduled | `Cancel scheduled email <id>` |
 | Update scheduled | `Update scheduled email <id> to send tomorrow at 9am` |
 
-> ⚠️ Scheduled emails are software-implemented (stored in a local JSON file). The OctaMind process must be running at the scheduled send time — this is not a native Gmail scheduled send.
+> ⚠️ Scheduled emails are software-implemented (stored in a local JSON file). The Octa Bot process must be running at the scheduled send time — this is not a native Gmail scheduled send.
 
 ---
 
@@ -366,11 +366,11 @@ config/
 |---------|-------|-----|
 | Browser doesn't open on first run | `credentials.json` not found | Check it's at `config/credentials.json`; verify path in `config/settings.json` |
 | `Error 400: redirect_uri_mismatch` | Wrong application type | Re-create the OAuth client as **Desktop application**, not Web application |
-| `Access blocked: OctaMind has not completed the Google verification process` | App in "testing" mode | In OAuth Consent Screen → Test Users, add your email; or click "Advanced → Go to OctaMind (unsafe)" |
+| `Access blocked: Octa Bot has not completed the Google verification process` | App in "testing" mode | In OAuth Consent Screen → Test Users, add your email; or click "Advanced → Go to Octa Bot (unsafe)" |
 | `Token has been expired or revoked` | Token invalidated | Delete `config/token.json` and send any command to re-authenticate |
 | `credentials.json` not found error at startup | File in wrong location | Move it to `config/credentials.json` and confirm `settings.json` points there |
 | `Quota exceeded` Gmail API error | Too many calls in a short window | The free Gmail API has usage limits; wait a minute and retry |
-| Scheduled email never sent | OctaMind was not running at send time | This is a software scheduler — keep OctaMind running; restart and check `data/scheduled_emails.json` |
+| Scheduled email never sent | Octa Bot was not running at send time | This is a software scheduler — keep Octa Bot running; restart and check `data/scheduled_emails.json` |
 | `download_attachment` saves to wrong place | Path is relative to server process | Use an absolute path, e.g. `C:/Users/YourName/Downloads/receipt.pdf` |
 | `export_to_calendar` only saves a file | Calendar write scope not granted | The `.ics` file can be imported manually into Google Calendar; full write requires re-auth after adding the Calendar API |
 | Agent shows "Rate limit reached" mid-conversation | GitHub Models free tier limit (150 req/day) | Wait for the daily counter to reset; or switch to a paid provider in `config/credentials.json` |

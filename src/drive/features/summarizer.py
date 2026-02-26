@@ -1,7 +1,7 @@
 """
 Google Drive File Summarizer Module (Phase 3)
 
-AI-powered summaries of Drive files using the OctaMind LLM client.
+AI-powered summaries of Drive files using the Octa Bot LLM client.
 
 Functions:
 - summarize_file   — generate a natural-language summary of a file's content

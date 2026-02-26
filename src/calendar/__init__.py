@@ -1,5 +1,5 @@
 """
-Calendar Module — Google Calendar integration for OctaMind.
+Calendar Module — Google Calendar integration for Octa Bot.
 
 Provides Google Calendar read/write operations via the Calendar API v3.
 All functions return plain dicts with at least ``status`` and ``message``.

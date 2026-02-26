@@ -161,6 +161,18 @@ class AgentManager:
             'icon': '📈',
             'capabilities': ['get_quote', 'get_historical_data', 'technical_analysis', 'risk_score', 'pattern_detection', 'portfolio_analysis', 'portfolio_suggestions', 'sentiment_analysis', 'compare_stocks', 'market_overview']
         },
+        'linkedin': {
+            'name': 'LinkedIn Agent',
+            'description': 'Manage a LinkedIn page — create text, image and video posts, schedule content, generate AI-written posts and AI images, and track page analytics',
+            'icon': '💼',
+            'capabilities': [
+                'create_text_post', 'create_image_post', 'create_video_post',
+                'create_article_post', 'schedule_post', 'list_scheduled_posts',
+                'cancel_scheduled_post', 'generate_ai_post_content', 'generate_ai_image',
+                'get_post_analytics', 'get_page_analytics', 'get_org_followers',
+                'delete_post', 'list_published_posts',
+            ]
+        },
         'custom': {
             'name': 'Custom Agent',
             'description': 'Build your own agent with custom capabilities',

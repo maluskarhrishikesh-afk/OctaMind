@@ -1,12 +1,12 @@
-# Browser Agent — Setup Guide
+﻿# Browser Agent — Setup Guide
 
-This guide explains how to set up, configure, and test the Browser Agent in OctaMind.
+This guide explains how to set up, configure, and test the Browser Agent in Octa Bot.
 
 ---
 
 ## What the Browser Agent Does
 
-The Browser Agent gives any OctaMind Personal Assistant the ability to interact with the web:
+The Browser Agent gives any Octa Bot Personal Assistant the ability to interact with the web:
 
 | Tool | What it does |
 |------|-------------|
@@ -73,7 +73,7 @@ print(r['status'], '-', r['count'], 'results')
 
 ## Enabling the Browser Skill in the UI
 
-1. Open the OctaMind dashboard (`python start.py` or `streamlit run src/agent/ui/dashboard/app.py`)
+1. Open the Octa Bot dashboard (`python start.py` or `streamlit run src/agent/ui/dashboard/app.py`)
 2. Click **"+ Add Agent / Skill"**
 3. In the skill catalogue, locate **🌐 Web Browser**
 4. Toggle it on for an existing Personal Assistant, or create a new one with it pre-selected

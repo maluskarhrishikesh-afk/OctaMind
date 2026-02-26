@@ -169,10 +169,55 @@ def update_assistant(pa_id: str, **fields) -> bool:
 
 
 def delete_assistant(pa_id: str) -> bool:
-    """Delete a PA by id. Returns False if not found."""
+    """Delete a PA by id, its memory directory, and any log files that belong to it.
+
+    Returns False if the PA is not found.
+    """
     assistants = load_assistants()
     remaining = [a for a in assistants if a["id"] != pa_id]
     if len(remaining) == len(assistants):
         return False   # not found
+
     _save(remaining)
+    _cleanup_pa_resources(pa_id)
     return True
+
+
+def _cleanup_pa_resources(pa_id: str) -> None:
+    """Delete the memory directory and log files for a personal assistant.
+
+    Also stops any running Telegram poller so file handles are released before
+    the log is deleted.  Safe to call even if resources do not exist.
+    """
+    import shutil
+    import glob
+
+    project_root = _PA_PATH.parent.parent   # …/OctaMind
+
+    # 1. Stop any running Telegram poller (releases the log file handle)
+    try:
+        from src.telegram.pa_poller_manager import stop_pa_poller
+        stop_pa_poller(pa_id)
+    except Exception:
+        pass  # poller may not be running — that's fine
+
+    # 2. Memory directory
+    memory_dir = project_root / "memory" / pa_id
+    if memory_dir.exists():
+        try:
+            shutil.rmtree(memory_dir)
+        except Exception as exc:
+            print(f"⚠️  Could not remove memory dir {memory_dir}: {exc}")
+
+    # 3. Log files — match logs/*<pa_id>*.log and logs/<pa_id>.log
+    logs_dir = project_root / "logs"
+    patterns = [
+        str(logs_dir / f"*{pa_id}*.log"),
+        str(logs_dir / f"{pa_id}.log"),
+    ]
+    for pattern in patterns:
+        for path in glob.glob(pattern):
+            try:
+                Path(path).unlink()
+            except Exception as exc:
+                print(f"⚠️  Could not remove log {path}: {exc}")

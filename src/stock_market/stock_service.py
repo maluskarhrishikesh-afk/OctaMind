@@ -1,5 +1,5 @@
 """
-Stock Market Analysis Service — OctaMind
+Stock Market Analysis Service — Octa Bot
 
 All analysis is READ-ONLY. No buy/sell order functionality whatsoever.
 
@@ -28,6 +28,16 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger("stock_service")
 
 
+def _log_analysis_step(step: str, symbol: str, status: str) -> None:
+    """Emit a structured INFO log line for each analysis pipeline step."""
+    try:
+        from src.agent.logging.log_manager import bind_request, new_request_id
+        bind_request(new_request_id())
+    except Exception:
+        pass
+    logger.info("[stock_analysis] step=%s symbol=%s status=%s", step, symbol, status)
+
+
 # ── yfinance guard ─────────────────────────────────────────────────────────────
 
 def _yf():
@@ -43,6 +53,58 @@ def _yf():
 
 def _ticker(symbol: str):
     return _yf().Ticker(symbol.upper().strip())
+
+
+def resolve_ticker(query: str) -> str:
+    """
+    Resolve a company name or partial name to a yfinance ticker symbol.
+
+    - If *query* already looks like a ticker symbol (uppercase letters/digits/dots/hyphens)
+      it is returned as-is.
+    - Otherwise yf.Search() is used to find the best match;
+      NSE (.NS) equity results are preferred so Indian company names work naturally.
+
+    Examples::
+
+        resolve_ticker("Intellect Design Arena")  # → "INTELLECT.NS"
+        resolve_ticker("TCS")                     # → "TCS.NS"
+        resolve_ticker("AAPL")                    # → "AAPL"  (unchanged)
+        resolve_ticker("Eternal")                 # → "ETERNAL.NS" (Zomato rename)
+    """
+    query = query.strip()
+    if not query:
+        return query
+    # Already looks like a ticker: all-uppercase, optional exchange suffix (.NS, .BO, .L, ^VIX …)
+    if re.match(r'^[A-Z0-9\.\-\^]{1,25}$', query):
+        return query
+    try:
+        results = _yf().Search(query, max_results=10)
+        quotes  = results.quotes if hasattr(results, 'quotes') else []
+        if not quotes:
+            logger.warning("[resolve_ticker] No results for '%s' — using as-is", query)
+            return query.upper()
+        # Prefer NSE equity (most Indian stocks are on NSE)
+        nse = [
+            q for q in quotes
+            if q.get("exchange") in ("NSI", "NSE") and q.get("quoteType") == "EQUITY"
+        ]
+        if nse:
+            symbol = nse[0]["symbol"]
+            logger.info("[resolve_ticker] '%s' → %s (NSE)", query, symbol)
+            return symbol
+        # Fallback: first equity result on any exchange
+        equity = [q for q in quotes if q.get("quoteType") == "EQUITY"]
+        if equity:
+            symbol = equity[0]["symbol"]
+            logger.info("[resolve_ticker] '%s' → %s", query, symbol)
+            return symbol
+        # Last resort: first result regardless of type
+        symbol = quotes[0]["symbol"]
+        logger.info("[resolve_ticker] '%s' → %s (first result)", query, symbol)
+        return symbol
+    except Exception as exc:
+        logger.warning("[resolve_ticker] Search failed for '%s': %s — using as-is", query, exc)
+        return query.upper()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -217,7 +279,13 @@ def technical_analysis(symbol: str, period: str = "6mo") -> Dict[str, Any]:
                 return "N/A"
             return "above" if price > ma else "below"
 
-        rsi_signal = "overbought" if rsi_val > 70 else ("oversold" if rsi_val < 30 else "neutral")
+        rsi_signal = (
+            "overbought"      if rsi_val > 70 else
+            "near overbought" if rsi_val >= 65 else
+            "oversold"        if rsi_val < 30 else
+            "near oversold"   if rsi_val <= 35 else
+            "neutral"
+        )
         macd_signal = "bullish" if macd_hist > 0 else "bearish"
         bb_signal   = "overbought" if latest > bb_upper else ("oversold" if latest < bb_lower else "neutral")
 
@@ -313,8 +381,12 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
         hist_idx = max(0, int(len(sorted_rets) * 0.05) - 1)
         var_95_hist = round(-sorted_rets[hist_idx] * 100, 3)
 
-        # Beta vs SPY (and derived metrics)
-        spy_hist = yf.Ticker("SPY").history(period=period)
+        # Beta vs benchmark — use NIFTY 50 for Indian stocks, SPY for global
+        _sym_upper = symbol.upper()
+        _is_indian = _sym_upper.endswith(".NS") or _sym_upper.endswith(".BO")
+        _benchmark_ticker = "^NSEI" if _is_indian else "SPY"
+        _benchmark_label  = "NIFTY 50" if _is_indian else "SPY"
+        spy_hist = yf.Ticker(_benchmark_ticker).history(period=period)
         beta = None
         if not spy_hist.empty:
             spy_closes = [float(c) for c in spy_hist["Close"].dropna()]
@@ -398,16 +470,18 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
         composite  = round(vol_score * 0.40 + beta_score * 0.30 + var_score * 0.30, 1)
 
         risk_level = (
-            "Very Low"   if composite < 2.5 else
-            "Low"        if composite < 4   else
-            "Moderate"   if composite < 6   else
-            "High"       if composite < 8   else
+            "Very Low"      if composite < 2.5 else
+            "Low"           if composite < 4   else
+            "Moderate"      if composite < 5.5 else
+            "Moderate-High" if composite < 7   else
+            "High"          if composite < 8.5 else
             "Very High"
         )
 
         return {
             "status":                "success",
             "symbol":                symbol.upper(),
+            "benchmark":             _benchmark_label,
             "annual_volatility_pct": annual_vol,
             "annual_return_pct":     annual_return,
             "beta":                  beta,
@@ -564,12 +638,14 @@ def pattern_detection(symbol: str, period: str = "3mo") -> Dict[str, Any]:
             while va_vol < target_v and (lo_idx > 0 or hi_idx < n_buckets - 1):
                 up_vol   = vol_buckets[hi_idx + 1] if hi_idx < n_buckets - 1 else 0.0
                 down_vol = vol_buckets[lo_idx - 1] if lo_idx > 0         else 0.0
-                if up_vol >= down_vol:
+                if up_vol >= down_vol and hi_idx < n_buckets - 1:
                     hi_idx += 1
                     va_vol += vol_buckets[hi_idx]
-                else:
+                elif lo_idx > 0:
                     lo_idx -= 1
                     va_vol += vol_buckets[lo_idx]
+                else:
+                    break  # no further expansion possible
 
             value_area_high = round(p_min + (hi_idx + 1) * bucket_sz, 4)
             value_area_low  = round(p_min +  lo_idx      * bucket_sz, 4)
@@ -585,8 +661,15 @@ def pattern_detection(symbol: str, period: str = "3mo") -> Dict[str, Any]:
             trend = "sideways"
 
         # ── Candlestick Patterns ───────────────────────────────────────────────
+        # Align all series to the shortest — yfinance may return different NaN patterns
+        _n = min(len(closes), len(opens), len(highs), len(lows))
+        closes = closes[-_n:]
+        opens  = opens[-_n:]
+        highs  = highs[-_n:]
+        lows   = lows[-_n:]
+
         patterns: List[str] = []
-        if len(closes) >= 2:
+        if _n >= 2:
             o, c, h, l = opens[-1], closes[-1], highs[-1], lows[-1]
             body   = abs(c - o)
             range_ = h - l if h != l else 0.0001
@@ -972,7 +1055,14 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
             }
 
         batch = news[:15]
-        titles = [(item.get("title") or "").strip() for item in batch]
+        # yfinance 1.2+ nests fields under item["content"]; support both schemas
+        titles = [
+            (
+                item.get("title") or
+                item.get("content", {}).get("title") or ""
+            ).strip()
+            for item in batch
+        ]
         now_ts = datetime.utcnow().timestamp()
 
         # ── Step 1: Try LLM batch classification (one API call) ───────────────
@@ -1014,32 +1104,53 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
                 item_score = kw_score
 
             # ── Recency decay ─────────────────────────────────────────────────
-            ts = item.get("providerPublishTime") or item.get("content", {}).get("pubDate")
+            # Support both old schema (epoch int) and new yfinance 1.2+ schema (ISO string)
+            ts_raw = item.get("providerPublishTime") or item.get("content", {}).get("pubDate")
             pub_date_str   = ""
             recency_weight = 1.0
-            if ts:
+            if ts_raw:
+                ts_epoch = None
                 try:
-                    age_days = (now_ts - float(ts)) / 86400
-                    recency_weight = 1.0 if age_days <= 7 else (0.8 if age_days <= 14 else 0.6)
-                    pub_date_str = datetime.utcfromtimestamp(float(ts)).strftime("%Y-%m-%d")
+                    ts_epoch = float(ts_raw)           # old schema: Unix epoch int
                 except (TypeError, ValueError):
-                    pass
+                    try:                               # new schema: ISO-8601 string
+                        ts_epoch = datetime.strptime(
+                            str(ts_raw)[:19], "%Y-%m-%dT%H:%M:%S"
+                        ).timestamp()
+                    except Exception:
+                        pass
+                if ts_epoch is not None:
+                    try:
+                        age_days = (now_ts - ts_epoch) / 86400
+                        recency_weight = 1.0 if age_days <= 7 else (0.8 if age_days <= 14 else 0.6)
+                        pub_date_str = datetime.utcfromtimestamp(ts_epoch).strftime("%Y-%m-%d")
+                    except Exception:
+                        pass
 
             # ── Publisher reliability boost ───────────────────────────────────
-            publisher  = (item.get("publisher") or "").lower()
+            publisher = (
+                item.get("publisher") or
+                item.get("content", {}).get("provider", {}).get("displayName") or ""
+            ).lower()
             pub_weight = 1.3 if any(p in publisher for p in TRUSTED_PUBLISHERS) else 1.0
 
             total_weight = recency_weight * pub_weight
 
             entry: Dict[str, Any] = {
                 "title":          title,
-                "publisher":      item.get("publisher", ""),
+                "publisher":      (
+                    item.get("publisher") or
+                    item.get("content", {}).get("provider", {}).get("displayName") or ""
+                ),
                 "sentiment":      label,
                 "score":          item_score,
                 "weighted_score": round(item_score * total_weight, 3),
                 "weight":         round(total_weight, 2),
                 "published":      pub_date_str,
-                "url":            item.get("link", "") or item.get("clickThroughUrl", {}).get("url", ""),
+                "url":            (
+                    item.get("link") or
+                    item.get("content", {}).get("canonicalUrl", {}).get("url") or ""
+                ),
             }
             if confidence is not None:
                 entry["llm_confidence"] = round(confidence, 3)
@@ -1257,68 +1368,98 @@ def generate_full_report(
     generated_at = datetime.utcnow().isoformat() + "Z"
 
     # ── Step 1–6: Run all analyses (pure math, no LLM) ─────────────────────────
-    logger.info("[generate_full_report] Fetching quote for %s", symbol)
+    # Bind a fresh correlation ID for the entire report pipeline
+    try:
+        from src.agent.logging.log_manager import bind_correlation, bind_request, new_correlation_id, new_request_id
+        bind_correlation(new_correlation_id())
+    except Exception:
+        pass
+
+    _log_analysis_step("quote", symbol, "start")
     quote_data = get_quote(symbol)
     if quote_data.get("status") == "success":
         sections_included.append("market_snapshot")
+        _log_analysis_step("quote", symbol, "ok")
     else:
         errors.append(f"quote: {quote_data.get('message', 'unknown error')}")
+        _log_analysis_step("quote", symbol, f"error:{quote_data.get('message', '')}")
         quote_data = {}
 
-    logger.info("[generate_full_report] Running technical analysis for %s", symbol)
+    _log_analysis_step("technical", symbol, "start")
     tech_data = technical_analysis(symbol)
     if tech_data.get("status") == "success":
         sections_included.append("technical_analysis")
+        _log_analysis_step("technical", symbol, "ok")
     else:
         errors.append(f"technical: {tech_data.get('message', 'unknown error')}")
+        _log_analysis_step("technical", symbol, f"error")
         tech_data = {}
 
-    logger.info("[generate_full_report] Running risk score for %s", symbol)
+    _log_analysis_step("risk", symbol, "start")
     risk_data = risk_score(symbol)
     if risk_data.get("status") == "success":
         sections_included.append("risk_assessment")
+        _log_analysis_step("risk", symbol, "ok")
     else:
         errors.append(f"risk: {risk_data.get('message', 'unknown error')}")
+        _log_analysis_step("risk", symbol, "error")
         risk_data = {}
 
-    logger.info("[generate_full_report] Running pattern detection for %s", symbol)
+    _log_analysis_step("patterns", symbol, "start")
     pattern_data = pattern_detection(symbol)
     if pattern_data.get("status") == "success":
         sections_included.append("pattern_detection")
+        _log_analysis_step("patterns", symbol, "ok")
     else:
         errors.append(f"patterns: {pattern_data.get('message', 'unknown error')}")
+        _log_analysis_step("patterns", symbol, "error")
         pattern_data = {}
 
-    logger.info("[generate_full_report] Running fundamental analysis for %s", symbol)
+    _log_analysis_step("fundamental", symbol, "start")
     fund_data = fundamental_analysis(symbol)
     if fund_data.get("status") == "success":
         sections_included.append("fundamental_analysis")
+        _log_analysis_step(
+            "fundamental", symbol,
+            f"ok quality={fund_data.get('quality_score')} moat={fund_data.get('moat_label')} "
+            f"gross_margin={fund_data.get('gross_margin_pct')} op_margin={fund_data.get('operating_margin_pct')} "
+            f"rev_growth={fund_data.get('revenue_growth_yoy_pct')} earnings_growth={fund_data.get('earnings_growth_yoy_pct')} "
+            f"de={fund_data.get('debt_to_equity')} pe={fund_data.get('pe_ratio')}",
+        )
     else:
         errors.append(f"fundamentals: {fund_data.get('message', 'unknown error')}")
+        _log_analysis_step("fundamental", symbol, "error")
         fund_data = {}
 
-    logger.info("[generate_full_report] Running sentiment analysis for %s", symbol)
+    _log_analysis_step("sentiment", symbol, "start")
     sentiment_data = sentiment_analysis(symbol)
     if sentiment_data.get("status") == "success":
         sections_included.append("news_sentiment")
+        _log_analysis_step(
+            "sentiment", symbol,
+            f"ok overall={sentiment_data.get('overall_sentiment')} score={sentiment_data.get('aggregate_score')}",
+        )
     else:
         errors.append(f"sentiment: {sentiment_data.get('message', 'unknown error')}")
+        _log_analysis_step("sentiment", symbol, "error")
         sentiment_data = {}
 
     # ── Step 7: ONE LLM call for plain-language narrative ──────────────────────
     narrative = ""
+    _log_analysis_step("narrative_llm", symbol, "start" if llm_client else "skipped")
     if llm_client is not None:
         try:
-            logger.info("[generate_full_report] Requesting LLM narrative for %s", symbol)
             narrative = _build_narrative(
                 symbol, quote_data, fund_data, tech_data, risk_data, pattern_data, sentiment_data, llm_client
             )
+            _log_analysis_step("narrative_llm", symbol, f"ok chars={len(narrative)}")
         except Exception as exc:
             errors.append(f"narrative_llm: {exc}")
+            _log_analysis_step("narrative_llm", symbol, f"error:{exc}")
             narrative = ""
 
     # ── Step 8: Build PDF ───────────────────────────────────────────────────────
-    logger.info("[generate_full_report] Building PDF for %s", symbol)
+    _log_analysis_step("build_pdf", symbol, "start")
     pdf_path = build_report(
         symbol       = symbol,
         quote        = quote_data,
@@ -1336,26 +1477,68 @@ def generate_full_report(
     emailed_to = None
     if send_to_email:
         try:
-            from src.email.gmail_service import GmailService
-            gs = GmailService()
-            subject = f"OctaMind Stock Analysis: {symbol.upper()} — {datetime.utcnow().strftime('%d %b %Y')}"
+            from src.email.gmail_service import send_email_with_attachment as _send_with_attachment
+            subject = f"Octa Bot Stock Analysis: {symbol.upper()} — {datetime.utcnow().strftime('%d %b %Y')}"
             body = (
-                f"Please find attached the OctaMind stock analysis report for {symbol.upper()}.\n\n"
+                f"Please find attached the Octa Bot stock analysis report for {symbol.upper()}.\n\n"
                 f"DISCLAIMER: This report is for informational purposes only. It does not constitute "
                 f"financial advice or a recommendation to buy, sell, or hold any security. "
                 f"Please consult a SEBI-registered investment advisor before making any investment decision.\n\n"
                 f"Generated at: {generated_at}"
             )
-            gs.send_email_with_attachment(
+            _send_with_attachment(
                 to=send_to_email,
                 subject=subject,
-                body=body,
+                message=body,
                 attachment_path=pdf_path,
             )
             emailed_to = send_to_email
             logger.info("[generate_full_report] Report emailed to %s", send_to_email)
         except Exception as exc:
             errors.append(f"email: {exc}")
+
+    _log_analysis_step("build_pdf", symbol, "ok")
+    logger.info(
+        "[generate_full_report] COMPLETE symbol=%s price=%s quality=%s/%s moat=%s "
+        "risk=%s sentiment=%s sections=%d pdf=%s errors=%d",
+        symbol.upper(),
+        quote_data.get("price", "N/A"),
+        fund_data.get("quality_score", "N/A"),
+        10,
+        fund_data.get("moat_label", "N/A"),
+        risk_data.get("risk_level", "N/A"),
+        sentiment_data.get("overall_sentiment", "N/A"),
+        len(sections_included),
+        pdf_path,
+        len(errors),
+    )
+
+    # ── Optional: capture summary in agent memory ──────────────────────────────
+    try:
+        from src.agent.memory.agent_memory import get_agent_memory
+        import os
+        agent_id = os.getenv("AGENT_ID", "__multi_agent__")
+        mem = get_agent_memory(agent_id)
+        mem.add_interaction(
+            command=f"stock analysis {symbol.upper()}",
+            action="generate_full_report",
+            result={
+                "status": "success",
+                "symbol": symbol.upper(),
+                "price": quote_data.get("price"),
+                "quality_score": fund_data.get("quality_score"),
+                "moat_label": fund_data.get("moat_label"),
+                "risk_level": risk_data.get("risk_level"),
+                "sentiment": sentiment_data.get("overall_sentiment"),
+                "gross_margin_pct": fund_data.get("gross_margin_pct"),
+                "revenue_growth_pct": fund_data.get("revenue_growth_yoy_pct"),
+                "earnings_growth_pct": fund_data.get("earnings_growth_yoy_pct"),
+                "pdf_path": pdf_path,
+            },
+            importance="High",
+        )
+    except Exception as _mem_err:
+        logger.debug("[generate_full_report] Memory capture skipped: %s", _mem_err)
 
     return {
         "status":       "success",

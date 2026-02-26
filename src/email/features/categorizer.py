@@ -47,7 +47,7 @@ class EmailCategorizer:
         if category in self._label_cache:
             return self._label_cache[category]
 
-        label_name = f"OctaMind/{category.capitalize()}"
+        label_name = f"Octa Bot/{category.capitalize()}"
         try:
             # List existing labels
             labels = self.gmail_service.users().labels().list(userId=self.user_id).execute()
@@ -189,7 +189,7 @@ Return ONLY a JSON object:
         """
         Create Gmail filters based on patterns from already-categorized emails.
 
-        Scans emails labeled with OctaMind/<Category>, finds recurring senders,
+        Scans emails labeled with Octa Bot/<Category>, finds recurring senders,
         and creates Gmail filter rules that auto-label future emails from those senders.
 
         Args:
@@ -219,7 +219,7 @@ Return ONLY a JSON object:
                 existing_froms = set()
 
             for category in CATEGORIES:
-                label_name = f"OctaMind/{category.capitalize()}"
+                label_name = f"Octa Bot/{category.capitalize()}"
 
                 # Look up the label ID
                 label_id = self._label_cache.get(category)
