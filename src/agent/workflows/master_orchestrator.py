@@ -75,6 +75,7 @@ Rules:
 - Write the final_answer message in friendly, markdown-formatted style (bold, bullets, emojis).
 - Call final_answer ONLY when the user's full request is correctly and completely satisfied.
 - Base final_answer strictly on what the observations report — never hallucinate results.
+- When delegating to the email agent to send a notification, always include TO address, SUBJECT, and BODY all together in one instruction. Compose a meaningful body summarising what was accomplished (files created, links, sizes, etc.) — never send an instruction without a body.
 """
 
 
@@ -101,8 +102,10 @@ def react_workflow(
     # Resolve user email and inject it so the LLM can use the literal address
     _react_user_email = ctx.get("__user_email__") if hasattr(ctx, "get") else None
     _email_ctx_line = (
-        f"\nAuthenticated user email (use this literal address whenever the user says "
-        f"'email me', 'send to me', 'send it to me', etc.): {_react_user_email}"
+        f"\nAuthenticated user email: {_react_user_email}. "
+        f"Use this as the TO address in every email delegation UNLESS the user explicitly provides a different recipient. "
+        f"This includes phrases like 'send me', 'email me', 'notify me', 'send an email when done', "
+        f"or any request that mentions sending an email without specifying a recipient."
         if _react_user_email else ""
     )
 
@@ -114,9 +117,20 @@ def react_workflow(
     steps_results: List[Dict[str, Any]] = []
     step_counter = 0
     final_answer_text: Optional[str] = None
+    _loop_start = time.time()
+
+    # ── Per-iteration token tracking (prompt + completion tokens if available) ──
+    _total_prompt_tokens     = 0
+    _total_completion_tokens = 0
+    _llm_calls               = 0
+
+    logger.info(
+        "┌─ ReAct loop START  command=%.120s  max_iters=%d",
+        command, _MAX_REACT_ITERATIONS,
+    )
 
     for iteration in range(_MAX_REACT_ITERATIONS):
-        logger.info("ReAct iteration %d/%d", iteration + 1, _MAX_REACT_ITERATIONS)
+        logger.info("│  ▶ Iteration %d/%d", iteration + 1, _MAX_REACT_ITERATIONS)
 
         # ── LLM reasoning turn ────────────────────────────────────────────
         try:
@@ -127,8 +141,13 @@ def react_workflow(
             max_tokens=1200,
             )
             raw = _strip_code_fences(response.choices[0].message.content.strip())
+            _llm_calls += 1
+            # Capture token usage when the provider reports it
+            if hasattr(response, "usage") and response.usage:
+                _total_prompt_tokens     += getattr(response.usage, "prompt_tokens", 0)
+                _total_completion_tokens += getattr(response.usage, "completion_tokens", 0)
         except Exception as exc:
-            logger.error("ReAct LLM call failed at iteration %d: %s", iteration + 1, exc)
+            logger.error("│  ✗ ReAct LLM call failed at iteration %d: %s", iteration + 1, exc)
             break
 
         messages.append({"role": "assistant", "content": raw})
@@ -148,14 +167,23 @@ def react_workflow(
         params  = turn.get("params",  {})
 
         logger.info(
-            "ReAct [iter %d] action=%s  thought=%.120s",
-            iteration + 1, action, thought,
+            "│    action=%-22s  thought=%.100s",
+            action, thought,
         )
 
         # ── final_answer ──────────────────────────────────────────────────
         if action == "final_answer":
             final_answer_text = params.get("message", "✅ Workflow complete.")
-            logger.info("ReAct final_answer after %d iteration(s)", iteration + 1)
+            _elapsed = time.time() - _loop_start
+            logger.info(
+                "└─ ReAct loop DONE  ✅  iters=%d/%d  steps=%d  llm_calls=%d  "
+                "prompt_tokens=%d  completion_tokens=%d  total_tokens=%d  elapsed=%.2fs",
+                iteration + 1, _MAX_REACT_ITERATIONS,
+                step_counter, _llm_calls,
+                _total_prompt_tokens, _total_completion_tokens,
+                _total_prompt_tokens + _total_completion_tokens,
+                _elapsed,
+            )
             break
 
         # ── delegate_to_agent ─────────────────────────────────────────────
@@ -170,6 +198,10 @@ def react_workflow(
 
             step_counter += 1
             t0 = time.time()
+            logger.info(
+                "│    → delegate step=%d  agent=%-12s  instruction=%.80s",
+                step_counter, agent_name, instruction,
+            )
             executor = get_executor(agent_name)
 
             if executor is None:
@@ -220,10 +252,14 @@ def react_workflow(
                     "result": {"message": text[:500], "artifacts": artifacts_out},
                     "error": None, "elapsed": time.time() - t0,
                 })
+                logger.info(
+                    "│    ✔ step=%d  agent=%-12s  elapsed=%.2fs",
+                    step_counter, agent_name, time.time() - t0,
+                )
 
             except Exception as exc:
                 logger.exception(
-                    "ReAct delegate error [%s] iter %d: %s", agent_name, iteration + 1, exc
+                    "│    ✗ delegate error [%s] iter %d: %s", agent_name, iteration + 1, exc
                 )
                 observation = f"Agent '{agent_name}' raised an error: {exc}"
                 steps_results.append({
@@ -241,12 +277,20 @@ def react_workflow(
                 f"Error: Unknown action '{action}'. "
                 "You must respond with 'delegate_to_agent' or 'final_answer'."
             )
+            logger.warning("│  ⚠ Unknown action at iter %d: %s", iteration + 1, action)
             messages.append({"role": "user", "content": f"Observation: {obs}"})
 
     # Max iterations exhausted without final_answer
     if final_answer_text is None:
+        _elapsed = time.time() - _loop_start
         logger.warning(
-            "ReAct loop hit max iterations (%d) without final_answer", _MAX_REACT_ITERATIONS
+            "└─ ReAct loop TIMEOUT  ⚠  iters=%d/%d  steps=%d  llm_calls=%d  "
+            "prompt_tokens=%d  completion_tokens=%d  total_tokens=%d  elapsed=%.2fs",
+            _MAX_REACT_ITERATIONS, _MAX_REACT_ITERATIONS,
+            step_counter, _llm_calls,
+            _total_prompt_tokens, _total_completion_tokens,
+            _total_prompt_tokens + _total_completion_tokens,
+            _elapsed,
         )
         summary = _summarize_results(steps_results) if steps_results else "No steps were executed."
         final_answer_text = f"⚠️ Workflow reached its iteration limit.\n\n{summary}"
@@ -435,7 +479,7 @@ def run_workflow(
     elapsed       = ctx.elapsed_seconds()
 
     logger.info(
-        "ReAct workflow complete: %s (%d/%d steps in %.1fs)",
+        "Workflow complete: status=%-8s  steps=%d/%d-success  elapsed=%.1fs",
         status, success_count, total, elapsed,
     )
 

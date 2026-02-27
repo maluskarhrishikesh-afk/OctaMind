@@ -1136,6 +1136,16 @@ class AgentMemory:
 
 
 # Factory function
-def get_agent_memory(agent_id: str) -> AgentMemory:
-    """Get or create agent memory instance"""
+def get_agent_memory(agent_id: str) -> Optional[AgentMemory]:
+    """Get or create agent memory instance.
+
+    Only Personal Assistant agents (ID prefix ``pa_``) and the shared
+    multi-agent hub have persistent on-disk memory.  All other agent or
+    skill IDs are silently ignored so that calling skills through the
+    orchestrator does not create dozens of stray UUID memory directories.
+    """
+    if not agent_id:
+        return None
+    if not (agent_id.startswith("pa_") or agent_id == MULTI_AGENT_ID):
+        return None
     return AgentMemory(agent_id)

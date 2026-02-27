@@ -1,27 +1,27 @@
 ﻿# Octa Bot — Architecture
 
-Last updated: 2026-02-25
+Last updated: 2026-02-27
 
 ---
 
 ## System Overview
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  Agent Hub Dashboard  (port 8501, always on)         │
-│  Streamlit UI for creating / starting / stopping     │
-│  agents. State persisted in running_agents.json.     │
-└────────────────────┬────────────────────────────────┘
-                     │  subprocess.Popen per agent
-    ┌─────────────┬─────────┬─────────┬─────────┬────────┬─────────────┐
-    │            │         │         │         │        │             │
-Email Agent  Drive Agent WA Agent  TG Agent Files Agent Personal Assistant
-port:dynamic port:dynamic port:dyn port:dyn port:dynamic  port: dynamic
-(each is an isolated Streamlit process with own st.session_state)
+┌──────────────────────────────────────────────────────────┐
+│  Agent Hub Dashboard  (port 8501, always on)              │
+│  Streamlit UI for creating / starting / stopping agents.  │
+│  State persisted in running_agents.json.                  │
+└─────────────────────┬────────────────────────────────────┘
+                      │  subprocess.Popen per agent
+ ┌──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┬──────────┐
+ │          │          │          │          │          │          │          │          │          │          │          │          │
+Email     Drive      Files   WhatsApp  Telegram  Calendar  Browser   Stock    LinkedIn  Habit    Scheduler  Personal
+Agent     Agent      Agent    Agent     Agent     Agent     Agent    Agent     Agent     Agent     Agent     Assistant
+(each is an isolated Streamlit process with its own st.session_state)
 ```
 
-**Skills vs Personal Assistants:**  
-- **Skills** (Email, Drive, WhatsApp, Telegram, Files) are stateless executors — no memory, no personality. They are tools the PA orchestrates.
+**Skills vs Personal Assistants:**
+- **Skills** (Email, Drive, Files, WhatsApp, Telegram, Calendar, Browser, Stock, LinkedIn, Habit, Scheduler) are stateless executors — no memory, no personality. They execute a single task and return.
 - **Personal Assistants** have full 6-layer memory (working, episodic, semantic, personality, habits, consciousness) and a cross-domain `collective_consciousness.md`.
 
 ---
@@ -78,16 +78,19 @@ After a tool result comes back, `_compose_*_response()` sends the raw JSON direc
 
 ### `src/agent/workflows/` — Multi-Agent Workflows
 
-When a command needs **both** Drive + Email the orchestrator plans in natural language, not tool signatures:
+Multi-agent commands use a **two-level ReAct architecture**:
 
 1. `router.py` → `detect_agents_needed()` classifies the command (LLM, `max_tokens=5`)
-2. `master_orchestrator.py` → `plan_nl_workflow()` asks the LLM to produce a step plan using only compact capability summaries (~10 tokens/agent). **No tool signatures appear in the orchestrator context.**
-3. Each step is executed by `nl_step_runner.py` → `run_nl_step()`, which looks up the target agent in `agent_registry.py` and calls its `execute_with_llm_orchestration()`. The sub-agent runs its own full ReAct loop with its own tool list and memory.
-4. Artifact handoff (e.g. a downloaded file path) is carried via an `artifacts_out` dict and resolved as `{output_key.file_path}` tokens in subsequent step instructions.
+2. `master_orchestrator.py` → `react_workflow()` runs a **master ReAct loop** (up to 12 iterations). The orchestrator LLM sees only compact capability summaries (~10 tokens/agent) and uses `delegate_to_agent` or `final_answer` each turn.
+3. Each `delegate_to_agent` call looks up the target in `agent_registry.py` and calls its `execute_with_llm_orchestration()`. This runs a **per-skill ReAct loop** via the shared `skill_react_engine.py` → `run_skill_react()` (up to 6 iterations per skill).
+4. Artifact handoff (e.g. a downloaded file path) is passed via an `artifacts_out` dict and reported back to the master loop as an observation. The master loop copies the path literally into the next delegation instruction.
+5. The authenticated user's email address is injected into the master system prompt at runtime so `email me` instructions always resolve to the correct address.
 
-**Context cost:** ~445 tokens for 2 agents (vs ~8,000 for the previous flat-tool-list design). Adding an agent = one entry in `agent_registry.py`; orchestrator context does not grow.
+**Context cost:** ~445 tokens for 2 agents (vs ~8,000 for a flat tool-list design). Adding an agent = one entry in `agent_registry.py`; orchestrator context does not grow.
 
-Single-agent commands routed through the Personal Assistant bypass the planner and call the individual skill's ReAct orchestrator directly.
+**Shared skill engine:** `src/agent/workflows/skill_react_engine.py` — `run_skill_react()` is the single ReAct loop implementation used by every skill orchestrator. Each skill passes its own `tool_map` and `skill_context`. This removes code duplication across agents.
+
+Single-agent commands routed through the Personal Assistant bypass the multi-agent planner and call the individual skill's ReAct orchestrator directly.
 
 ---
 
@@ -97,27 +100,40 @@ Single-agent commands routed through the Personal Assistant bypass the planner a
 User command
       │
       ▼
-detect_agents_needed()
+detect_agents_needed()          (1 LLM call, max_tokens=5)
       │
-   ┌──┴──────────────────┬─────────────────────┐
-   ▼                  ▼                        ▼
- NEITHER            SINGLE AGENT           MULTI-AGENT
-(casual chat)     (email/drive/wa/        (NL workflow planner)
-      │            tg/files only)
-      ▼                  ▼                        ▼
- _chat_response()   execute_with_             plan_nl_workflow()
-                    llm_orchestration()       context: ~10 tokens/agent
-                    (ReAct loop)                       │
+   ┌──┴──────────────────┬──────────────────────────┐
+   ▼                     ▼                           ▼
+ NEITHER             SINGLE AGENT               MULTI-AGENT
+(casual chat)      (any single skill)           (2+ agents needed)
+      │                  ▼                           ▼
+      ▼        execute_with_llm_orchestration() react_workflow()
+ _chat_response()  run_skill_react()            MASTER ReAct loop
+ (1 LLM call)      up to 6 LLM calls/skill      up to 12 iterations
+                                                      │
+                                          delegate_to_agent × N
+                                                      │
+                                     ┌────────────────┼────────────────┐
+                                     ▼                ▼                ▼
+                                  Email            Drive          Files/WA/TG
+                              run_skill_react  run_skill_react  run_skill_react
+                              up to 6 calls    up to 6 calls    up to 6 calls
+                                     └────────────────┼────────────────┘
                                                       ▼
-                                                run_nl_step() × N
-                                                       │
-                                          ┌─────────┴────────┐
-                                          ▼             ▼        ▼
-                                       Email        Drive    WA/TG/Files
-                                     47 tools     37 tools  36/38/48 tools
-                                      own ReAct    own ReAct own ReAct
-                                      artifacts_out →→→ {token} resolved
+                                           master: final_answer
+                                           (LLM composes summary)
 ```
+
+**Worst-case LLM call count per flow:**
+
+| Flow | Path | Typical calls | Max possible |
+|------|------|:---:|:---:|
+| Casual chat | chat_response | 2 | 2 |
+| Single-skill command | skill ReAct only | 2–4 | 7 |
+| 2-agent command (e.g. zip + email) | master + 2 sub-agents | 5–8 | 25 |
+| 3-agent command | master + 3 sub-agents | 7–12 | 31 |
+
+*Master loop: up to 12 calls. Each sub-agent: up to 6 calls. Intent classify: 1 call.*
 
 ---
 

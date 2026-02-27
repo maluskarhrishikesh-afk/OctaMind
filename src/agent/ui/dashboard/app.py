@@ -566,19 +566,30 @@ def main() -> None:
         # ── How it works ──────────────────────────────────────────────────
         st.markdown(
             "<p style='font-size:0.72rem;font-weight:700;color:#475569;text-transform:uppercase;"
-            "letter-spacing:0.08em;margin:0 0 10px 0;'>HOW IT WORKS</p>",
+            "letter-spacing:0.08em;margin:0 0 12px 0;'>HOW IT WORKS</p>",
             unsafe_allow_html=True,
         )
-        for _step_icon, _step_text in [
-            ("1️⃣", "Create a **Personal Assistant** — give it a name"),
-            ("2️⃣", "Enable the **Skills** it needs (email, drive, files…)"),
-            ("3️⃣", "Connect **Telegram** to chat from your phone"),
-            ("4️⃣", "Chat via the **Dashboard** or Telegram anytime"),
-        ]:
+        _steps = [
+            ("1️⃣", "Create Assistant", "Give your PA a name & role"),
+            ("2️⃣", "Enable Skills", "Email, Drive, Files and more"),
+            ("3️⃣", "Connect Telegram", "Chat from your phone anywhere"),
+            ("4️⃣", "Start Chatting", "Dashboard or Telegram — anytime"),
+        ]
+        for _icon, _title, _desc in _steps:
             st.markdown(
-                f"<div style='display:flex;gap:8px;align-items:flex-start;padding:5px 0;"
-                f"font-size:0.8rem;color:#64748b;line-height:1.4;'>"
-                f"<span style='flex-shrink:0;'>{_step_icon}</span><span>{_step_text}</span></div>",
+                f"""<div style='
+                    display:flex;gap:10px;align-items:flex-start;
+                    background:rgba(255,255,255,0.03);
+                    border:1px solid rgba(255,255,255,0.06);
+                    border-radius:10px;padding:9px 11px;margin-bottom:6px;
+                    transition:border 0.2s;'>
+                    <span style='font-size:1.2rem;line-height:1.4;flex-shrink:0;'>{_icon}</span>
+                    <div>
+                      <div style='font-size:0.8rem;font-weight:700;color:#c4b5fd;
+                                  line-height:1.2;margin-bottom:2px;'>{_title}</div>
+                      <div style='font-size:0.74rem;color:#64748b;line-height:1.3;'>{_desc}</div>
+                    </div>
+                </div>""",
                 unsafe_allow_html=True,
             )
 

@@ -281,15 +281,60 @@ _SOURCE_ICONS = {
     "telegram": "✈️",
     "whatsapp": "💬",
     "api": "🔌",
+    "dashboard": "🖥️",
     "unknown": "📡",
 }
 _SOURCE_COLORS = {
     "telegram": "#229ED9",
     "whatsapp": "#25D366",
     "api": "#7c3aed",
+    "dashboard": "#e91e8c",
     "unknown": "#888",
 }
 _CONV_PATH = Path(__file__).parent.parent.parent.parent.parent / "data" / "hub_conversations.json"
+
+
+import threading as _threading
+
+_dashboard_chat_lock = _threading.Lock()
+
+
+def _persist_dashboard_chat(pa_id: str, messages: list) -> None:
+    """
+    Write the current Dashboard chat session to hub_conversations.json so
+    the consolidation engine can pick it up alongside Telegram / WhatsApp
+    conversations.  Session key is ``dashboard_<pa_id>`` and source is
+    ``"dashboard"``.
+    """
+    from datetime import timezone as _tz
+
+    session_id = f"dashboard_{pa_id}"
+    now_iso = datetime.now(_tz.utc).isoformat()
+    history = [
+        {"role": m["role"], "content": str(m["content"])[:500], "ts": now_iso}
+        for m in messages
+    ]
+    try:
+        with _dashboard_chat_lock:
+            data: dict = {}
+            if _CONV_PATH.exists():
+                try:
+                    data = _json.loads(_CONV_PATH.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001
+                    data = {}
+            sessions = data.setdefault("sessions", {})
+            sessions[session_id] = {
+                "source": "dashboard",
+                "session_id": session_id,
+                "last_updated": now_iso,
+                "messages": history,
+            }
+            _CONV_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _CONV_PATH.with_suffix(".tmp")
+            tmp.write_text(_json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(_CONV_PATH)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Dashboard chat persist skipped: %s", exc)
 
 
 @st.fragment(run_every=5)
@@ -609,13 +654,13 @@ def _render_pa_chat(pa: dict) -> None:
 
     # ── Session state (per PA) ────────────────────────────────────────────────
     if mk("messages") not in st.session_state:
-        skill_list = ", ".join(f"**{s.title()}**" for s in pa_skills) if pa_skills else "all skills"
         st.session_state[mk("messages")] = [{
             "role": "assistant",
             "content": (
-                f"👋 Hello! I'm **{pa_name}**, your Personal Assistant. "
-                f"My skills: {skill_list}. "
-                "Give me a command and I'll handle it! ⚡"
+                f"👋 Hey! I'm **{pa_name}**, your personal AI assistant. "
+                "I'm ready to work — just tell me what you need! ⚡\n\n"
+                "💡 *Try something like: \"Check my emails\", \"What's on my calendar?\", "
+                "or \"Organise my downloads folder\".*"
             ),
         }]
     if mk("processing") not in st.session_state:
@@ -642,7 +687,26 @@ def _render_pa_chat(pa: dict) -> None:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # ── Process pending command (before chat_input so spinner stays in chat) ──
+    # ── Chat input (placed here — before the processing block — so that it is
+    # rendered on every script run, even while the LLM is blocking execution
+    # below.  st.chat_input() always anchors itself to the bottom of the page
+    # regardless of where in the script it is called.) ───────────────────────
+    user_input = st.chat_input(
+        f"Ask {pa_name}…" if not st.session_state[mk("processing")] else "⏳ Processing — please wait…",
+        key=f"chat_input_{pa_id}",
+    )
+    if user_input:
+        if st.session_state[mk("processing")]:
+            st.toast("⏳ Still thinking — please wait for the current response.", icon="⏳")
+        else:
+            # Append to history immediately so it renders in the for-loop above
+            # on the next rerun (above the chat input), not below it.
+            st.session_state[mk("messages")].append({"role": "user", "content": user_input})
+            st.session_state[mk("command")] = user_input
+            st.session_state[mk("processing")] = True
+            st.rerun()
+
+    # ── Process pending command ───────────────────────────────────────────────
     if st.session_state[mk("processing")] and st.session_state[mk("command")]:
         command = st.session_state[mk("command")]
         st.session_state[mk("command")] = None
@@ -675,10 +739,14 @@ def _render_pa_chat(pa: dict) -> None:
         with st.chat_message("assistant"):
             # ── Conversational ────────────────────────────────────────────────
             if agents_needed is None:
-                with st.spinner("Thinking…"):
+                with st.status("💭 Thinking…", expanded=False) as _think_status:
+                    st.write("🔍 Reading your message…")
+                    st.write("🧠 Reasoning & composing a reply…")
                     reply = _chat_response(command, pa_name, pa_id)
+                    _think_status.update(label="✅ Done", state="complete", expanded=False)
                 st.markdown(reply)
                 st.session_state[mk("messages")].append({"role": "assistant", "content": reply})
+                _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
                 st.session_state[mk("processing")] = False
                 st.rerun()
 
@@ -690,11 +758,13 @@ def _render_pa_chat(pa: dict) -> None:
                 icon  = icons.get(single_agent, "🤖")
                 label = labels.get(single_agent, single_agent.title())
                 _result_status = "success"
-                with st.spinner("Working on it…"):
+                with st.status(f"⚡ Routing to {icon} {label}…", expanded=True) as _skill_status:
+                    st.write(f"🔧 Preparing {label} skill…")
                     try:
                         from src.agent.workflows.agent_registry import get_executor
                         executor = get_executor(single_agent)
                         # Skills are stateless — always agent_id=None
+                        st.write("🚀 Executing task…")
                         result = executor(command, agent_id=None) if executor else {"action": "error", "message": f"Skill '{single_agent}' not loaded."}
                         _result_status = result.get("status", "success")
                         action = result.get("action", "react_response")
@@ -708,9 +778,12 @@ def _render_pa_chat(pa: dict) -> None:
                                 reply = compose_fn(result, action, command) if compose_fn else str(result.get("message", result))
                             except Exception:
                                 reply = str(result.get("message", result))
+                        st.write("📝 Formatting response…")
+                        _skill_status.update(label=f"✅ {label} completed", state="complete", expanded=False)
                     except Exception as exc:
                         logger.exception("Single-skill shortcut error: %s", exc)
                         reply = f"❌ Something went wrong: {exc}"
+                        _skill_status.update(label="❌ Error", state="error", expanded=True)
 
                 # ── Auth error: show re-auth panel instead of the reply ────────
                 if _result_status == "auth_error":
@@ -722,28 +795,36 @@ def _render_pa_chat(pa: dict) -> None:
                 else:
                     st.markdown(reply)
                     st.session_state[mk("messages")].append({"role": "assistant", "content": reply})
+                _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
                 st.session_state[mk("processing")] = False
                 st.rerun()
 
             # ── Multi-skill workflow ──────────────────────────────────────────
             result_placeholder = st.empty()
             step_lines: list[str] = []
-            with st.status("⚡ Working on it…", expanded=True) as status_box:
+            with st.status("🤖 Orchestrating agents…", expanded=True) as status_box:
+                st.write("🗺️ Planning your workflow…")
                 try:
                     run_result = run_workflow(command)
-                    for sr in run_result.get("steps", []):
+                    _total_steps = len(run_result.get("steps", []))
+                    for _i, sr in enumerate(run_result.get("steps", []), 1):
                         step_text = _render_step_result(sr)
-                        st.markdown(step_text)
+                        st.markdown(f"**Step {_i}/{_total_steps}** — {step_text}")
                         step_lines.append(step_text)
+                    st.write("📝 Composing final answer…")
                     wf_status = run_result.get("status", "error")
-                    label_map = {"success": ("✅ Done", "complete"),
-                                 "partial": ("⚠️ Partially completed", "error")}
+                    _elapsed = run_result.get("elapsed", 0)
+                    _iters   = len(run_result.get("steps", []))
+                    label_map = {
+                        "success": (f"✅ Completed in {_elapsed:.1f}s · {_iters} step(s)", "complete"),
+                        "partial": (f"⚠️ Partially completed · {_elapsed:.1f}s", "error"),
+                    }
                     lbl, st_state = label_map.get(wf_status, ("❌ Something went wrong", "error"))
-                    status_box.update(label=lbl, state=st_state)
+                    status_box.update(label=lbl, state=st_state, expanded=False)
                 except Exception as exc:
                     logger.exception("Workflow execution error: %s", exc)
                     run_result = {"status": "error", "steps": [], "elapsed": 0, "plan": None, "summary": str(exc)}
-                    status_box.update(label="❌ Unexpected error", state="error")
+                    status_box.update(label="❌ Unexpected error", state="error", expanded=True)
                     st.error(str(exc))
 
             final_text = _render_workflow_output(run_result, command)
@@ -768,21 +849,8 @@ def _render_pa_chat(pa: dict) -> None:
             logger.debug("PA workflow memory record skipped: %s", _mem_err)
 
         st.session_state[mk("messages")].append({"role": "assistant", "content": final_text})
+        _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
         st.session_state[mk("processing")] = False
-        st.rerun()
-
-    # ── Chat input ────────────────────────────────────────────────────────────
-    user_input = st.chat_input(
-        f"Ask {pa_name}…",
-        key=f"chat_input_{pa_id}",
-        disabled=st.session_state[mk("processing")],
-    )
-    if user_input:
-        # Append to history immediately so it renders in the for-loop above
-        # on the next rerun (above the chat input), not below it.
-        st.session_state[mk("messages")].append({"role": "user", "content": user_input})
-        st.session_state[mk("command")] = user_input
-        st.session_state[mk("processing")] = True
         st.rerun()
 
 

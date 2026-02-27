@@ -136,19 +136,50 @@ div[data-baseweb="modal"] [data-testid="stAlert"][data-baseweb="notification"] {
 }
 
 /* ── Text inputs / textareas / number inputs ── */
+/* Target the BaseWeb wrapper div so the container itself is dark */
+[data-testid="stTextInput"] [data-baseweb="input"],
+[data-testid="stTextInput"] [data-baseweb="base-input"],
+[data-testid="stTextInput"] > div > div,
+[data-testid="stNumberInput"] [data-baseweb="input"],
+[data-testid="stNumberInput"] > div > div {
+    background: rgba(15,23,42,0.85) !important;
+    border: 1px solid rgba(233,30,140,0.28) !important;
+    border-radius: 8px !important;
+}
 [data-testid="stTextInput"] input,
 [data-testid="stTextArea"] textarea,
 [data-testid="stNumberInput"] input {
-    background: rgba(255,255,255,0.06) !important;
-    border: 1px solid rgba(233,30,140,0.28) !important;
+    background: transparent !important;
+    border: none !important;
     border-radius: 8px !important;
     color: #e0e0e0 !important;
+    -webkit-text-fill-color: #e0e0e0 !important;
+    caret-color: #e91e8c !important;
 }
 [data-testid="stTextInput"] input::placeholder,
-[data-testid="stTextArea"] textarea::placeholder { color: #666 !important; }
-[data-testid="stTextInput"] input:focus,
-[data-testid="stTextArea"] textarea:focus,
-[data-testid="stNumberInput"] input:focus {
+[data-testid="stTextArea"] textarea::placeholder {
+    color: #64748b !important;
+    -webkit-text-fill-color: #64748b !important;
+    opacity: 1 !important;
+}
+/* Textarea wrapper — same dark treatment */
+[data-testid="stTextArea"] [data-baseweb="textarea"],
+[data-testid="stTextArea"] > div > div {
+    background: rgba(15,23,42,0.85) !important;
+    border: 1px solid rgba(233,30,140,0.28) !important;
+    border-radius: 8px !important;
+}
+[data-testid="stTextArea"] textarea {
+    background: transparent !important;
+    border: none !important;
+    color: #e0e0e0 !important;
+    -webkit-text-fill-color: #e0e0e0 !important;
+}
+/* Focus — highlight the wrapper border, not the input itself */
+[data-testid="stTextInput"]:focus-within [data-baseweb="input"],
+[data-testid="stTextInput"]:focus-within [data-baseweb="base-input"],
+[data-testid="stTextArea"]:focus-within [data-baseweb="textarea"],
+[data-testid="stNumberInput"]:focus-within [data-baseweb="input"] {
     border-color: #e91e8c !important;
     box-shadow: 0 0 0 2px rgba(233,30,140,0.2) !important;
 }
@@ -625,10 +656,38 @@ def inject_agent_css(
         [data-testid="stChatInput"] [data-baseweb="base-input"] textarea {{
             background: transparent !important;
             color: #e0e0e0 !important;
+            -webkit-text-fill-color: #e0e0e0 !important;
             caret-color: {accent_hex} !important;
             border: none !important;
             box-shadow: none !important;
             font-size: 0.95rem !important;
+        }}
+        /* Disabled state — keep container visible, just soften it */
+        [data-testid="stChatInput"][disabled],
+        [data-testid="stChatInput"] [disabled],
+        [data-testid="stChatInput"].disabled,
+        [data-testid="stChatInput"] > div[data-disabled="true"],
+        [data-testid="stBottomBlockContainer"] [disabled] {{
+            opacity: 0.65 !important;
+            pointer-events: none !important;
+            visibility: visible !important;
+            display: flex !important;
+        }}
+        /* Always keep the bottom container AND chat input visible */
+        [data-testid="stBottomBlockContainer"],
+        [data-testid="stBottomBlockContainer"] > div,
+        [data-testid="stBottomBlockContainer"] > div > div,
+        [data-testid="stChatInput"],
+        [data-testid="stChatInput"] > div {{
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+        }}
+        /* Flex containers inside the chat input need display:flex */
+        [data-testid="stChatInput"] [data-baseweb="base-input"],
+        [data-testid="stChatInput"] [data-baseweb="base-input"] > div {{
+            display: flex !important;
+            visibility: visible !important;
         }}
         [data-testid="stChatInput"] textarea::placeholder,
         [data-testid="stChatInput"] input::placeholder,
