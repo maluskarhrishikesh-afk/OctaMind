@@ -294,21 +294,7 @@
         .use-pill:hover { border-color: var(--border); background: rgba(233,30,140,0.06); }
 
         /* ROADMAP */
-        #roadmap { background: rgba(255,255,255,0.01); }
-        .roadmap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; max-width: 1000px; margin: 0 auto; }
-        .phase-card { border: 1px solid var(--border-dim); border-radius: var(--radius); padding: 32px 28px; background: var(--card-bg); transition: all 0.3s; }
-        .phase-card.current { border-color: var(--border); background: rgba(233,30,140,0.06); }
-        .phase-card:hover { transform: translateY(-4px); border-color: var(--border); }
-        .phase-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-        .phase-number { width: 40px; height: 40px; border-radius: 10px; background: var(--pink-dim); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 800; color: var(--pink); font-family: 'JetBrains Mono', monospace; }
-        .phase-label { font-size: 0.95rem; font-weight: 700; color: #fff; }
-        .phase-status { font-size: 0.72rem; color: var(--muted); margin-top: 2px; }
-        .phase-items { list-style: none; }
-        .phase-items li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border-dim); font-size: 0.87rem; color: var(--muted); }
-        .phase-items li:last-child { border-bottom: none; }
-        .phase-items li.done { color: var(--text); }
-        .check-done { color: #68d391; font-size: 0.9rem; }
-        .check-todo { color: var(--muted); font-size: 0.9rem; opacity: 0.4; }
+        // ...existing code...
 
         /* QUICKSTART */
         #quickstart { background: linear-gradient(180deg, transparent, rgba(233,30,140,0.05), transparent); }
@@ -391,7 +377,7 @@
             <a href="#agents">Helpers</a>
             <a href="#remote">Anywhere</a>
             <a href="#how">How it works</a>
-            <a href="#roadmap">Roadmap</a>
+            // ...existing code...
             <a href="https://github.com/maluskarhrishikesh-afk/OctaMind" class="btn-nav">⭐ Star on GitHub</a>
         </div>
         <div class="hamburger" id="hamburger" onclick="toggleNav()">
@@ -1110,76 +1096,12 @@
                 <ul>
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind">GitHub Repository</a></li>
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/tree/main/documentation">Documentation</a></li>
-                    <li><a href="#roadmap">Roadmap</a></li>
+                    // ...existing code...
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/CONTRIBUTING.md">Contribute</a></li>
                 </ul>
             </div>
 
-            <div class="footer-links">
-                <h4>Setup Guides</h4>
-                <ul>
-                    <li><a href="#quickstart">Quick Start</a></li>
-                    <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/documentation/setup/EMAIL_SETUP.md">Gmail Setup</a></li>
-                    <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/documentation/setup/TELEGRAM_SETUP.md">Telegram Setup</a></li>
-                    <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/documentation/setup/WHATSAPP_SETUP.md">WhatsApp Setup</a></li>
-                </ul>
-            </div>
-
-            <div class="footer-links">
-                <h4>Explore</h4>
-                <ul>
-                    <li><a href="#what-can-it-do">What It Does</a></li>
-                    <li><a href="#stories">Real Stories</a></li>
-                    <li><a href="#remote">Use Anywhere</a></li>
-                    <li><a href="#agents">All Helpers</a></li>
-                </ul>
-            </div>
-        </div>
-
-        <div class="footer-bottom">
-            <span>&copy; 2026 Octa Bot &middot; MIT licensed &middot; Free forever</span>
-            <span>Made with <span class="heart">♥</span> and Python 🐍</span>
-            <a href="https://github.com/maluskarhrishikesh-afk/OctaMind">⭐ Star on GitHub</a>
-        </div>
-    </footer>
-
-    <script>
-        function toggleNav() {
-            document.getElementById('navLinks').classList.toggle('open');
-        }
-        document.addEventListener('click', function(e) {
-            var nav = document.getElementById('navLinks');
-            var btn = document.getElementById('hamburger');
-            if (nav.classList.contains('open') && !nav.contains(e.target) && !btn.contains(e.target)) {
-                nav.classList.remove('open');
-            }
-        });
-
-        var revealObserver = new IntersectionObserver(function(entries) {
-            entries.forEach(function(entry, i) {
-                if (entry.isIntersecting) {
-                    setTimeout(function() { entry.target.classList.add('visible'); }, i * 80);
-                    revealObserver.unobserve(entry.target);
-                }
-            });
-        }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
-        document.querySelectorAll('.reveal').forEach(function(el) { revealObserver.observe(el); });
-
-        window.addEventListener('scroll', function() {
-            document.getElementById('navbar').style.background = window.scrollY > 50
-                ? 'rgba(8,12,24,0.97)' : 'rgba(8,12,24,0.72)';
-        });
-
-        var sections = document.querySelectorAll('section[id]');
-        var navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
-        var sectionObserver = new IntersectionObserver(function(entries) {
-            entries.forEach(function(entry) {
-                if (entry.isIntersecting) {
-                    navLinks.forEach(function(a) {
-                        a.style.color = a.getAttribute('href') === '#' + entry.target.id ? '#fff' : '';
-                    });
-                }
-            });
+            // ...existing code...
         }, { threshold: 0.4 });
         sections.forEach(function(s) { sectionObserver.observe(s); });
     </script>
