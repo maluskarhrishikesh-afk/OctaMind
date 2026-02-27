@@ -377,7 +377,6 @@
             <a href="#agents">Helpers</a>
             <a href="#remote">Anywhere</a>
             <a href="#how">How it works</a>
-            // ...existing code...
             <a href="https://github.com/maluskarhrishikesh-afk/OctaMind" class="btn-nav">⭐ Star on GitHub</a>
         </div>
         <div class="hamburger" id="hamburger" onclick="toggleNav()">
@@ -1096,14 +1095,52 @@
                 <ul>
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind">GitHub Repository</a></li>
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/tree/main/documentation">Documentation</a></li>
-                    // ...existing code...
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/CONTRIBUTING.md">Contribute</a></li>
                 </ul>
             </div>
 
-            // ...existing code...
-        }, { threshold: 0.4 });
-        sections.forEach(function(s) { sectionObserver.observe(s); });
+    <script>
+        function toggleNav() {
+            const nav = document.getElementById('navLinks');
+            if (!nav) return;
+            nav.style.display = (getComputedStyle(nav).display === 'none') ? 'flex' : 'none';
+        }
+
+        (function() {
+            const nav = document.getElementById('navLinks');
+            const hamb = document.getElementById('hamburger');
+            function updateNav() {
+                if (!nav || !hamb) return;
+                if (window.innerWidth <= 800) {
+                    nav.style.display = 'none';
+                    hamb.style.display = 'flex';
+                } else {
+                    nav.style.display = 'flex';
+                    hamb.style.display = 'none';
+                }
+            }
+            window.addEventListener('resize', updateNav);
+            document.addEventListener('DOMContentLoaded', function() {
+                updateNav();
+                // Reveal animations
+                const reveals = document.querySelectorAll('.reveal');
+                const io = new IntersectionObserver((entries, observer) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            entry.target.style.opacity = 1;
+                            entry.target.style.transform = 'translateY(0)';
+                            entry.target.classList.add('visible');
+                            observer.unobserve(entry.target);
+                        }
+                    });
+                }, { threshold: 0.35 });
+                reveals.forEach(r => {
+                    r.style.opacity = 0;
+                    r.style.transform = 'translateY(32px)';
+                    io.observe(r);
+                });
+            });
+        })();
     </script>
 
 </body>
