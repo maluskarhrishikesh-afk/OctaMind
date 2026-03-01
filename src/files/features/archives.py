@@ -61,6 +61,7 @@ def zip_files(
         return {
             "status": "success",
             "archive": str(out),
+            "file_path": str(out),   # alias used by cross-agent {step_id.file_path} tokens
             "file_count": file_count,
             "original_size": _fmt_size(total_original),
             "compressed_size": _fmt_size(compressed_size),

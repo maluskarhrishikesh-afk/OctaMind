@@ -162,10 +162,20 @@ def run_skill_react(
                 logger.info("│    [%s] → calling tool=%s  kwargs=%s", skill_name, tool_name, str(kwargs)[:120])
                 result = callable_fn(**kwargs) if kwargs else callable_fn()
                 # Merge any file path into artifacts_out for cross-agent handoff
+                # Always stored under "file_path" so {step_id.file_path} tokens resolve
                 if isinstance(result, dict):
-                    for key in ("file_path", "local_path", "path"):
+                    for key in ("file_path", "local_path", "path", "archive"):
                         if result.get(key):
-                            artifacts_out[key] = result[key]
+                            artifacts_out["file_path"] = result[key]
+                            break
+                    # Also extract from search result lists (e.g. search_by_name returns
+                    # {"results": [{"path": "...", "name": ...}], "count": N})
+                    if not artifacts_out.get("file_path"):
+                        first_results = result.get("results", [])
+                        if isinstance(first_results, list) and first_results:
+                            fp = first_results[0].get("file_path") or first_results[0].get("path")
+                            if fp:
+                                artifacts_out["file_path"] = fp
                 obs = _format_observation(tool_name, result)
                 logger.info("│    [%s] ✔ tool=%s  obs=%.120s", skill_name, tool_name, obs)
             except Exception as exc:
@@ -198,9 +208,10 @@ def run_skill_react(
         status = "error"
 
     return {
-        "status": status,
-        "message": final_message,
-        "action": "react_response",
+        "status":    status,
+        "message":   final_message,
+        "action":    "react_response",
+        "llm_calls": _llm_calls,
     }
 
 
@@ -214,25 +225,55 @@ def _build_system_prompt(skill_context: str, tool_docs: str) -> str:
 You have access to the following tools:
 {tool_docs}
 
-Each turn you MUST output exactly ONE JSON object — no markdown code fences:
+Each turn output exactly ONE JSON object — NO markdown fences, NO extra text.
+
+To call a tool:
 {{
-  "thought": "<reasoning about what to do next>",
-  "action": "call_tool" | "final_answer",
+  "thought": "<your reasoning>",
+  "action": "call_tool",
   "params": {{
-    "tool": "<tool_name>",   // only when action = call_tool
-    "kwargs": {{}}           // keyword arguments for the tool
-    // OR when action = final_answer:
+    "tool": "<tool_name>",
+    "kwargs": {{"<param1>": "<value1>", "<param2>": "<value2>"}}
+  }}
+}}
+
+To give the final answer when the task is fully complete:
+{{
+  "thought": "<your reasoning>",
+  "action": "final_answer",
+  "params": {{
     "message": "<friendly markdown response to the user>"
+  }}
+}}
+
+Example — calling quick_add_event with the required 'text' argument:
+{{
+  "thought": "I will use quick_add_event to create the calendar event.",
+  "action": "call_tool",
+  "params": {{
+    "tool": "quick_add_event",
+    "kwargs": {{"text": "Gym Session today at 8 PM for 1 hour"}}
+  }}
+}}
+
+Example — calling create_event with explicit arguments:
+{{
+  "thought": "I will create the event with explicit ISO 8601 date/time.",
+  "action": "call_tool",
+  "params": {{
+    "tool": "create_event",
+    "kwargs": {{"title": "Team Meeting", "start": "2026-03-01T10:00:00+05:30", "end": "2026-03-01T11:00:00+05:30"}}
   }}
 }}
 
 Rules:
 - Always include "thought" — explain your reasoning before acting.
+- kwargs MUST include all required arguments with real values. NEVER output empty kwargs {{}}.
 - Use call_tool to gather information or perform operations.
-- Use final_answer ONLY when the task is fully complete or you have all needed info.
+- Use final_answer ONLY when the task is fully complete.
 - Write final_answer messages in friendly, markdown-formatted style (bold, bullets, emojis).
 - If a tool returns an error, decide whether to retry, try a different approach, or report the error.
-- Never hallucinate tool names or results.
+- IMPORTANT: Always output valid JSON. Use lowercase boolean values: true and false (NOT Python-style True or False).
 """
 
 
@@ -247,11 +288,15 @@ def _strip_fences(raw: str) -> str:
 
 
 def _parse_json(raw: str) -> dict:
-    """Parse JSON from raw string; tolerates minor wrapping."""
+    """Parse JSON from raw string; tolerates Python-style bools and minor wrapping."""
+    # Some models emit Python literals (True/False/None) instead of JSON (true/false/null)
+    normalized = re.sub(r'\bTrue\b', 'true', raw)
+    normalized = re.sub(r'\bFalse\b', 'false', normalized)
+    normalized = re.sub(r'\bNone\b', 'null', normalized)
     try:
-        return json.loads(raw)
+        return json.loads(normalized)
     except json.JSONDecodeError:
-        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        m = re.search(r'\{.*\}', normalized, re.DOTALL)
         if m:
             try:
                 return json.loads(m.group(0))

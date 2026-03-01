@@ -1,22 +1,27 @@
 """
-MasterOrchestrator — natural-language planning + sub-agent delegation.
+MasterOrchestrator — Hybrid Planner + Deterministic Execution.
 
-Architecture (scalable to N agents):
-    1. plan_nl_workflow(command)
-         → LLM sees only per-agent capability summaries (~10 tokens/agent),
-           not individual tool signatures.
-         → Produces NLWorkflowPlan: a list of {agent, natural-language instruction}.
+Primary execution path (new):
+    1. plan_dag_workflow(command)  [1 LLM call]
+         → LLM returns a Directed Acyclic Graph (JSON) with explicit
+           depends_on fields between steps.
+         → Topological sort determines a guaranteed-correct execution order.
+    2. execute_dag_workflow(plan)  [0 orchestration LLM calls]
+         → Steps dispatched in dependency order; {step_id.field} tokens
+           resolved deterministically from prior step outputs.
+         → Each sub-agent runs its own focused ReAct loop for tool execution.
 
-    2. run_workflow(command, agent_ids)
-         → For each NLWorkflowStep, calls the agent's own
-           execute_with_llm_orchestration(instruction).
-         → Each sub-agent runs its own ReAct loop with its own full tool list,
-           its own memory, and its own context window.
-         → The orchestrator only tracks: working_memory + collective_consciousness.
+Fallback path (used only when DAG planning fails):
+    react_workflow(command)  [1–12 LLM calls]
+         → Full multi-turn master orchestration loop as before.
+
+LLM call reduction:
+    Old master loop:  1–12 orchestration calls per workflow
+    New DAG planner:  1 orchestration call per workflow (60–90% reduction)
 
 Scaling:
     Adding a new agent = one line in agent_registry.py.
-    Orchestrator context stays constant regardless of agent count or tool count.
+    Orchestrator and planner stay unchanged regardless of agent count.
 """
 from __future__ import annotations
 
@@ -29,7 +34,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.agent.llm.llm_parser import get_llm_client
 from src.agent.workflows.workflow_context import WorkflowContext, NLWorkflowPlan, NLWorkflowStep
 from src.agent.workflows.agent_registry import get_capabilities_text, get_executor, registered_agents
-from src.agent.workflows.nl_step_runner import run_nl_step
 from src.agent.workflows import file_bridge as _file_bridge
 
 logger = logging.getLogger("workflows")
@@ -431,31 +435,70 @@ def _summarize_results(steps_results: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _dag_final_answer(steps_results: List[Dict[str, Any]]) -> str:
+    """
+    Build a friendly final-answer string from DAG execution results.
+
+    For successful single-step workflows the agent's own message is returned
+    directly.  For multi-step workflows a markdown summary is produced.
+    """
+    successes = [r for r in steps_results if r["status"] == "success"]
+    failures  = [r for r in steps_results if r["status"] == "error"]
+
+    # Single step — return the agent's reply verbatim
+    if len(steps_results) == 1 and successes:
+        msg = (successes[0].get("result") or {}).get("message", "")
+        if msg:
+            return msg
+
+    # Multi-step — compose a structured summary
+    lines: List[str] = []
+    if successes:
+        lines.append("**All steps completed successfully:**")
+        for r in successes:
+            label = r.get("tool") or r.get("instruction", "")[:60]
+            agent_msg = (r.get("result") or {}).get("message", "")
+            short_msg = f" — {agent_msg[:120]}" if agent_msg else ""
+            lines.append(f"✅ [{r['agent']}] {label}{short_msg}")
+    if failures:
+        lines.append("\n**The following steps failed:**")
+        for r in failures:
+            label = r.get("tool") or r.get("instruction", "")[:60]
+            lines.append(f"❌ [{r['agent']}] {label} — {r.get('error', 'unknown error')}")
+
+    return "\n".join(lines) if lines else "✅ Workflow complete."
+
+
 def run_workflow(
     command: str,
     agent_ids: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
-    Plan and execute a multi-agent workflow using natural-language sub-agent delegation.
+    Plan and execute a multi-agent workflow.
 
-    The orchestrator:
-      1. Plans using compact agent capability descriptions (~10 tokens/agent).
-      2. Calls each sub-agent's execute_with_llm_orchestration() with a natural-
-         language instruction. Each sub-agent runs its own ReAct loop.
-      3. Resolves {output_key.field} cross-step references (e.g. file paths).
-      4. Returns the same result dict format as before for UI compatibility.
+    Primary path (DAG planner — 1 orchestration LLM call):
+      1. plan_dag_workflow(command) → structured DAG with depends_on
+      2. Topological sort (algorithmic, 0 LLM calls)
+      3. execute_dag_workflow() — deterministic dispatch to sub-agents
+         (each sub-agent still uses its own focused ReAct loop)
+
+    Fallback path (when DAG planning fails):
+      react_workflow() — full multi-turn master ReAct loop
 
     Args:
-        command:    The natural language command from the user.
-        agent_ids:  Optional mapping of agent type → agent_id string for memory.
+        command:    Natural language command from the user.
+        agent_ids:  Optional mapping of agent type → agent_id for memory.
 
     Returns:
-        {"status", "summary", "steps", "elapsed", "plan"}
+        {"status", "summary", "steps", "elapsed", "plan", "final_answer",
+         "execution_mode"}
     """
+    from src.agent.workflows.dag_planner import plan_dag_workflow, execute_dag_workflow
+
     ctx = WorkflowContext(command=command)
     agent_ids = agent_ids or {}
 
-    # Pre-populate authenticated user email
+    # Resolve authenticated user email once — used by both paths
     user_email = _get_user_email()
     if user_email:
         ctx.set("__user_email__", user_email)
@@ -463,14 +506,31 @@ def run_workflow(
     else:
         logger.warning("Could not resolve user email — 'email me' commands may fail")
 
-    # ── ReAct loop ────────────────────────────────────────────────────────
-    steps_results, final_answer_text = react_workflow(command, agent_ids, ctx)
+    # ── Primary path: DAG planner (1 LLM call) ────────────────────────────
+    plan = plan_dag_workflow(command)
+    if plan is not None:
+        logger.info(
+            "run_workflow: DAG planner succeeded (%d steps)  mode=dag_planner",
+            len(plan.steps),
+        )
+        steps_results    = execute_dag_workflow(plan, agent_ids, user_email)
+        final_answer_text = _dag_final_answer(steps_results)
+        execution_mode   = "dag_planner"
 
-    # Cleanup
+    else:
+        # ── Fallback: multi-turn ReAct loop ───────────────────────────────
+        logger.warning(
+            "run_workflow: DAG planning failed — falling back to ReAct loop"
+        )
+        steps_results, final_answer_text = react_workflow(command, agent_ids, ctx)
+        execution_mode = "react_fallback"
+        plan = None
+
+    # Cleanup temp files registered during execution
     _file_bridge.cleanup_all()
     ctx.cleanup()
 
-    # Build response
+    # Build unified response
     success_count = sum(1 for r in steps_results if r["status"] == "success")
     total         = len(steps_results)
     failed        = any(r["status"] == "error" for r in steps_results)
@@ -478,16 +538,27 @@ def run_workflow(
     summary       = _summarize_results(steps_results) if steps_results else final_answer_text
     elapsed       = ctx.elapsed_seconds()
 
+    # ── Total LLM calls summary ───────────────────────────────────────────
+    sub_llm_calls  = sum(r.get("llm_calls", 0) for r in steps_results)
+    router_calls   = 1  # detect_agents_needed() always makes 1 call for routed commands
+    planner_calls  = 1 if execution_mode == "dag_planner" else 0
+    total_llm_calls = router_calls + planner_calls + sub_llm_calls
     logger.info(
-        "Workflow complete: status=%-8s  steps=%d/%d-success  elapsed=%.1fs",
-        status, success_count, total, elapsed,
+        "Workflow complete: mode=%-14s  status=%-8s  steps=%d/%d-success  elapsed=%.1fs",
+        execution_mode, status, success_count, total, elapsed,
+    )
+    logger.info(
+        "Total LLM calls: %d  (router=%d  planner=%d  sub_agents=%d)",
+        total_llm_calls, router_calls, planner_calls, sub_llm_calls,
     )
 
     return {
-        "status": status,
-        "summary": summary,
-        "steps": steps_results,
-        "elapsed": elapsed,
-        "plan": None,          # ReAct is dynamic — no upfront plan object
-        "final_answer": final_answer_text,  # LLM-composed; rendered directly by app
+        "status":           status,
+        "summary":          summary,
+        "steps":            steps_results,
+        "elapsed":          elapsed,
+        "plan":             plan,
+        "final_answer":     final_answer_text,
+        "execution_mode":   execution_mode,
+        "total_llm_calls":  total_llm_calls,
     }

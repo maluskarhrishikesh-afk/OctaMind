@@ -73,7 +73,7 @@ class HubRequest:
     message: str
     session_id: str                  # unique per chat / user (e.g. "telegram_123456")
     source: str = "unknown"          # "telegram" | "whatsapp" | "api" | …
-    agent_id: str = "__multi_agent__"
+    agent_id: str = "_collective_memory_"
     agent_name: str = "Personal Assistant"
 
 
@@ -198,7 +198,7 @@ class HubProcessor:
     """
 
     def process(self, message: str, session_id: str, source: str = "unknown",
-                agent_id: str = "__multi_agent__",
+                agent_id: str = "_collective_memory_",
                 agent_name: str = "Personal Assistant") -> HubResponse:
         t0 = time.perf_counter()
         req = HubRequest(

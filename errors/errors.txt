@@ -1,0 +1,32 @@
+---------------------------------------------------------------------------
+
+1) Memory Architecture ->
+
+I think we are capturing the memory for "Dashboard Chat" and "Live Channels" differently.
+Actually it should be the same -> 
+a) The user can create a "personal assistant" and that personal asistant will have a "Dashboard Chat" and "Live Channel".
+b) He can then create another "personal assistant" that can also have its own "Dashboard Chat" and "Live Channel".
+
+So, every personal assistant will have its own memory coming from "Dashboard Chat" and "Live Channel".
+
+And collective consciousness = memory of all the personal assistants.
+I think we have named this as _multi_agent_ - maybe we can rename it to something better like _collective_memory_
+
+Have you understood this requirement, feel free to clarify if not understood.
+
+Also update the documentation after making this change.
+
+---------------------------------------------------------------------------
+
+2) Also I am not exactly sure if the consolidation engine is working correctly or not, this got captured ->
+{
+  "last_consolidation": "2026-03-01T14:31:30.046858",
+  "last_consciousness_update": null
+}
+
+---------------------------------------------------------------------------
+
+3) I have kept an image in docs folder named "octabot_in_action_01.png", can we make you of that somewhere on the website. USe your intuition to place it at the right spot so at to make it catchy for the user.
+
+---------------------------------------------------------------------------
+

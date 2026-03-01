@@ -72,11 +72,11 @@ class MemoryConsolidator:
         if interaction_count >= 20:
             return True
 
-        # Every 24 hours
+        # Every 8 hours (changed from 24 h — more responsive memory updates)
         if self.last_consolidation:
             hours_since = (datetime.now() -
                            self.last_consolidation).total_seconds() / 3600
-            if hours_since >= 24:
+            if hours_since >= 8:
                 return True
 
         return False
@@ -168,11 +168,16 @@ class MemoryConsolidator:
         # Step 4: Apply 90-day decay
         self._apply_decay_mechanism()
 
-        # Step 5: Update consciousness (every 2-4 weeks)
-        if self._should_update_consciousness():
+        # Step 5 + 6: Update consciousness & adapt personality (same cadence: ~2 weeks)
+        # Evaluate the gate ONCE — _update_consciousness_layer() advances the
+        # timestamp inside, so a second call to should_update_consciousness()
+        # would incorrectly return False for the personality step.
+        _run_consciousness_update = self._should_update_consciousness()
+        if _run_consciousness_update:
             self._update_consciousness_layer()
+            self._update_user_personality_observations()
 
-        # Step 6 (multi-agent only): Synthesise collective consciousness
+        # Step 7 (multi-agent only): Synthesise collective consciousness
         from src.agent.memory.agent_memory import MULTI_AGENT_ID
         if self.memory.agent_id == MULTI_AGENT_ID:
             self._update_collective_consciousness()
@@ -667,9 +672,11 @@ class MemoryConsolidator:
             True if update is needed
         """
         if not self.last_consciousness_update:
-            # First time - update if we have sufficient data
+            # First time — update if we have at least a handful of interactions.
+            # Threshold is intentionally low (5) so that even a freshly set-up
+            # system generates a consciousness file after the very first session.
             interactions = self.memory.get_recent_interactions(count=50)
-            return len(interactions) >= 30
+            return len(interactions) >= 5
 
         # Check if 2 weeks have passed
         days_since = (datetime.now() - self.last_consciousness_update).days
@@ -778,13 +785,150 @@ class MemoryConsolidator:
         self._save_state()
         logger.info("Consciousness layer updated (all memory layers used)")
 
+    # ============ User Personality Observations → Personality.md ============
+
+    def _update_user_personality_observations(self) -> None:
+        """
+        Observe how this user communicates and adapt the agent's personality
+        to mirror it. Rewrites the "Observed User Personality" and
+        "Adapted Communication Style" sections in personality.md so the
+        agent's tone gradually mirrors the user's preferred style.
+
+        Design intent:
+          - personality.md is the agent's stable *identity* (rarely changed).
+          - The two auto-managed sections added here capture user-calibrated
+            behavioural adaptations that evolve over time.
+          - Both sections are REWRITTEN each cycle — the file doesn't grow.
+
+        Observations extracted (all from local interaction data, 0 LLM calls):
+          • Formality  → imperative / polite / casual mix ratio
+          • Verbosity  → average command word count
+          • Question style → inquisitive vs directive
+          • Emoji usage → whether user uses emoji
+          • Time-of-day → when the user is most active
+        """
+        interactions = self.memory.get_recent_interactions(count=100)
+        if len(interactions) < 5:
+            logger.debug("Not enough interactions to build user personality observations.")
+            return
+
+        now_str = datetime.now().strftime("%Y-%m-%d")
+
+        # ── Communication formality ───────────────────────────────────────────
+        polite_count, direct_count, casual_count = 0, 0, 0
+        word_counts: list[int] = []
+        emoji_count = 0
+        question_count = 0
+
+        for i in interactions:
+            cmd = str(i.get("command", "")).strip()
+            if not cmd:
+                continue
+            words = cmd.split()
+            word_counts.append(len(words))
+
+            cmd_lower = cmd.lower()
+            if any(w in cmd_lower for w in ("please", "could you", "can you", "would you", "kindly")):
+                polite_count += 1
+            elif any(w in cmd_lower for w in ("hey", "yo", "hmm", "lol", "haha", "ok ", "ok,", "nah", "yep")):
+                casual_count += 1
+            else:
+                direct_count += 1
+
+            if "?" in cmd:
+                question_count += 1
+            # Rough emoji heuristic: non-ASCII chars in common emoji range
+            if any(ord(c) > 127 for c in cmd):
+                emoji_count += 1
+
+        total = len(interactions)
+        avg_words = sum(word_counts) / max(len(word_counts), 1)
+
+        # Determine dominant style
+        if polite_count >= max(direct_count, casual_count):
+            style_label = "polite and courteous"
+            style_guidance = ("Use a warm, respectful tone. Include 'please' and appreciation. "
+                              "Avoid being blunt or terse.")
+        elif casual_count >= direct_count:
+            style_label = "casual and conversational"
+            style_guidance = ("Use a relaxed, friendly tone. Short sentences are fine. "
+                              "Match the user's informal energy — emojis are welcome if the user uses them.")
+        else:
+            style_label = "direct and task-oriented"
+            style_guidance = ("Be concise and to-the-point. Lead with the answer or result. "
+                              "Avoid filler phrases. The user values efficiency.")
+
+        verbosity = (
+            "brief (avg <8 words/message)"  if avg_words < 8  else
+            "medium-length"                 if avg_words < 20 else
+            "detailed and descriptive"
+        )
+
+        question_ratio = question_count / max(total, 1)
+        interaction_type = (
+            "asks many questions — be thorough in answers"
+            if question_ratio > 0.5
+            else "gives directives — execute clearly without over-explaining"
+        )
+
+        uses_emoji = emoji_count / max(total, 1) > 0.2
+
+        # ── Time-of-day preference ────────────────────────────────────────────
+        hour_buckets: dict[str, int] = {"morning": 0, "afternoon": 0, "evening": 0, "night": 0}
+        for i in interactions:
+            ts = i.get("timestamp", "")
+            try:
+                h = datetime.fromisoformat(ts).hour
+                if 5 <= h < 12:   hour_buckets["morning"]   += 1
+                elif 12 <= h < 17: hour_buckets["afternoon"] += 1
+                elif 17 <= h < 21: hour_buckets["evening"]   += 1
+                else:              hour_buckets["night"]      += 1
+            except Exception:
+                pass
+        peak_time = max(hour_buckets, key=hour_buckets.get)  # type: ignore[arg-type]
+
+        # ── Write "Observed User Personality" section ─────────────────────────
+        obs_section = (
+            f"**Last updated:** {now_str}  \n"
+            f"**Interactions analysed:** {total}  \n\n"
+            f"| Attribute | Observed value |\n"
+            f"|---|---|\n"
+            f"| Communication style | {style_label} |\n"
+            f"| Message verbosity | {verbosity} |\n"
+            f"| Interaction type | {interaction_type} |\n"
+            f"| Uses emoji | {'Yes' if uses_emoji else 'No'} |\n"
+            f"| Most active time | {peak_time} |\n"
+        )
+        self.memory.update_personality_section("Observed User Personality", obs_section)
+
+        # ── Write "Adapted Communication Style" section ───────────────────────
+        # This section is read by the LLM on every request via get_full_context_for_llm.
+        # It directly shapes how the agent speaks to this user.
+        adapted_section = (
+            f"**Auto-calibrated from {total} interactions — last updated {now_str}**\n\n"
+            f"Based on how this user communicates, adapt your style as follows:\n\n"
+            f"- **Tone:** {style_guidance}\n"
+            f"- **Length:** Messages tend to be {verbosity}; match that depth.\n"
+            f"- **Approach:** User {interaction_type}.\n"
+            f"- **Emoji use:** {'Feel free to use relevant emojis sparingly.' if uses_emoji else 'Avoid emoji unless the user uses them first.'}\n"
+            f"- **Best time:** User is most active in the **{peak_time}**; greet accordingly when relevant.\n\n"
+            f"> This section is automatically rewritten every consolidation cycle. "
+            f"Do not treat it as permanent — it reflects recent patterns only.\n"
+        )
+        self.memory.update_personality_section("Adapted Communication Style", adapted_section)
+
+        logger.info(
+            "User personality observations updated: style=%s, verbosity=%s, interactions=%d",
+            style_label, verbosity, total,
+        )
+
     def _update_collective_consciousness(self) -> None:
         """
         Synthesise collective_consciousness.md for the multi-agent hub.
 
         Reads consciousness.md from every registered agent and combines
         them into a unified cross-agent mental model of the user.
-        Only runs for the __multi_agent__ agent.
+        Only runs for the _collective_memory_ agent.
         """
         from src.agent.memory.agent_memory import get_agent_memory
 

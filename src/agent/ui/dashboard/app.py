@@ -29,7 +29,7 @@ _APP_INITIALIZED: bool = False
 def _startup() -> None:
     """
     Bootstrap tasks that must run exactly once when the app process starts:
-      1. Ensure __multi_agent__ memory files exist (creates them if absent).
+      1. Ensure _collective_memory_ memory files exist (creates them if absent).
       2. Start the global consolidation background thread.
     """
     global _APP_INITIALIZED

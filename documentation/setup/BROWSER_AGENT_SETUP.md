@@ -1,4 +1,4 @@
-﻿# Browser Agent — Setup Guide
+# Browser Agent � Setup Guide
 
 This guide explains how to set up, configure, and test the Browser Agent in Octa Bot.
 
@@ -30,7 +30,7 @@ The Browser Agent gives any Octa Bot Personal Assistant the ability to interact 
 The Browser Agent works with **zero extra dependencies** using Python's built-in `urllib.request`. When `beautifulsoup4` and `requests` are installed (recommended), parsing is significantly richer.
 
 ```bash
-# Recommended — already installed by setup process
+# Recommended � already installed by setup process
 pip install beautifulsoup4 requests
 ```
 
@@ -75,9 +75,9 @@ print(r['status'], '-', r['count'], 'results')
 
 1. Open the Octa Bot dashboard (`python start.py` or `streamlit run src/agent/ui/dashboard/app.py`)
 2. Click **"+ Add Agent / Skill"**
-3. In the skill catalogue, locate **🌐 Web Browser**
+3. In the skill catalogue, locate **?? Web Browser**
 4. Toggle it on for an existing Personal Assistant, or create a new one with it pre-selected
-5. Save — the PA now routes web-related queries to the Browser Agent
+5. Save � the PA now routes web-related queries to the Browser Agent
 
 ---
 
@@ -102,20 +102,20 @@ Once added to a PA, the Browser Agent understands natural language:
 
 ```
 User query
-    │
-    ▼
+    �
+    ?
 browser_agent/orchestrator.py
     execute_with_llm_orchestration(user_query, agent_id, artifacts_out)
-    │
-    ├─ Step 1: LLM tool selector (temperature=0.1, max_tokens=400)
-    │          → chooses one of 10 tools + params
-    │
-    ├─ Step 2: _dispatch_tool(tool, params)
-    │          → calls src/browser/browser_service.py
-    │          → uses urllib.request (stdlib) + optional bs4
-    │
-    └─ Step 3: LLM response composer (temperature=0.4, max_tokens=1500)
-               → returns human-readable message
+    �
+    +- Step 1: LLM tool selector (temperature=0.1, max_tokens=400)
+    �          ? chooses one of 10 tools + params
+    �
+    +- Step 2: _dispatch_tool(tool, params)
+    �          ? calls src/browser/browser_service.py
+    �          ? uses urllib.request (stdlib) + optional bs4
+    �
+    +- Step 3: LLM response composer (temperature=0.4, max_tokens=1500)
+               ? returns human-readable message
 ```
 
 **Service layer:** `src/browser/browser_service.py`  
@@ -147,11 +147,11 @@ python -m pytest tests/ -k "browser" -v
 
 | Limitation | Notes |
 |-----------|-------|
-| JavaScript-rendered pages | Pages requiring JS execution (SPAs) will return sparse content — the agent uses HTTP-only, not a real browser |
+| JavaScript-rendered pages | Pages requiring JS execution (SPAs) will return sparse content � the agent uses HTTP-only, not a real browser |
 | Rate limiting / CAPTCHAs | Some sites block automated requests; the agent will return an HTTP error with an explanation |
 | Login-required pages | No session/cookie/login support; public pages only |
 | Very large pages | Content is truncated at `max_chars` (default 3000 for `browse_url`) |
-| File download paths | `download_file_from_url` requires a valid local path — create directories beforehand or specify an existing folder |
+| File download paths | `download_file_from_url` requires a valid local path � create directories beforehand or specify an existing folder |
 
 ---
 
@@ -166,7 +166,7 @@ pip install beautifulsoup4
 Some sites block automated user agents. The Browser Agent already sends a realistic browser User-Agent string, but some sites require additional headers or JS execution. Try a different URL or use `search_web` to find a mirror.
 
 **Connection timeout:**
-Default timeout is 15 seconds. For slow sites this may not be enough — the error message will say "timed out".
+Default timeout is 15 seconds. For slow sites this may not be enough � the error message will say "timed out".
 
 **No search results:**
 DuckDuckGo HTML search is used. If DuckDuckGo is unavailable in your region, use `browse_url` directly with a known URL instead.
@@ -177,7 +177,7 @@ DuckDuckGo HTML search is used. If DuckDuckGo is unavailable in your region, use
 
 | Package | Version | Required | Purpose |
 |---------|---------|----------|---------|
-| `urllib.request` | stdlib | ✅ always | HTTP fetching |
-| `beautifulsoup4` | ≥4.12 | ⚡ recommended | Rich HTML parsing |
-| `requests` | ≥2.31 | ⚡ recommended | Richer HTTP client |
-| Playwright / Selenium | — | ❌ not used | Full browser (not needed) |
+| `urllib.request` | stdlib | ? always | HTTP fetching |
+| `beautifulsoup4` | =4.12 | ? recommended | Rich HTML parsing |
+| `requests` | =2.31 | ? recommended | Richer HTTP client |
+| Playwright / Selenium | � | ? not used | Full browser (not needed) |

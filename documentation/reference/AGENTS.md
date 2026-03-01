@@ -1,4 +1,4 @@
-ï»¿# Octa Bot â€” Agents Reference
+# Octa Bot — Agents Reference
 
 For full parameter details on every tool, see [TOOL_REFERENCE.md](TOOL_REFERENCE.md).  
 For implementation status and known limitations, see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
@@ -16,8 +16,8 @@ For implementation status and known limitations, see [IMPLEMENTATION_STATUS.md](
 
 | Category | Example commands |
 |----------|----------------|
-| **Read** | "List my emails from today" Â· "Show unread emails" Â· "Search for emails from Alice" |
-| **Count** | "How many emails did I get today?" Â· "How many unread emails?" |
+| **Read** | "List my emails from today" · "Show unread emails" · "Search for emails from Alice" |
+| **Count** | "How many emails did I get today?" · "How many unread emails?" |
 | **Send** | "Send an email to bob@example.com saying the meeting is at 3pm" |
 | **Send with attachment** | "Email the Q3 report to alice@example.com" (after downloading from Drive) |
 | **Draft** | "Create a draft to the team about the project update" |
@@ -54,20 +54,20 @@ export_contacts()
 **Script:** `src/agent/ui/drive_agent_ui.py`  
 **Backend:** Drive API via `src/drive/`  
 **LLM loop:** ReAct (up to 6 iterations, `max_tokens=3000`)  
-**Setup Guide:** [EMAIL_SETUP.md â€” Drive section](EMAIL_SETUP.md#also-setting-up-google-drive)
+**Setup Guide:** [EMAIL_SETUP.md — Drive section](EMAIL_SETUP.md#also-setting-up-google-drive)
 
 ### What It Can Do
 
 | Category | Example commands |
 |----------|----------------|
-| **List** | "List my recent files" Â· "List files in the Projects folder" |
-| **Search** | "Find the Q3 report" Â· "Search for spreadsheets modified this week" |
+| **List** | "List my recent files" · "List files in the Projects folder" |
+| **Search** | "Find the Q3 report" · "Search for spreadsheets modified this week" |
 | **Upload** | "Upload report.pdf to my Drive" |
 | **Download** | "Download the budget spreadsheet" |
-| **Organise** | "Create a folder called Archive" Â· "Move invoice.pdf to Finance folder" |
+| **Organise** | "Create a folder called Archive" · "Move invoice.pdf to Finance folder" |
 | **Share** | "Share the roadmap doc with alice@example.com as viewer" |
-| **Storage** | "How much storage am I using?" Â· "Show me my largest files" |
-| **Analyse** | "Find duplicate files" Â· "Summarise the Q3 presentation" |
+| **Storage** | "How much storage am I using?" · "Show me my largest files" |
+| **Analyse** | "Find duplicate files" · "Summarise the Q3 presentation" |
 
 ### Tools Available
 
@@ -104,16 +104,16 @@ generate_drive_report()
 
 | Category | Example commands |
 |----------|----------------|
-| **Send** | "Send hi to 919876543210" Â· "Message Alice saying I'll be late" |
-| **Read** | "Show unread messages" Â· "Show recent messages" |
+| **Send** | "Send hi to 919876543210" · "Message Alice saying I'll be late" |
+| **Read** | "Show unread messages" · "Show recent messages" |
 | **Reply** | "Reply to message wamid.xxx saying thanks" |
-| **Search** | "Search for invoice" Â· "Messages from last week" |
-| **Contacts** | "List my contacts" Â· "Who messages me most?" |
-| **Groups** | "Show my groups" Â· "Messages in group <id>" |
-| **AI** | "Summarize chat with 919876543210" Â· "Draft a message about project update" |
+| **Search** | "Search for invoice" · "Messages from last week" |
+| **Contacts** | "List my contacts" · "Who messages me most?" |
+| **Groups** | "Show my groups" · "Messages in group <id>" |
+| **AI** | "Summarize chat with 919876543210" · "Draft a message about project update" |
 | **Translate** | "Translate message wamid.xxx to Hindi" |
-| **Schedule** | "Schedule message for tomorrow 9am" Â· "Show scheduled messages" |
-| **Analytics** | "WhatsApp stats 30 days" Â· "Who messages me most?" |
+| **Schedule** | "Schedule message for tomorrow 9am" · "Show scheduled messages" |
+| **Analytics** | "WhatsApp stats 30 days" · "Who messages me most?" |
 
 ### Tools Available (36 total)
 
@@ -193,18 +193,18 @@ share_drive_file(to, file_id, message)
 
 | Category | Example commands |
 |----------|----------------|
-| **Send** | "Send hi to chat 123456" Â· "Message -100987654 saying the meeting is moved" |
-| **Read** | "Show unread Telegram messages" Â· "Show recent messages" |
+| **Send** | "Send hi to chat 123456" · "Message -100987654 saying the meeting is moved" |
+| **Read** | "Show unread Telegram messages" · "Show recent messages" |
 | **Reply** | "Reply to Telegram message 1001:5 saying thanks" |
-| **Chats** | "List my Telegram chats" Â· "Get info about chat 123456" |
-| **Media** | "Send photo to 123456" Â· "Show media messages" |
-| **Search** | "Search Telegram for invoice" Â· "Messages from last week" |
-| **Polls** | "Create a poll in chat 123456 about best day" Â· "Stop poll message 10" |
-| **Schedule** | "Schedule Telegram message for tomorrow 9am" Â· "List scheduled messages" |
-| **AI** | "Summarize Telegram chat 123456" Â· "Draft a Telegram message about project update" |
+| **Chats** | "List my Telegram chats" · "Get info about chat 123456" |
+| **Media** | "Send photo to 123456" · "Show media messages" |
+| **Search** | "Search Telegram for invoice" · "Messages from last week" |
+| **Polls** | "Create a poll in chat 123456 about best day" · "Stop poll message 10" |
+| **Schedule** | "Schedule Telegram message for tomorrow 9am" · "List scheduled messages" |
+| **AI** | "Summarize Telegram chat 123456" · "Draft a Telegram message about project update" |
 | **Translate** | "Translate Telegram message 1001:3 to Hindi" |
-| **Sentiment** | "Analyse sentiment of chat 123456" Â· "Find urgent Telegram messages" |
-| **Cross-agent** | "Forward Telegram message 1001:5 to bob@example.com" Â· "Share Drive file abc123 to chat 456" |
+| **Sentiment** | "Analyse sentiment of chat 123456" · "Find urgent Telegram messages" |
+| **Cross-agent** | "Forward Telegram message 1001:5 to bob@example.com" · "Share Drive file abc123 to chat 456" |
 
 ### Tools Available (38 total)
 
@@ -277,7 +277,7 @@ share_drive_file(chat_id, drive_file_id, caption)
 ## Files Agent
 
 **Script:** `src/agent/ui/files_agent_ui.py`  
-**Backend:** Python stdlib (`pathlib`, `shutil`, `zipfile`, `hashlib`, `os`) â€” no credentials required  
+**Backend:** Python stdlib (`pathlib`, `shutil`, `zipfile`, `hashlib`, `os`) — no credentials required  
 **LLM loop:** ReAct (same pattern as Email/Drive/WhatsApp agents)  
 **Setup guide:** [FILES_SETUP.md](FILES_SETUP.md)
 
@@ -285,15 +285,15 @@ share_drive_file(chat_id, drive_file_id, caption)
 
 | Category | Example commands |
 |----------|----------------|
-| **Files** | "List my Downloads folder" Â· "Copy report.pdf to D:/Backup" Â· "Rename old.txt to new.txt" |
-| **Search** | "Find all PDFs in D:/Documents" Â· "Files modified last 7 days" Â· "Find large files on C:" |
-| **Duplicates** | "Find duplicate files in D:/Photos" Â· "Find empty folders in C:/Users/me" |
-| **Archives** | "Zip my Documents folder" Â· "Unzip archive.zip to D:/Extracted" Â· "List contents of backup.zip" |
-| **Organise** | "Organise D:/Downloads by file type" Â· "Organise D:/Photos by date" Â· "Bulk rename files" |
-| **Disk** | "Show all drives" Â· "Disk usage on C:" Â· "How big is my Documents folder?" |
-| **Read** | "Read notes.txt" Â· "Preview data.csv" Â· "Tail app.log last 50 lines" |
-| **AI** | "Summarize D:/Finance/budget.txt" Â· "Analyse my Downloads" Â· "Suggest how to organise D:/Desktop" |
-| **Cross-agent** | "Email report.pdf to alice@example.com" Â· "Upload D:/report.pdf to Google Drive" |
+| **Files** | "List my Downloads folder" · "Copy report.pdf to D:/Backup" · "Rename old.txt to new.txt" |
+| **Search** | "Find all PDFs in D:/Documents" · "Files modified last 7 days" · "Find large files on C:" |
+| **Duplicates** | "Find duplicate files in D:/Photos" · "Find empty folders in C:/Users/me" |
+| **Archives** | "Zip my Documents folder" · "Unzip archive.zip to D:/Extracted" · "List contents of backup.zip" |
+| **Organise** | "Organise D:/Downloads by file type" · "Organise D:/Photos by date" · "Bulk rename files" |
+| **Disk** | "Show all drives" · "Disk usage on C:" · "How big is my Documents folder?" |
+| **Read** | "Read notes.txt" · "Preview data.csv" · "Tail app.log last 50 lines" |
+| **AI** | "Summarize D:/Finance/budget.txt" · "Analyse my Downloads" · "Suggest how to organise D:/Desktop" |
+| **Cross-agent** | "Email report.pdf to alice@example.com" · "Upload D:/report.pdf to Google Drive" |
 
 ### Tools Available (48 total)
 
@@ -365,7 +365,7 @@ send_file_via_whatsapp(file_path, to)
 
 ### Architecture Notes
 
-- **No credentials required** for core 43 tools â€” works on first launch
+- **No credentials required** for core 43 tools — works on first launch
 - **Cross-agent tools** (5) gracefully handle `ImportError` if Gmail/Drive/WhatsApp not configured
 - **Safety:** `_is_safe_path()` blocks operations on `C:/Windows`, `C:/System32`, `C:/Program Files`, and similar Linux paths
 - **Destructive operations** (delete, bulk remove, deduplicate) default to `dry_run=True`
@@ -385,19 +385,19 @@ send_file_via_whatsapp(file_path, to)
 
 | Category | Example commands |
 |----------|----------------|
-| **View today/tomorrow** | "What's on my calendar today?" Â· "Show me tomorrow's events" |
-| **List & search** | "List my next 10 events" Â· "Search my calendar for team meeting" |
-| **Date-specific** | "What do I have on Friday?" Â· "Events for 2025-07-15" |
+| **View today/tomorrow** | "What's on my calendar today?" · "Show me tomorrow's events" |
+| **List & search** | "List my next 10 events" · "Search my calendar for team meeting" |
+| **Date-specific** | "What do I have on Friday?" · "Events for 2025-07-15" |
 | **Create** | "Create a meeting called Project Review on Friday at 3pm for 1 hour" |
 | **Quick add** | "Add lunch with Sarah tomorrow at noon" (natural-language parse) |
-| **Update** | "Move the standup to 10am" Â· "Change the title to Sprint Planning" |
+| **Update** | "Move the standup to 10am" · "Change the title to Sprint Planning" |
 | **Delete** | "Delete the Project Review meeting" |
 | **Recurring** | "Create a weekly standup every Monday at 9am for the next 4 weeks" |
-| **Agenda** | "Show my daily agenda for Monday" Â· "Show this week's calendar" |
+| **Agenda** | "Show my daily agenda for Monday" · "Show this week's calendar" |
 | **Free slots** | "Find a 2-hour free slot this week" |
 | **Conflicts** | "Do I have any scheduling conflicts this week?" |
 | **Reminders** | "Add a 30-minute reminder to my afternoon meeting" |
-| **RSVP** | "Accept the Q3 Planning Session invite" Â· "Decline the Design Review" |
+| **RSVP** | "Accept the Q3 Planning Session invite" · "Decline the Design Review" |
 | **Calendars** | "List all my calendars" |
 
 ### Tools Available (19 total)
@@ -427,12 +427,12 @@ decline_invite(event_id, calendar_id)
 
 ### Architecture Notes
 
-- **Reuses `config/credentials.json`** â€” same Google Cloud project as Gmail and Drive; only one Cloud project needed
-- **Token:** `config/calendar_token.json` â€” generated on first auth, silently refreshed thereafter
+- **Reuses `config/credentials.json`** — same Google Cloud project as Gmail and Drive; only one Cloud project needed
+- **Token:** `config/calendar_token.json` — generated on first auth, silently refreshed thereafter
 - **Skill (stateless):** Calendar has no memory of its own; all context lives in the Personal Assistant that calls it
 - **Auth preflight:** If `config/calendar_token.json` is missing or invalid, the orchestrator returns a structured `auth_error` that the PA surfaces as a re-authorization prompt
 - **`quick_add_event`:** Uses Google's server-side natural-language parser (same as typing in Google Calendar's "quick add" box)
-- **`find_free_slots`:** Computes 30-min-granularity windows across 09:00â€“17:00 working hours by default
+- **`find_free_slots`:** Computes 30-min-granularity windows across 09:00–17:00 working hours by default
 - Scopes required: `https://www.googleapis.com/auth/calendar`
 
 ---
@@ -444,20 +444,20 @@ decline_invite(event_id, calendar_id)
 **Registry key:** `scheduler`  
 **LLM orchestration:** Single-pass tool selection + response composition
 
-> **Different from Calendar Agent:** The Calendar Agent handles CRUD on individual events. The Scheduler Agent adds an **intelligence layer** â€” it reasons *over* your calendar to find optimal times, protect focus, and resolve conflicts.
+> **Different from Calendar Agent:** The Calendar Agent handles CRUD on individual events. The Scheduler Agent adds an **intelligence layer** — it reasons *over* your calendar to find optimal times, protect focus, and resolve conflicts.
 
 ### What It Can Do
 
 | Category | Example commands |
 |----------|----------------|
-| **Find meeting time** | "Find a good time for a 1hr meeting next week" Â· "When am I free on Wednesday?" |
+| **Find meeting time** | "Find a good time for a 1hr meeting next week" · "When am I free on Wednesday?" |
 | **Multi-attendee** | "Find a time for a meeting with alice@example.com and bob@company.com" |
-| **Focus blocks** | "Protect my Thursday morning for deep work" Â· "Block 2 hours for focused coding tomorrow" |
-| **Day optimisation** | "Analyse my Monday schedule" Â· "How can I improve my Wednesday?" |
-| **Conflicts** | "Smart-resolve my scheduling conflicts" Â· "Fix my double bookings this week" |
-| **Time blocks** | "Block 2 hours for admin tasks Friday afternoon" Â· "Add a review block Thursday at 4pm" |
-| **Insights** | "How heavy is my meeting load?" Â· "Give me scheduling insights for the next 2 weeks" |
-| **Recurring focus** | "Block every Monday and Wednesday morning 9â€“11am for deep work" |
+| **Focus blocks** | "Protect my Thursday morning for deep work" · "Block 2 hours for focused coding tomorrow" |
+| **Day optimisation** | "Analyse my Monday schedule" · "How can I improve my Wednesday?" |
+| **Conflicts** | "Smart-resolve my scheduling conflicts" · "Fix my double bookings this week" |
+| **Time blocks** | "Block 2 hours for admin tasks Friday afternoon" · "Add a review block Thursday at 4pm" |
+| **Insights** | "How heavy is my meeting load?" · "Give me scheduling insights for the next 2 weeks" |
+| **Recurring focus** | "Block every Monday and Wednesday morning 9–11am for deep work" |
 
 ### Tools Available (8 total)
 
@@ -474,9 +474,9 @@ schedule_recurring_focus_time(title, days_of_week, start_time, duration_minutes)
 
 ### Architecture Notes
 
-- **Shares the Calendar Agent's auth token** (`config/calendar_token.json`) â€” no extra OAuth setup
-- **`optimize_day_schedule`** is read-only â€” it returns observations and suggestions without modifying events
-- **`smart_reschedule_conflicts`** proposes a plan without applying it â€” the user reviews and confirms
+- **Shares the Calendar Agent's auth token** (`config/calendar_token.json`) — no extra OAuth setup
+- **`optimize_day_schedule`** is read-only — it returns observations and suggestions without modifying events
+- **`smart_reschedule_conflicts`** proposes a plan without applying it — the user reviews and confirms
 - **Scoring algorithm:** meeting slots are scored by time-of-day preference, mid-week preference, and back-to-back penalty
 - **`find_mutual_availability`** searches your own calendar; for true cross-calendar availability, attendees must share their Google Calendar or reply via invite
 
@@ -485,32 +485,32 @@ schedule_recurring_focus_time(title, days_of_week, start_time, duration_minutes)
 ## File Organizer Agent
 
 **Module:** `src/agent/ui/file_organizer_agent/orchestrator.py`  
-**Backend:** Python stdlib (`pathlib`, `shutil`) â€” no credentials required  
+**Backend:** Python stdlib (`pathlib`, `shutil`) — no credentials required  
 **Registry key:** `file_organizer`  
 **Data stores:** `data/organizer_pending_plans.json`, `data/organizer_archival_policies.json`  
 
-> **Different from Files Agent:** The Files Agent performs immediate actions. The File Organizer Agent uses a **conversational approval workflow** â€” scan â†’ propose â†’ preview â†’ approve â†’ apply. It also manages archival policies and maintains Octa Bot's own `data/` directory.
+> **Different from Files Agent:** The Files Agent performs immediate actions. The File Organizer Agent uses a **conversational approval workflow** — scan ? propose ? preview ? approve ? apply. It also manages archival policies and maintains Octa Bot's own `data/` directory.
 
 ### What It Can Do
 
 | Category | Example commands |
 |----------|----------------|
-| **Scan & propose** | "Organise my Downloads folder" Â· "Categorise my Documents by type" |
-| **Preview** | "Show me what plan a1b2c3d4 will do" Â· "Preview the organisation" |
-| **Apply** | "Apply plan a1b2c3d4" Â· "Yes, go ahead with the organisation" |
-| **Discard** | "Cancel plan X" Â· "Forget the organisation plan" |
-| **Archive old files** | "Archive files older than 3 months in Downloads" Â· "Show what would be archived" |
-| **App data cleanup** | "Clean up Octa Bot data" Â· "What can I clean up in the app data?" |
-| **Archival policies** | "Auto-archive Downloads files older than 60 days" Â· "Show my archive rules" |
-| **Run policies** | "Run my archival policies" Â· "Apply all archive rules" |
-| **List plans** | "Show pending plans" Â· "What organisation plans do I have?" |
+| **Scan & propose** | "Organise my Downloads folder" · "Categorise my Documents by type" |
+| **Preview** | "Show me what plan a1b2c3d4 will do" · "Preview the organisation" |
+| **Apply** | "Apply plan a1b2c3d4" · "Yes, go ahead with the organisation" |
+| **Discard** | "Cancel plan X" · "Forget the organisation plan" |
+| **Archive old files** | "Archive files older than 3 months in Downloads" · "Show what would be archived" |
+| **App data cleanup** | "Clean up Octa Bot data" · "What can I clean up in the app data?" |
+| **Archival policies** | "Auto-archive Downloads files older than 60 days" · "Show my archive rules" |
+| **Run policies** | "Run my archival policies" · "Apply all archive rules" |
+| **List plans** | "Show pending plans" · "What organisation plans do I have?" |
 
 ### Tools Available (10 total)
 
 ```
 scan_and_propose(directory, strategy, max_files)          # strategy: by_type | by_date | by_name_prefix
 preview_plan(plan_id, max_show)                           # show first N moves without applying
-apply_plan(plan_id)                                       # MODIFIES FILES â€” only on explicit confirmation
+apply_plan(plan_id)                                       # MODIFIES FILES — only on explicit confirmation
 discard_plan(plan_id)                                     # remove a pending plan
 list_plans()                                              # show all pending + recently applied plans
 archive_old_files(directory, days_old, destination, dry_run)
@@ -522,10 +522,10 @@ run_archival_policies(dry_run)
 
 ### Architecture Notes
 
-- **Plans are persisted** to `data/organizer_pending_plans.json` â€” survive session restarts
+- **Plans are persisted** to `data/organizer_pending_plans.json` — survive session restarts
 - **Never auto-applies:** the LLM is instructed never to call `apply_plan` unless the user explicitly confirms with words like "apply", "yes go ahead", "execute plan X"
 - **`dry_run=True`** is the default for all destructive operations
-- **Strategies:** `by_type` uses extensionâ†’category map; `by_date` groups to `YYYY-MM/` folders; `by_name_prefix` groups to alphabetical prefix folders
+- **Strategies:** `by_type` uses extension?category map; `by_date` groups to `YYYY-MM/` folders; `by_name_prefix` groups to alphabetical prefix folders
 - **`cleanup_app_data`** targets Octa Bot's own `data/exports/` (files older than 30 days) and applied plan records
 
 ---
@@ -537,21 +537,21 @@ run_archival_policies(dry_run)
 **Registry key:** `habit_tracker`  
 **Data stores:** `data/habits.json` (habit definitions), `data/habit_logs.json` (daily completion logs)  
 
-> **Completely new** â€” no overlap with Calendar Agent or Files Agent. Tracks daily habits, streaks, check-ins, and weekly reports. Optionally schedules habit sessions on Google Calendar.
+> **Completely new** — no overlap with Calendar Agent or Files Agent. Tracks daily habits, streaks, check-ins, and weekly reports. Optionally schedules habit sessions on Google Calendar.
 
 ### What It Can Do
 
 | Category | Example commands |
 |----------|----------------|
-| **Add habit** | "Add habit Morning Run" Â· "Track daily meditation at 7am" Â· "Start a reading habit" |
-| **Log completion** | "Log morning run done" Â· "Mark yoga complete" Â· "I finished reading today, ran 5km" |
-| **Check-in** | "Daily check-in" Â· "What habits are pending today?" |
-| **View habits** | "Show my habits" Â· "What habits do I have?" Â· "Today's habit list" |
-| **Streaks** | "What's my meditation streak?" Â· "How many days in a row for running?" |
-| **Reports** | "Weekly habit report" Â· "How did I do this week?" Â· "Last week's habits" |
-| **Analytics** | "30-day stats for morning run" Â· "Analyse my yoga habit" |
+| **Add habit** | "Add habit Morning Run" · "Track daily meditation at 7am" · "Start a reading habit" |
+| **Log completion** | "Log morning run done" · "Mark yoga complete" · "I finished reading today, ran 5km" |
+| **Check-in** | "Daily check-in" · "What habits are pending today?" |
+| **View habits** | "Show my habits" · "What habits do I have?" · "Today's habit list" |
+| **Streaks** | "What's my meditation streak?" · "How many days in a row for running?" |
+| **Reports** | "Weekly habit report" · "How did I do this week?" · "Last week's habits" |
+| **Analytics** | "30-day stats for morning run" · "Analyse my yoga habit" |
 | **Calendar sync** | "Schedule my run on Thursday at 7am on Google Calendar" |
-| **Delete** | "Remove habit Morning Run" Â· "Stop tracking yoga" |
+| **Delete** | "Remove habit Morning Run" · "Stop tracking yoga" |
 
 ### Tools Available (9 total)
 
@@ -570,7 +570,7 @@ schedule_habit_on_calendar(habit_name, date_str, time, duration_minutes)
 
 ### Data Format
 
-`data/habits.json` â€” flat list of habit objects:
+`data/habits.json` — flat list of habit objects:
 ```json
 {
   "id": "a1b2c3d4",
@@ -584,7 +584,7 @@ schedule_habit_on_calendar(habit_name, date_str, time, duration_minutes)
 }
 ```
 
-`data/habit_logs.json` â€” flat list of daily log entries:
+`data/habit_logs.json` — flat list of daily log entries:
 ```json
 {
   "habit_id": "a1b2c3d4",
@@ -616,12 +616,12 @@ schedule_habit_on_calendar(habit_name, date_str, time, duration_minutes)
 
 | Classified as | Action |
 |--------------|--------|
-| Email only | Calls Email Agentâ€™s ReAct orchestrator directly |
-| Drive only | Calls Drive Agentâ€™s ReAct orchestrator directly |
-| WhatsApp only | Calls WhatsApp Agentâ€™s ReAct orchestrator directly |
-| Telegram only | Calls Telegram Agentâ€™s ReAct orchestrator directly |
-| Files only | Calls Files Agentâ€™s ReAct orchestrator directly |
-| Cross-agent | Runs the NL workflow planner â†’ sequential step execution |
+| Email only | Calls Email Agent’s ReAct orchestrator directly |
+| Drive only | Calls Drive Agent’s ReAct orchestrator directly |
+| WhatsApp only | Calls WhatsApp Agent’s ReAct orchestrator directly |
+| Telegram only | Calls Telegram Agent’s ReAct orchestrator directly |
+| Files only | Calls Files Agent’s ReAct orchestrator directly |
+| Cross-agent | Runs the NL workflow planner ? sequential step execution |
 | Neither | Casual chat via `llm.chat()` |
 
 ### Cross-Agent Example Commands
@@ -642,8 +642,8 @@ schedule_habit_on_calendar(habit_name, date_str, time, duration_minutes)
 In multi-step workflows, the output of one step can be piped to the next using `{output_key}` syntax. For example:
 
 ```
-Step 1: download_file â†’ output_key: "downloaded_file"
-Step 2: send_email_with_attachment â†’ attachment_path: "{downloaded_file}"
+Step 1: download_file ? output_key: "downloaded_file"
+Step 2: send_email_with_attachment ? attachment_path: "{downloaded_file}"
 ```
 
 ---
@@ -653,18 +653,18 @@ Step 2: send_email_with_attachment â†’ attachment_path: "{downloaded_file}"
 **Orchestrator:** `src/agent/ui/browser_agent/orchestrator.py`  
 **Service layer:** `src/browser/browser_service.py`  
 **Setup Guide:** [BROWSER_AGENT_SETUP.md](BROWSER_AGENT_SETUP.md)  
-**Dependencies:** `beautifulsoup4`, `requests` (optional but recommended) â€” no API keys required
+**Dependencies:** `beautifulsoup4`, `requests` (optional but recommended) — no API keys required
 
 ### What It Can Do
 
 | Category | Example commands |
 |----------|----------------|
-| **Browse** | "Open https://news.ycombinator.com" Â· "What does the Python docs say about decorators?" |
-| **Search** | "Search for latest AI news" Â· "Look up Python string formatting" |
-| **Extract** | "Read the full article at [URL]" Â· "Get the text from this page" |
-| **Links** | "What links are on hacker news?" Â· "List all URLs on this page" |
-| **Metadata** | "What is the description of openai.com?" Â· "Page metadata for github.com" |
-| **Find** | "Does the page mention 'pricing'?" Â· "Find where it talks about fees" |
+| **Browse** | "Open https://news.ycombinator.com" · "What does the Python docs say about decorators?" |
+| **Search** | "Search for latest AI news" · "Look up Python string formatting" |
+| **Extract** | "Read the full article at [URL]" · "Get the text from this page" |
+| **Links** | "What links are on hacker news?" · "List all URLs on this page" |
+| **Metadata** | "What is the description of openai.com?" · "Page metadata for github.com" |
+| **Find** | "Does the page mention 'pricing'?" · "Find where it talks about fees" |
 | **Structured** | "Extract tables from Wikipedia's stock market page" |
 | **Download** | "Download the PDF from [URL] to data/downloads/report.pdf" |
 | **Summarise** | "Summarise https://arxiv.org/abs/xxxx" |
@@ -697,23 +697,23 @@ Step 2: send_email_with_attachment â†’ attachment_path: "{downloaded_file}"
 **Orchestrator:** `src/agent/ui/stock_agent/orchestrator.py`  
 **Service layer:** `src/stock_market/stock_service.py`  
 **Setup Guide:** [STOCK_AGENT_SETUP.md](STOCK_AGENT_SETUP.md)  
-**Dependencies:** `yfinance` â€” free, no API key required  
+**Dependencies:** `yfinance` — free, no API key required  
 **Scope:** READ-ONLY analysis. No buy/sell, no order placement, no brokerage integration.
 
 ### What It Can Do
 
 | Category | Example commands |
 |----------|----------------|
-| **Quotes** | "What is Apple's stock price?" Â· "TSLA quote" Â· "How is Amazon trading?" |
-| **History** | "6 months of AAPL prices" Â· "MSFT historical data for 1 year" |
-| **Technical** | "Technical analysis for NVDA" Â· "Is Tesla overbought?" Â· "MACD for SPY" |
-| **Risk** | "How risky is TSLA?" Â· "Risk score for Amazon" Â· "Volatility of NVDA" |
-| **Patterns** | "Chart patterns for AAPL" Â· "Support and resistance for NFLX" |
-| **Portfolio** | "Analyse my portfolio: AAPL MSFT JPM JNJ" Â· "How diversified is my holding?" |
-| **Suggestions** | "Any issues with my portfolio?" Â· "Rebalancing hints for AAPL TSLA META" |
-| **Sentiment** | "News sentiment for Tesla" Â· "What are people saying about Apple?" |
-| **Compare** | "Compare AAPL vs GOOGL vs MSFT" Â· "Side-by-side: TSLA vs RIVN" |
-| **Market** | "How is the market today?" Â· "Market overview" Â· "Is the S&P500 up?" |
+| **Quotes** | "What is Apple's stock price?" · "TSLA quote" · "How is Amazon trading?" |
+| **History** | "6 months of AAPL prices" · "MSFT historical data for 1 year" |
+| **Technical** | "Technical analysis for NVDA" · "Is Tesla overbought?" · "MACD for SPY" |
+| **Risk** | "How risky is TSLA?" · "Risk score for Amazon" · "Volatility of NVDA" |
+| **Patterns** | "Chart patterns for AAPL" · "Support and resistance for NFLX" |
+| **Portfolio** | "Analyse my portfolio: AAPL MSFT JPM JNJ" · "How diversified is my holding?" |
+| **Suggestions** | "Any issues with my portfolio?" · "Rebalancing hints for AAPL TSLA META" |
+| **Sentiment** | "News sentiment for Tesla" · "What are people saying about Apple?" |
+| **Compare** | "Compare AAPL vs GOOGL vs MSFT" · "Side-by-side: TSLA vs RIVN" |
+| **Market** | "How is the market today?" · "Market overview" · "Is the S&P500 up?" |
 
 ### Tools Available
 
@@ -734,10 +734,10 @@ Step 2: send_email_with_attachment â†’ attachment_path: "{downloaded_file}"
 
 | Indicator | Bullish | Neutral | Bearish |
 |-----------|---------|---------|---------|
-| RSI | < 30 (oversold) | 30â€“70 | > 70 (overbought) |
-| MACD histogram | > 0 | â‰ˆ 0 | < 0 |
+| RSI | < 30 (oversold) | 30–70 | > 70 (overbought) |
+| MACD histogram | > 0 | ˜ 0 | < 0 |
 | Bollinger | Below lower band | Mid-range | Above upper band |
-| Price vs SMA | Above | â€” | Below |
+| Price vs SMA | Above | — | Below |
 
 ### PDF Report Generation
 
@@ -746,7 +746,7 @@ Use `generate_full_report` to produce a full multi-page A4 PDF analysis:
 | Command example | What it does |
 |---|---|
 | "Full analysis of TCS" | Runs all 10 analyses, builds PDF, returns file path |
-| "Stock report for Reliance" | Same â€” triggers PDF build |
+| "Stock report for Reliance" | Same — triggers PDF build |
 | "Email me the AAPL report at me@example.com" | Builds PDF then emails it (requires Gmail auth) |
 
 The PDF cover page includes an **Analyst Quick Snapshot** with: Technical Signal, Risk Level, Quality Score, Sentiment, 52W Price Position, and an Analyst Verdict (BUY / HOLD / AVOID) derived from composite scoring.
@@ -771,10 +771,10 @@ All output is informational and educational only. Not financial advice. Always c
 |----------|----------------|
 | **Text posts** | "Post on LinkedIn about the benefits of AI automation" |
 | **Image posts** | "Generate an image and post about Octa Bot on LinkedIn" |
-| **Video posts** | "Post this video to LinkedIn: /path/to/video.mp4" *(upload only â€” no video generation)* |
+| **Video posts** | "Post this video to LinkedIn: /path/to/video.mp4" *(upload only — no video generation)* |
 | **Article sharing** | "Share this article on LinkedIn: https://..." |
 | **AI content** | "Write a professional LinkedIn post about productivity tools" |
-| **AI images** | "Generate a LinkedIn banner image for a FinTech product" *(requires OpenAI DALLÂ·E 3 key)* |
+| **AI images** | "Generate a LinkedIn banner image for a FinTech product" *(requires OpenAI DALL·E 3 key)* |
 | **Scheduling** | "Schedule a post for Monday 9 AM about team culture" |
 | **Analytics** | "How is my LinkedIn page performing this month?" |
 | **Post metrics** | "Show analytics for my last post" |
@@ -802,14 +802,14 @@ get_access_token_url(state)
 exchange_code_for_token(code)
 ```
 
-### âš ï¸ Key Limitations
+### ?? Key Limitations
 
 | Limitation | Detail |
 |---|---|
-| **No video generation** | `create_video_post` uploads an existing local MP4 â€” it cannot generate a video from text/script |
-| **AI images need OpenAI key** | `generate_ai_image` uses DALLÂ·E 3 which requires a **paid OpenAI API key**, not GitHub Models |
+| **No video generation** | `create_video_post` uploads an existing local MP4 — it cannot generate a video from text/script |
+| **AI images need OpenAI key** | `generate_ai_image` uses DALL·E 3 which requires a **paid OpenAI API key**, not GitHub Models |
 | **LinkedIn OAuth required** | All posting/analytics tools need a valid LinkedIn `access_token` configured |
-| **Token expiry** | LinkedIn tokens expire every 60 days â€” re-run the OAuth flow to refresh |
+| **Token expiry** | LinkedIn tokens expire every 60 days — re-run the OAuth flow to refresh |
 
 ### Required LinkedIn API Scopes
 
@@ -842,4 +842,4 @@ All agents share the same GitHub Models API token.
 | Per day | 150 requests |
 | Reset | Every 24 hours |
 
-Each ReAct loop iteration is one API call. A typical 2-step task uses 2â€“4 calls. When the limit is hit, all agents show: *"â³ API rate limit reached."*
+Each ReAct loop iteration is one API call. A typical 2-step task uses 2–4 calls. When the limit is hit, all agents show: *"? API rate limit reached."*

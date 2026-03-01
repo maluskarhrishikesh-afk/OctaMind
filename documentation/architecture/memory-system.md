@@ -37,13 +37,15 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 
 ### Key Features
 
-- **Automatic Consolidation**: `ConsolidationRunner` daemon thread starts with the app and runs every 24 h for **all** Personal Assistants — including idle/stopped ones
+- **Automatic Consolidation**: Runs every **8 hours** in a **dedicated background process** launched by `start.exe` / `start.py` (`src/agent/memory/run_consolidation.py --loop`). Also runs via daemon thread inside the Streamlit dashboard as a secondary fallback.
 - **Pattern Extraction**: Automatically detects repeated behaviours
 - **Habit Learning**: Requires 3+ confirmations. Detects day-of-week patterns (e.g. “deletes spam every Friday”) and time-of-day patterns (e.g. “sends emails at 09:00”)
 - **90-Day Decay**: Old memories archived or deleted based on importance
 - **State Persistence**: Consolidation timestamps survive agent restarts
 - **LLM Integration**: Memory-aware responses
-- **PA Hub Hard-Coded Personality**: `__multi_agent__` personality is prose-level, protective, always restored on init — immune to trait-slider edits
+- **Personality Evolution**: Each consolidation cycle analyses recent interaction patterns and rewrites two sections of `personality.md` — `Observed User Personality` and `Adapted Communication Style` — so the agent gradually mirrors how the user prefers to communicate.
+- **Emotion Detection**: PA UI scans user messages for anger / frustration / sadness / stress / major-decision signals via keyword regex (zero extra LLM calls) and injects an empathy guidance note into the LLM prompt.
+- **PA Hub Hard-Coded Personality**: `_collective_memory_` personality is prose-level, protective, always restored on init — immune to trait-slider edits
 
 ---
 
@@ -56,16 +58,16 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 | `working_memory.md`  | The last 10 things the agent did or was asked                         | Every interaction                                                | Fast — auto-trimmed to 10 items |                    ✅ Last 10 interactions                   |                           Auto-trimmed in-place                            |
 | `episodic_memory.md` | Time-stamped events: what happened and why it matters                 | Every interaction (via `add_interaction`) + consolidation themes | Moderate                        | ❌ Not sent by default — loaded on-demand for recall queries | Items older than 90 days → `archive/` (Low → deleted, Medium → archived, High → kept) |
 | `semantic_memory.md` | Learned facts about the user — preferences, recurring needs, background, values, people | Consolidation engine                            | Slow                            |                   ✅ Last 3 000 chars only                   |                     Never archived (caps protect LLM)                      |
-| `personality.md`     | Who the agent is: tone, communication style, goals. **PA Hub: hard-coded protective persona** | Manual / agent setup. PA Hub: always restored on init | Barely at all |                   ✅ Full file (no cap)                      |                               Never changes                                |
+| `personality.md`     | Who the agent is: tone, communication style, goals. **Two auto-managed sections rewritten each consolidation cycle:** `Observed User Personality` and `Adapted Communication Style` — these capture how the user communicates and shape how the agent responds. **PA Hub: hard-coded protective persona** | Manual (stable sections) / Consolidation engine (adaptive sections). PA Hub: always restored on init | Barely — auto sections are rewritten not appended |                   ✅ Full file (no cap)                      |                Auto-managed sections rewritten; stable sections never change                |
 | `habits.md`          | Confirmed user behavioural patterns (3+ occurrences). Captures day-of-week, time-of-day, and action-type patterns | Consolidation engine | Slow |                     ✅ Last 3 000 chars                      |                     Never archived (caps protect LLM)                      |
 | `consciousness.md`   | Big-picture manager-level mental model of the user. Synthesised from ALL memory layers | Consolidation engine (every 2–4 weeks) | Very slow |                   ✅ Full file (no cap)                      |                               Never archived                               |
-| `collective_consciousness.md` | **PA Hub only.** Cross-domain synthesis of every skill agent’s `consciousness.md` | Consolidation engine (each cycle for `__multi_agent__`) | Very slow | ✅ Full file (no cap) | Never archived |
+| `collective_consciousness.md` | **PA Hub only.** Cross-domain synthesis of every skill agent’s `consciousness.md` | Consolidation engine (each cycle for `_collective_memory_`) | Very slow | ✅ Full file (no cap) | Never archived |
 
 ### Rule of thumb
 
-- **User sends a message** → `working_memory.md` gains one entry (oldest dropped if > 10).
-- **App boots** → `ConsolidationRunner` daemon thread starts immediately and runs a full consolidation pass for all agents. Subsequent passes run every 24 hours — even for stopped/inactive agents.
-- **Each consolidation cycle:** working memory patterns → `semantic_memory.md`; episodic themes → `semantic_memory.md`; day-of-week/time-of-day patterns → `habits.md`; consciousness update (if 2+ weeks); PA hub → `collective_consciousness.md`.
+- **User sends a message** → `working_memory.md` gains one entry (oldest dropped if > 10). Emotion detection (`_detect_emotion`) runs immediately — if detected, an empathy note is injected into the LLM prompt at zero extra cost.
+- **App boots** → `start.py` / `start.exe` launches a **dedicated consolidation process** (`src/agent/memory/run_consolidation.py --loop`) that runs immediately and then every **8 hours**. The Streamlit dashboard also starts a `ConsolidationRunner` daemon thread as a secondary fallback.
+- **Each consolidation cycle:** (1) working memory patterns → `semantic_memory.md`; (2) episodic themes → `semantic_memory.md`; (3) day-of-week/time-of-day patterns → `habits.md`; (4) 90-day decay; (5) consciousness update if 2+ weeks since last; (6) **personality evolution** — rewrites `Observed User Personality` and `Adapted Communication Style` sections in `personality.md` based on recent interaction analysis; (7) PA hub → `collective_consciousness.md`.
 - **Event is 90 days old** → Low importance deleted, Medium moved to `archive/episodic_YYYY_MM.md`, High kept forever.
 - **Every LLM call** → last 10 working memory interactions sent. `personality.md` and `consciousness.md` sent in full. `habits.md` and `semantic_memory.md` capped at 3 000 chars. `episodic_memory.md` excluded by default (on-demand recall only). Multi-agent additionally sends `collective_consciousness.md` in full.
 - **User asks “do you remember X?”** → `recall_for_llm()` runs before the LLM call, searches episodic/working/semantic on demand, and injects only matching entries into the prompt for that single turn.
@@ -310,12 +312,12 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 **Purpose**: Cross-domain synthesis of all sub-agents’ individual consciousness layers into a single unified picture of the user
 
 **Characteristics**:  
-- Only exists for `__multi_agent__` (`memory/__multi_agent__/collective_consciousness.md`)
+- Only exists for `_collective_memory_` (`memory/_collective_memory_/collective_consciousness.md`)
 - Updated every consolidation cycle (not just every 2–4 weeks)
 - Aggregates non-placeholder bullets from each agent’s `consciousness.md`
 - Builds a composite trust baseline from all agents’ safety sections
 
-**Storage**: `memory/__multi_agent__/collective_consciousness.md`
+**Storage**: `memory/_collective_memory_/collective_consciousness.md`
 
 **Sections**:
 
@@ -346,7 +348,7 @@ memory/
 │   ├── consolidation_state.json   # Persistence state
 │   └── archive/                   # Old episodic memories
 │       └── episodic_2025_*.md
-└── __multi_agent__/             # Personal Assistant hub (created on first dashboard launch)
+└── _collective_memory_/             # Personal Assistant hub (created on first dashboard launch)
     ├── working_memory.md
     ├── episodic_memory.md
     ├── semantic_memory.md
@@ -620,7 +622,7 @@ class MemoryConsolidator:
 - Starts: Automatically when the Agent Hub dashboard boots (`dashboard/app.py` at import time)
 - First run: Immediately on startup
 - Subsequent runs: Every 24 hours
-- Scope: **All registered agents + `__multi_agent__`** — including stopped/inactive agents
+- Scope: **All registered agents + `_collective_memory_`** — including stopped/inactive agents
 - Survives dashboard reruns: Yes (daemon thread lives with the Streamlit process)
 - Use case: Ensures memory improves continuously regardless of agent activity
 
@@ -957,7 +959,7 @@ Medium Importance events (90+ days):
 | `src/agent/memory/memory_consolidator.py` | Consolidation engine: patterns, habits, consciousness, collective consciousness | ~830 lines |
 | `src/agent/memory/consolidation_runner.py` | Global 24 h background thread — covers all agents | ~140 lines |
 | `src/agent/memory/collective_memory.py`   | Episodic snapshot aggregator for Personal Assistant LLM context | ~140 lines |
-| `src/agent/ui/dashboard/app.py`           | Dashboard entry — boots ConsolidationRunner + `__multi_agent__` memory on startup | |
+| `src/agent/ui/dashboard/app.py`           | Dashboard entry — boots ConsolidationRunner + `_collective_memory_` memory on startup | |
 | `src/agent/llm/llm_parser.py`             | LLM integration with memory context     | |
 
 ### Critical Functions

@@ -620,6 +620,23 @@ def inject_agent_css(
             color: {accent_hex} !important;
             background: rgba({accent_rgb},0.08) !important;
         }}
+        /* ── Chat input — always fixed at the very bottom of the viewport ── */
+        /* Use sticky (no left/right override) so it sits within the main content
+           column — not under the sidebar — and still pins to the viewport bottom. */
+        section[data-testid="stBottom"] {{
+            position: sticky !important;
+            bottom: 0 !important;
+            z-index: 999 !important;
+        }}
+        /* Ensure the main scrollable container allows sticky children */
+        [data-testid="stMainBlockContainer"] {{
+            overflow-y: auto !important;
+        }}
+        /* Leave room so the last message isn't hidden behind the bar */
+        section[data-testid="stMainBlockContainer"],
+        .main .block-container {{
+            padding-bottom: 110px !important;
+        }}
         /* ── Chat input footer area — dark background + no defaults ─────── */
         [data-testid="stBottomBlockContainer"],
         section[data-testid="stBottom"] > div,
@@ -706,6 +723,23 @@ def inject_agent_css(
         [data-testid="stChatInput"] button:hover {{
             background: {accent_hex}dd !important;
             box-shadow: 0 2px 8px rgba({accent_rgb},0.5) !important;
+        }}
+        /* ── st.status() widget — force dark theme so text is visible ─────── */
+        [data-testid="stStatusWidget"] {{
+            background: #1e1b2e !important;
+            border: 1px solid rgba({accent_rgb},0.35) !important;
+            border-radius: 10px !important;
+        }}
+        [data-testid="stStatusWidget"] summary,
+        [data-testid="stStatusWidget"] summary *,
+        [data-testid="stStatusWidget"] > div *,
+        [data-testid="stStatusWidget"] p,
+        [data-testid="stStatusWidget"] span:not([data-testid]) {{
+            color: #e2e8f0 !important;
+        }}
+        /* Running spinner track */
+        [data-testid="stStatusWidget"] [data-testid="stSpinner"] * {{
+            color: {accent_hex} !important;
         }}
         </style>
         """,

@@ -121,19 +121,56 @@ Answer:"""
 # Public API
 # ---------------------------------------------------------------------------
 
+def keyword_pre_filter(command: str) -> bool:
+    """
+    Fast keyword pre-filter — runs BEFORE any LLM call.
+
+    Returns
+    -------
+    True   — at least one agent keyword found; proceed to LLM routing.
+    False  — zero agent keyword matches; command is almost certainly
+             conversational (casual chat, small talk).  Skip the LLM
+             routing call entirely and return None from detect_agents_needed().
+
+    This saves one LLM call per request for casual queries such as
+    "How are you?", "What time is it?", "Tell me a joke", etc.
+    """
+    kmap = _get_keyword_map()
+    lower = command.lower()
+    cmd_words = set(re.findall(r"[a-z]{3,}", lower))
+    matched = any(keywords & cmd_words for keywords in kmap.values())
+    if not matched:
+        logger.debug("Router [pre-filter]: no agent keywords found — skipping LLM call")
+    return matched
+
+
 def detect_agents_needed(command: str) -> Optional[List[str]]:
     """
     Analyse *command* and return the list of agents required.
 
-    Returns:
-        List of agent names (e.g. ["drive", "email"], ["files"]) — agents needed.
-        None — no agent needed; treat as conversational.
+    Strategy (ordered by cost):
+      1. Keyword pre-filter (0 LLM calls) — if no agent keywords found,
+         skip the LLM call and return None immediately.
+      2. LLM-based detection (1 LLM call) — accurate routing for
+         commands that contain at least one agent keyword.
+      3. Keyword fallback (0 LLM calls) — if LLM call fails, use the
+         keyword match result.
+
+    Returns
+    -------
+    List of agent names (e.g. ["drive", "email"]) — agents needed.
+    None — no agent needed; treat as conversational.
     """
     from src.agent.workflows.agent_registry import registered_agents
 
     valid = set(registered_agents())
 
-    # ── LLM-based detection ─────────────────────────────────────────────────
+    # ── Step 1: keyword pre-filter (0 LLM calls) ────────────────────────────
+    if not keyword_pre_filter(command):
+        logger.info("Router [pre-filter]: no agent keywords — returning None (conversational)")
+        return None
+
+    # ── Step 2: LLM-based detection (1 LLM call) ────────────────────────────
     try:
         from src.agent.llm.llm_parser import get_llm_client
         llm = get_llm_client()
@@ -165,7 +202,10 @@ def detect_agents_needed(command: str) -> Optional[List[str]]:
     except Exception as exc:
         logger.warning("Router LLM classification failed (%s), falling back to keywords", exc)
 
-    # ── Keyword fallback (dynamic — built from registry descriptions) ────────
+    # ── Step 3: Keyword fallback (0 LLM calls) ──────────────────────────────
+    # Only reached when the LLM call above raised an exception.
+    # We already know keyword_pre_filter() returned True (otherwise we
+    # returned None in step 1), so there is at least one keyword match here.
     kmap = _get_keyword_map()
     lower = command.lower()
     cmd_words = set(re.findall(r"[a-z]{3,}", lower))

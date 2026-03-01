@@ -23,13 +23,34 @@ create_recurring_event(title, start, end, recurrence, description="", location="
 list_calendars() – List all available calendars.
 """.strip()
 
-_SKILL_CONTEXT = """
-You are the Google Calendar Skill Agent.
-Help the user view, create, update and delete calendar events.
-When creating events, confirm the date/time and timezone with the user if ambiguous.
-Prefer quick_add_event for natural language inputs like "Meeting tomorrow at 3pm".
-Use ISO 8601 format (e.g. "2024-12-25T14:00:00") when calling create_event or update_event directly.
-""".strip()
+def _get_skill_context() -> str:
+    """Build the calendar skill context with the real current date+timezone."""
+    import datetime
+    try:
+        local = datetime.datetime.now().astimezone()
+        today_str = local.strftime("%A, %d %B %Y")   # e.g. "Sunday, 01 March 2026"
+        tz_name   = local.strftime("%Z")              # e.g. "IST"
+        offset    = local.strftime("%z")              # e.g. "+0530"
+        tz_display = f"{tz_name} (UTC{offset[:3]}:{offset[3:]})"
+        iso_offset = f"{offset[:3]}:{offset[3:]}"
+    except Exception:
+        import datetime as _dt
+        today_str  = _dt.date.today().strftime("%d %B %Y")
+        tz_display = "UTC"
+        iso_offset = "+00:00"
+    return f"""You are the Google Calendar Skill Agent.
+Today's date: {today_str}. ALWAYS use this exact date as the reference for EVERY relative expression ("today", "tomorrow", "this evening", "next Monday", "in 2 hours", etc.). NEVER use any other date.
+User's local timezone: {tz_display}. Always apply this timezone — never ask the user to specify it.
+
+CRITICAL RULE — choosing the right tool:
+  • For ANY natural-language time expression (e.g. "today at 8 PM", "tomorrow 3pm", "next Friday") -> ALWAYS call quick_add_event(text). It resolves relative times correctly.
+  • Only call create_event() when you have an exact, pre-computed ISO8601 datetime (e.g. "{local.year}-{local.month:02d}-{local.day:02d}T20:00:00{iso_offset}").
+  • NEVER invent or guess a date for create_event() — derive it strictly from today ({today_str}).
+
+When displaying event times, always show them in the user's local timezone.""".strip()
+
+# Kept for backward compatibility (static fallback)
+_SKILL_CONTEXT = _get_skill_context()
 
 
 def _get_tools() -> Dict[str, Any]:
@@ -60,7 +81,7 @@ def execute_with_llm_orchestration(
     try:
         return run_skill_react(
             skill_name="calendar",
-            skill_context=_SKILL_CONTEXT,
+            skill_context=_get_skill_context(),
             tool_map=_get_tools(),
             tool_docs=_TOOL_DOCS,
             user_query=user_query,

@@ -50,7 +50,7 @@ def get_collective_context(
     Args:
         max_chars_per_agent: Max characters to pull from each agent's episodic
                              memory (takes from the end = most recent events).
-        include_own:         Whether to also include __multi_agent__ own memory.
+        include_own:         Whether to also include _collective_memory_ own memory.
     Returns:
         A multi-section markdown string ready to inject into llm.chat() as
         memory_context.
@@ -110,7 +110,7 @@ def get_collective_context(
 
     # ── Multi-agent own memory ────────────────────────────────────────────────
     if include_own:
-        own_id = "__multi_agent__"
+        own_id = "_collective_memory_"
         own_path = _MEMORY_BASE / own_id / "episodic_memory.md"
         if own_path.exists():
             try:

@@ -10,8 +10,14 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# The reserved agent ID for the multi-agent hub
-MULTI_AGENT_ID = "__multi_agent__"
+# The reserved agent ID for the collective memory / multi-agent hub.
+# Named _collective_memory_ to better reflect its purpose: synthesising
+# memories from all Personal Assistants into one shared consciousness.
+COLLECTIVE_AGENT_ID = "_collective_memory_"
+
+# Backward-compatible alias — some older code and data files may still
+# reference the old name.  Do NOT remove until all usages are migrated.
+MULTI_AGENT_ID = COLLECTIVE_AGENT_ID
 
 # ---------------------------------------------------------------------------
 # Hard-coded personality for the Multi-Agent Hub.
@@ -92,6 +98,15 @@ class AgentMemory:
         """
         self.agent_id = agent_id
         self.memory_dir = Path(memory_base_dir) / agent_id
+
+        # One-time migration: rename the old __multi_agent__ directory to
+        # _collective_memory_ so existing deployments upgrade transparently.
+        if agent_id == COLLECTIVE_AGENT_ID:
+            old_dir = Path(memory_base_dir) / "__multi_agent__"
+            if old_dir.exists() and not self.memory_dir.exists():
+                import shutil
+                shutil.move(str(old_dir), str(self.memory_dir))
+
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         self.archive_dir = self.memory_dir / "archive"
         self.archive_dir.mkdir(exist_ok=True)
@@ -614,10 +629,45 @@ class AgentMemory:
         return self.personality_path.read_text(encoding='utf-8')
 
     def update_personality(self, trait: str, description: str):
-        """Add or update personality trait"""
+        """Add or update personality trait (appends a new section)."""
         current = self.personality_path.read_text(encoding='utf-8')
         update = f"\n## {trait}\n{description}\n"
         self.personality_path.write_text(current + update, encoding='utf-8')
+
+    def update_personality_section(self, section: str, content: str) -> None:
+        """
+        Find and replace an existing `## section` block in personality.md,
+        or append it if the section doesn't exist yet.
+
+        Used by the consolidation engine to evolve the agent's adaptive style
+        based on observed user communication patterns without growing the file
+        unboundedly.
+        """
+        current = self.personality_path.read_text(encoding='utf-8')
+        lines = current.split('\n')
+        new_lines: list[str] = []
+        in_section = False
+        section_header = f"## {section}"
+        section_found = False
+
+        for line in lines:
+            if line.startswith('## '):
+                if line == section_header:
+                    in_section = True
+                    section_found = True
+                    new_lines.append(line)
+                    new_lines.append(content)
+                else:
+                    in_section = False
+                    new_lines.append(line)
+            elif not in_section:
+                new_lines.append(line)
+
+        if not section_found:
+            new_lines.append(f"\n## {section}")
+            new_lines.append(content)
+
+        self.personality_path.write_text('\n'.join(new_lines), encoding='utf-8')
 
     # ============ Habits ============
 

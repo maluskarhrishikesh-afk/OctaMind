@@ -4,9 +4,9 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Octa Bot â€” Your Personal AI Assistant</title>
+    <title>Octa Bot - Your Personal AI Assistant</title>
     <meta name="description"
-        content="Meet Octa â€” your personal AI that handles your emails, files, messages, and more. Just say what you want. No tech skills needed." />
+        content="Meet Octa - your personal AI that handles your emails, files, messages, and more. Just say what you want. No tech skills needed." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -298,7 +298,7 @@
 
         /* QUICKSTART */
         #quickstart { background: linear-gradient(180deg, transparent, rgba(233,30,140,0.05), transparent); }
-        .qs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; max-width: 1000px; margin: 0 auto; }
+        .qs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; max-width: 1000px; margin: 0 auto; }
         .qs-step-label { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .qs-num { width: 32px; height: 32px; border-radius: 8px; background: var(--pink); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 800; flex-shrink: 0; }
         .qs-title { font-size: 0.95rem; font-weight: 700; color: #fff; }
@@ -327,6 +327,28 @@
         .footer-bottom a { color: var(--muted); text-decoration: none; }
         .footer-bottom a:hover { color: var(--pink-light); }
         .heart { color: var(--pink); }
+
+        /* SCREENSHOT / IN ACTION */
+        #in-action { text-align: center; background: linear-gradient(180deg, transparent 0%, rgba(124,58,237,0.05) 50%, transparent 100%); }
+        .screenshot-frame {
+            position: relative; display: inline-block; max-width: 960px; width: 100%;
+            border-radius: 18px; padding: 3px;
+            background: linear-gradient(135deg, var(--pink) 0%, var(--violet) 50%, var(--teal) 100%);
+            box-shadow: 0 0 80px rgba(233,30,140,0.25), 0 40px 120px rgba(0,0,0,0.5);
+        }
+        .screenshot-frame img {
+            width: 100%; border-radius: 16px; display: block;
+            background: var(--card-bg);
+        }
+        .screenshot-badges {
+            display: flex; gap: 10px; justify-content: center; margin-top: 28px; flex-wrap: wrap;
+        }
+        .scr-badge {
+            display: flex; align-items: center; gap: 7px;
+            background: var(--card-bg); border: 1px solid var(--border-dim); border-radius: 100px;
+            padding: 7px 16px; font-size: 0.8rem; color: var(--muted);
+        }
+        .scr-badge span { color: var(--pink); font-size: 1rem; }
 
         /* Animations */
         @keyframes fadeUp { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: translateY(0); } }
@@ -373,6 +395,7 @@
         </a>
         <div class="nav-links" id="navLinks">
             <a href="#stories">Stories</a>
+            <a href="#in-action">In Action</a>
             <a href="#what-can-it-do">What it does</a>
             <a href="#agents">Helpers</a>
             <a href="#remote">Anywhere</a>
@@ -575,6 +598,29 @@
         </div>
     </section>
 
+    <!-- SEE IT IN ACTION -->
+    <section id="in-action" class="section-pad">
+        <div class="section-header reveal">
+            <div class="section-tag">See It In Action</div>
+            <h2>A real conversation &mdash;<br><em>right on your screen</em></h2>
+            <p class="section-sub">
+                This is Octa Bot&rsquo;s personal assistant interface &mdash; clean, dark, and always one message away.
+            </p>
+        </div>
+
+        <div style="text-align:center;" class="reveal">
+            <div class="screenshot-frame">
+                <img src="octabot_in_action_01.png" alt="Octa Bot personal assistant chat interface in action" loading="lazy" />
+            </div>
+            <div class="screenshot-badges">
+                <div class="scr-badge"><span>💬</span> Just type naturally</div>
+                <div class="scr-badge"><span>⚡</span> Instant results</div>
+                <div class="scr-badge"><span>🔒</span> Runs 100% locally</div>
+                <div class="scr-badge"><span>🧠</span> Remembers your preferences</div>
+            </div>
+        </div>
+    </section>
+
     <!-- WHAT IT DOES  -->
     <section id="what-can-it-do" class="section-pad">
         <div class="section-header reveal">
@@ -631,7 +677,7 @@
                 <div class="agent-icon">📧</div>
                 <div class="agent-name">Email</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Read &amp; search your emails</li>
                         <li>Send emails &amp; replies</li>
@@ -676,7 +722,7 @@
                 <div class="agent-icon">✈️</div>
                 <div class="agent-name">Telegram</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Send &amp; receive messages</li>
                         <li>Schedule messages</li>
@@ -691,7 +737,7 @@
                 <div class="agent-icon">🗂️</div>
                 <div class="agent-name">Files</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Browse &amp; search your PC</li>
                         <li>Copy, move &amp; delete files</li>
@@ -706,7 +752,7 @@
                 <div class="agent-icon">📅</div>
                 <div class="agent-name">Calendar</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Create &amp; reschedule events</li>
                         <li>Find free time slots</li>
@@ -721,7 +767,7 @@
                 <div class="agent-icon">📈</div>
                 <div class="agent-name">Stock Market</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Real-time stock prices</li>
                         <li>Full technical analysis</li>
@@ -736,7 +782,7 @@
                 <div class="agent-icon">🌐</div>
                 <div class="agent-name">Web Research</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Browse &amp; summarise pages</li>
                         <li>Search the web for you</li>
@@ -751,7 +797,7 @@
                 <div class="agent-icon">💼</div>
                 <div class="agent-name">LinkedIn</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Post text, images &amp; videos</li>
                         <li>Write post content for you</li>
@@ -766,7 +812,7 @@
                 <div class="agent-icon">✨</div>
                 <div class="agent-name">File Organizer</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Tidy Desktop &amp; Downloads</li>
                         <li>Propose an organisation plan</li>
@@ -780,7 +826,7 @@
                 <div class="agent-icon">💬</div>
                 <div class="agent-name">Slack</div>
                 <details class="abilities-details">
-                    <summary class="abilities-link">\u2728 What can I do?</summary>
+                    <summary class="abilities-link">✨ What can I do?</summary>
                     <ul class="abilities-list">
                         <li>Send &amp; read Slack messages</li>
                         <li>Browse channels</li>
@@ -869,9 +915,9 @@
     <section id="remote" class="section-pad">
         <div class="section-header reveal">
             <div class="section-tag">Use It from Anywhere</div>
-            <h2>Your phone is<br><em>Octa&rsquo;s command centre</em></h2>
+            <h2>Reach it from<br><em>anywhere in the world</em></h2>
             <p class="section-sub">
-                As long as your computer is on at home, you can control everything from anywhere in the world &mdash;
+                As long as your computer is on at home, you can control everything from anywhere &mdash;
                 through WhatsApp or Telegram.
             </p>
         </div>
@@ -903,14 +949,6 @@
             </div>
         </div>
 
-        <div class="use-pills reveal">
-            <div class="use-pill">📄 <span>Retrieve a forgotten file from your home PC</span></div>
-            <div class="use-pill">📊 <span>Get a stock report emailed to you</span></div>
-            <div class="use-pill">📅 <span>Book a meeting while commuting</span></div>
-            <div class="use-pill">💼 <span>Post to LinkedIn from your phone</span></div>
-            <div class="use-pill">🗂️ <span>Tidy your Downloads folder remotely</span></div>
-            <div class="use-pill">📧 <span>Reply to urgent emails hands-free</span></div>
-        </div>
     </section>
 
     <!-- QUICK START -->
@@ -973,23 +1011,6 @@
                 </div>
             </div>
 
-            <div class="reveal">
-                <div class="qs-step-label">
-                    <div class="qs-num">4</div>
-                    <div class="qs-title">Create your first helper</div>
-                </div>
-                <div class="code-block">
-                    <div><span class="cb-comment"># Or create a helper via Python</span></div>
-                    <div><span style="color:#c084fc">from</span> src.agent.core <span style="color:#c084fc">import</span> get_agent_manager</div>
-                    <br>
-                    <div>manager = get_agent_manager()</div>
-                    <div>agent = manager.create_agent(</div>
-                    <div>  name=<span class="cb-str">"My Email Helper"</span>,</div>
-                    <div>  agent_type=<span class="cb-str">"gmail"</span>,</div>
-                    <div>  role=<span class="cb-str">"Keep my inbox tidy"</span></div>
-                    <div>)</div>
-                </div>
-            </div>
         </div>
     </section>
 
@@ -1032,6 +1053,18 @@
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/CONTRIBUTING.md">Contribute</a></li>
                 </ul>
             </div>
+
+        </div>
+
+        <div class="footer-bottom">
+            <span>Built with <span class="heart">♥</span> &middot; Open Source &middot; MIT License</span>
+            <span>
+                <a href="https://github.com/maluskarhrishikesh-afk/OctaMind">GitHub</a>
+                &nbsp;&middot;&nbsp;
+                <a href="https://github.com/maluskarhrishikesh-afk/OctaMind/tree/main/documentation">Docs</a>
+            </span>
+        </div>
+    </footer>
 
     <script>
         function toggleNav() {

@@ -1517,7 +1517,7 @@ def generate_full_report(
     try:
         from src.agent.memory.agent_memory import get_agent_memory
         import os
-        agent_id = os.getenv("AGENT_ID", "__multi_agent__")
+        agent_id = os.getenv("AGENT_ID", "_collective_memory_")
         mem = get_agent_memory(agent_id)
         mem.add_interaction(
             command=f"stock analysis {symbol.upper()}",

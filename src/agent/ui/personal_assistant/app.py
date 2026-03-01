@@ -36,6 +36,8 @@ sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..")
 ))
 
+import re as _re
+
 # ── Lazy workflow imports ───────────────────────────────────────────
 
 
@@ -44,7 +46,60 @@ def _import_workflows():
     return detect_agents_needed, run_workflow
 
 
-def _chat_response(message: str, agent_name: str, agent_id: str = None) -> str:
+# ── Emotion detection ────────────────────────────────────────────────────────
+# Zero extra LLM calls — pure regex keyword scan.
+# Returns (label, guidance) on a match, None otherwise.
+_EMOTION_RULES: list[tuple[str, str, str]] = [
+    (
+        r"\b(angry|furious|infuriating|outrage|outraged|ridiculous|useless|hate this|fed up|terrible|horrible|awful|disgusting)\b",
+        "angry",
+        "The user appears angry or frustrated. Start by warmly acknowledging their feelings — do NOT be dismissive or defensive. Then address their request calmly and helpfully.",
+    ),
+    (
+        r"\b(frustrated|annoying|annoyed|irritated|not working|broken|waste|again|still doesn.{0,5}t|never works|always wrong|keep failing|keeps failing)\b",
+        "frustrated",
+        "The user seems frustrated. Acknowledge this gently first. Be concise and focus on solving the problem directly.",
+    ),
+    (
+        r"\b(sad|depressed|upset|hopeless|worthless|miserable|lonely|overwhelmed|can.{0,5}t cope|crying|feeling low|feeling down)\b",
+        "sad_low",
+        "The user may be feeling low or overwhelmed. Lead with warmth and compassion. Offer encouragement before practical advice.",
+    ),
+    (
+        r"\b(stressed|panic|panicking|urgent|emergency|asap|right now|immediately|deadline|in trouble|please help|help me now)\b",
+        "stressed",
+        "The user appears stressed or in an urgent situation. Be calm and decisive — prioritise the most important action first and give a direct answer.",
+    ),
+    (
+        r"\b(should i quit|thinking of quitting|about to quit|want to quit|give up|give everything up|drop out|delete everything|delete all|leave everything|start over completely)\b",
+        "major_decision",
+        "The user may be considering a major or irreversible decision. Be thoughtful and non-judgmental. Gently acknowledge their situation, ask ONE clarifying question if helpful, and do NOT encourage hasty action.",
+    ),
+]
+
+_EMOTION_EMPATHY_OPENERS: dict[str, str] = {
+    "angry":         "I hear you — let's work through this together. ",
+    "frustrated":    "I understand your frustration. ",
+    "sad_low":       "I'm here for you. ",
+    "stressed":      "No worries, I've got this. ",
+    "major_decision": "That's a big decision — take a breath. ",
+}
+
+
+def _detect_emotion(message: str) -> tuple[str, str] | None:
+    """
+    Quick keyword-based emotion scan (zero LLM calls).
+    Returns (label, empathy_guidance_for_llm) or None.
+    Only the first matching rule fires (ordered by severity).
+    """
+    for pattern, label, guidance in _EMOTION_RULES:
+        if _re.search(pattern, message, _re.IGNORECASE):
+            return label, guidance
+    return None
+
+
+def _chat_response(message: str, agent_name: str, agent_id: str = None,
+                   emotion_hint: str = "") -> str:
     """
     Handle conversational (non-workflow) messages via the LLM.
     Used when the command doesn't involve multiple agents.
@@ -60,6 +115,13 @@ def _chat_response(message: str, agent_name: str, agent_id: str = None) -> str:
             memory_context = get_collective_context()
         except Exception as mem_err:
             logger.debug("Collective memory load skipped: %s", mem_err)
+
+        # Inject emotion guidance so the LLM responds with appropriate empathy
+        if emotion_hint:
+            memory_context = (
+                f"[Emotional Context — respond with empathy first: {emotion_hint}]\n\n"
+                + memory_context
+            )
 
         # Layer on per-message recall from own memory
         if agent_id:
@@ -337,6 +399,42 @@ def _persist_dashboard_chat(pa_id: str, messages: list) -> None:
         logger.debug("Dashboard chat persist skipped: %s", exc)
 
 
+# _inject_fixed_chat_bar removed — replaced by st.container(height=…) native Streamlit layout
+
+
+def _status_card(phase: str, steps: list, state: str = "running") -> str:
+    """Return a self-contained dark HTML progress card. state: running|complete|error"""
+    _palette = {
+        "running": {"bg": "rgba(124,58,237,0.12)", "border": "rgba(124,58,237,0.4)",
+                    "label": "#c4b5fd", "icon": "⚙️"},
+        "complete": {"bg": "rgba(34,197,94,0.12)",  "border": "rgba(34,197,94,0.4)",
+                     "label": "#86efac",  "icon": "✅"},
+        "error":    {"bg": "rgba(239,68,68,0.12)",   "border": "rgba(239,68,68,0.4)",
+                     "label": "#fca5a5",  "icon": "❌"},
+    }
+    c = _palette.get(state, _palette["running"])
+    dots = ""
+    if state == "running":
+        dots = ("<span style='display:inline-block;animation:spin 1s linear infinite;'"
+                ">⏳</span> ")
+    rows = "".join(
+        f"<div style='color:#94a3b8;font-size:0.82rem;padding:2px 0 2px 18px;'>▸ {s}</div>"
+        for s in steps
+    )
+    pulse = (
+        "<style>@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}</style>"
+        if state == "running" else ""
+    )
+    return (
+        f"{pulse}"
+        f"<div style='background:{c['bg']};border:1px solid {c['border']};"
+        f"border-radius:12px;padding:12px 16px;margin:6px 0;'>"
+        f"<div style='color:{c['label']};font-weight:700;font-size:0.93rem;'>"
+        f"{dots}{phase}</div>"
+        f"{rows}</div>"
+    )
+
+
 @st.fragment(run_every=5)
 def _render_live_channels() -> None:
     """Auto-refreshing live feed of all external-channel conversations."""
@@ -387,7 +485,7 @@ def _render_live_channels() -> None:
                     st.caption("No messages yet.")
                     continue
 
-                for msg in messages[-12:]:
+                for msg in reversed(messages[-12:]):
                     role = msg.get("role", "user")
                     content = msg.get("content", "")
                     ts = msg.get("ts", "")
@@ -599,7 +697,20 @@ def _reauth_gmail_ui(context: str = "", key_suffix: str = "") -> None:
 
 
 def _render_pa_chat(pa: dict) -> None:
-    """Render an independent chat panel for one Personal Assistant."""
+    """Render an independent chat panel for one Personal Assistant.
+
+    Layout (ChatGPT-style, fully native Streamlit):
+      ┌─────────────────────────────────────────┐
+      │  scrollable message area (container)    │
+      │  • all history messages                 │
+      │  • live status placeholders when busy   │
+      └─────────────────────────────────────────┘
+      [ chat_input — always anchored below ]
+
+    No JS injection needed.  st.container(height=…) gives a fixed-height
+    scrollable viewport; st.chat_input() placed after it auto-anchors to the
+    bottom of the page, always visible regardless of message count.
+    """
     pa_id   = pa["id"]
     pa_name = pa["name"]
     pa_skills = set(pa.get("skills", []))
@@ -617,34 +728,30 @@ def _render_pa_chat(pa: dict) -> None:
                           for ch_name in pa_channels if ch_name in CHANNEL_REGISTRY]
             any_stopped = any(not ch.is_running() for _, ch in ch_objects)
 
-            badge_cols = st.columns(len(ch_objects) + 1)
-            for i, (ch_name, ch) in enumerate(ch_objects):
+            # ── Compact inline pill bar ────────────────────────────────────
+            pills_html = "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;'>"
+            for ch_name, ch in ch_objects:
                 running = ch.is_running()
-                color  = "#16a34a" if running else "#dc2626"
-                status = "Running" if running else "Stopped"
-                with badge_cols[i]:
-                    st.markdown(
-                        f"<div style='background:#1a1a2e;border:1px solid {color};"
-                        f"border-radius:10px;padding:8px 10px;text-align:center;'>"
-                        f"<div style='font-size:1.25rem'>{ch.icon}</div>"
-                        f"<div style='color:#e2e8f0;font-size:0.78rem;font-weight:600;"  
-                        f"margin-top:2px'>{ch.display_name}</div>"
-                        f"<div style='color:{color};font-size:0.7rem;margin-top:3px'>&#x25cf; {status}</div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-            with badge_cols[-1]:
-                if any_stopped:
-                    if st.button("\u25b6\ufe0f Start Channels",
-                                 key=f"start_ch_{pa_id}", type="primary"):
-                        _start_pa_channels(pa)
-                        st.rerun()
-                else:
-                    st.markdown(
-                        "<div style='color:#16a34a;padding:18px 4px;"
-                        "font-size:0.82rem;font-weight:600'>\u2705 All channels running</div>",
-                        unsafe_allow_html=True,
-                    )
+                dot_color = "#22c55e" if running else "#ef4444"
+                status_label = "Running" if running else "Stopped"
+                pills_html += (
+                    f"<span style='display:inline-flex;align-items:center;gap:5px;"
+                    f"background:#1a1a2e;border:1px solid {dot_color}33;"
+                    f"border-radius:20px;padding:3px 10px 3px 8px;font-size:0.78rem;'>"
+                    f"<span style='font-size:0.9rem'>{ch.icon}</span>"
+                    f"<span style='color:#e2e8f0;font-weight:600'>{ch.display_name}</span>"
+                    f"<span style='font-size:0.65rem;color:{dot_color};'>&#x25cf;&nbsp;{status_label}</span>"
+                    f"</span>"
+                )
+            if any_stopped:
+                pills_html += "</div>"
+                st.markdown(pills_html, unsafe_allow_html=True)
+                if st.button("▶️ Start Channels", key=f"start_ch_{pa_id}", type="primary"):
+                    _start_pa_channels(pa)
+                    st.rerun()
+            else:
+                pills_html += "</div>"
+                st.markdown(pills_html, unsafe_allow_html=True)
             st.divider()
         else:
             st.caption("No channels assigned \u2014 go to PA Settings to add one.")
@@ -682,176 +789,235 @@ def _render_pa_chat(pa: dict) -> None:
                 key_suffix=pa_id,
             )
 
-    # ── Chat history ──────────────────────────────────────────────────────────
-    for msg in st.session_state[mk("messages")]:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+    # ── Determine if a command is in-flight ───────────────────────────────────
+    # Evaluated once here so the container and the processing block see the
+    # same state within a single script run.
+    _is_processing = (
+        st.session_state[mk("processing")]
+        and bool(st.session_state.get(mk("command")))
+    )
 
-    # ── Chat input (placed here — before the processing block — so that it is
-    # rendered on every script run, even while the LLM is blocking execution
-    # below.  st.chat_input() always anchors itself to the bottom of the page
-    # regardless of where in the script it is called.) ───────────────────────
+    # ── Scrollable chat history area ──────────────────────────────────────────
+    # Fixed-height container keeps the chat input permanently visible below.
+    # All messages — including live status cards and the final reply — render
+    # inside this scrollable box, so the input is never pushed off-screen.
+    with st.container(height=560, border=False):
+        for msg in st.session_state[mk("messages")]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # Pre-create the two live placeholders INSIDE the container (and inside
+        # a chat_message bubble) so status cards and the reply appear in-line
+        # with the conversation, not below the input bar.
+        _card_ph = None
+        _result_ph = None
+        if _is_processing:
+            with st.chat_message("assistant"):
+                _card_ph = st.empty()   # status card (thinking/planning/executing/done)
+                _result_ph = st.empty() # final reply text
+
+    # ── Chat input — placed AFTER the container ───────────────────────────────
+    # Streamlit positions chat_input at the bottom of the viewport when it is
+    # not nested inside a scrollable container.  This gives a true fixed-bottom
+    # input bar without any JS injection.
     user_input = st.chat_input(
-        f"Ask {pa_name}…" if not st.session_state[mk("processing")] else "⏳ Processing — please wait…",
+        f"Ask {pa_name}…" if not st.session_state[mk("processing")] else "⏳ Processing…",
         key=f"chat_input_{pa_id}",
     )
     if user_input:
         if st.session_state[mk("processing")]:
             st.toast("⏳ Still thinking — please wait for the current response.", icon="⏳")
         else:
-            # Append to history immediately so it renders in the for-loop above
-            # on the next rerun (above the chat input), not below it.
             st.session_state[mk("messages")].append({"role": "user", "content": user_input})
             st.session_state[mk("command")] = user_input
             st.session_state[mk("processing")] = True
             st.rerun()
 
     # ── Process pending command ───────────────────────────────────────────────
-    if st.session_state[mk("processing")] and st.session_state[mk("command")]:
-        command = st.session_state[mk("command")]
-        st.session_state[mk("command")] = None
+    if not _is_processing:
+        return   # nothing to process — exit cleanly
 
-        # User message was already appended to history before the rerun — the
-        # for-loop above already rendered it, so we only need the assistant reply.
-        agents_needed = detect_agents_needed(command)
+    command = st.session_state[mk("command")]
+    st.session_state[mk("command")] = None   # clear so it doesn't re-run on next rerun
 
-        # Filter to only this PA's attached skills
-        if agents_needed is not None and pa_skills:
-            filtered = [a for a in agents_needed if a in pa_skills]
-            if not filtered:
-                # Required skill(s) are not attached to this PA — tell the user
-                _missing = [a for a in agents_needed if a not in pa_skills]
-                _m_str = " and ".join(f"**{s.title()}**" for s in _missing)
-                _sfx = "s" if len(_missing) > 1 else ""
-                _verb = "are" if len(_missing) > 1 else "is"
-                _no_skill_reply = (
-                    f"⚠️ This request needs the {_m_str} skill{_sfx}, "
-                    f"which {_verb} not enabled for **{pa_name}**.\n\n"
-                    f"Go to the **Configure** tab → **Skills** to enable it."
-                )
-                with st.chat_message("assistant"):
-                    st.markdown(_no_skill_reply)
-                st.session_state[mk("messages")].append({"role": "assistant", "content": _no_skill_reply})
-                st.session_state[mk("processing")] = False
-                st.rerun()
-            agents_needed = filtered
+    # Detect emotional signals in the user's message (zero extra LLM calls)
+    _emotion_result = _detect_emotion(command)
+    _emotion_label  = _emotion_result[0] if _emotion_result else None
+    _emotion_hint   = _emotion_result[1] if _emotion_result else ""
+    _empathy_opener = _EMOTION_EMPATHY_OPENERS.get(_emotion_label or "", "")
 
-        with st.chat_message("assistant"):
-            # ── Conversational ────────────────────────────────────────────────
-            if agents_needed is None:
-                with st.status("💭 Thinking…", expanded=False) as _think_status:
-                    st.write("🔍 Reading your message…")
-                    st.write("🧠 Reasoning & composing a reply…")
-                    reply = _chat_response(command, pa_name, pa_id)
-                    _think_status.update(label="✅ Done", state="complete", expanded=False)
-                st.markdown(reply)
-                st.session_state[mk("messages")].append({"role": "assistant", "content": reply})
-                _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
-                st.session_state[mk("processing")] = False
-                st.rerun()
+    # Safety fallback: if placeholders weren't created (shouldn't happen)
+    if _card_ph is None:
+        _card_ph = st.empty()
+    if _result_ph is None:
+        _result_ph = st.empty()
 
-            # ── Single-skill shortcut ─────────────────────────────────────────
-            if len(agents_needed) == 1:
-                single_agent = agents_needed[0]
-                icons  = {"drive": "📁", "email": "✉️", "files": "🗂️"}
-                labels = {"drive": "Drive", "email": "Email", "files": "Files"}
-                icon  = icons.get(single_agent, "🤖")
-                label = labels.get(single_agent, single_agent.title())
-                _result_status = "success"
-                with st.status(f"⚡ Routing to {icon} {label}…", expanded=True) as _skill_status:
-                    st.write(f"🔧 Preparing {label} skill…")
-                    try:
-                        from src.agent.workflows.agent_registry import get_executor
-                        executor = get_executor(single_agent)
-                        # Skills are stateless — always agent_id=None
-                        st.write("🚀 Executing task…")
-                        result = executor(command, agent_id=None) if executor else {"action": "error", "message": f"Skill '{single_agent}' not loaded."}
-                        _result_status = result.get("status", "success")
-                        action = result.get("action", "react_response")
-                        if action == "react_response" or "message" in result:
-                            reply = result.get("message", str(result))
-                        else:
-                            try:
-                                import importlib
-                                mod = importlib.import_module(f"src.agent.ui.{single_agent}_agent.app")
-                                compose_fn = getattr(mod, f"_compose_{single_agent}_response", None)
-                                reply = compose_fn(result, action, command) if compose_fn else str(result.get("message", result))
-                            except Exception:
-                                reply = str(result.get("message", result))
-                        st.write("📝 Formatting response…")
-                        _skill_status.update(label=f"✅ {label} completed", state="complete", expanded=False)
-                    except Exception as exc:
-                        logger.exception("Single-skill shortcut error: %s", exc)
-                        reply = f"❌ Something went wrong: {exc}"
-                        _skill_status.update(label="❌ Error", state="error", expanded=True)
+    # Decide which skill(s) are needed
+    agents_needed = detect_agents_needed(command)
 
-                # ── Auth error: show re-auth panel instead of the reply ────────
-                if _result_status == "auth_error":
-                    _reauth_gmail_ui(result.get("message", ""))
-                    st.session_state[mk("messages")].append({
-                        "role": "assistant",
-                        "content": "🔑 Gmail authorization required — use the Re-authorize button above.",
-                    })
-                else:
-                    st.markdown(reply)
-                    st.session_state[mk("messages")].append({"role": "assistant", "content": reply})
-                _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
-                st.session_state[mk("processing")] = False
-                st.rerun()
-
-            # ── Multi-skill workflow ──────────────────────────────────────────
-            result_placeholder = st.empty()
-            step_lines: list[str] = []
-            with st.status("🤖 Orchestrating agents…", expanded=True) as status_box:
-                st.write("🗺️ Planning your workflow…")
-                try:
-                    run_result = run_workflow(command)
-                    _total_steps = len(run_result.get("steps", []))
-                    for _i, sr in enumerate(run_result.get("steps", []), 1):
-                        step_text = _render_step_result(sr)
-                        st.markdown(f"**Step {_i}/{_total_steps}** — {step_text}")
-                        step_lines.append(step_text)
-                    st.write("📝 Composing final answer…")
-                    wf_status = run_result.get("status", "error")
-                    _elapsed = run_result.get("elapsed", 0)
-                    _iters   = len(run_result.get("steps", []))
-                    label_map = {
-                        "success": (f"✅ Completed in {_elapsed:.1f}s · {_iters} step(s)", "complete"),
-                        "partial": (f"⚠️ Partially completed · {_elapsed:.1f}s", "error"),
-                    }
-                    lbl, st_state = label_map.get(wf_status, ("❌ Something went wrong", "error"))
-                    status_box.update(label=lbl, state=st_state, expanded=False)
-                except Exception as exc:
-                    logger.exception("Workflow execution error: %s", exc)
-                    run_result = {"status": "error", "steps": [], "elapsed": 0, "plan": None, "summary": str(exc)}
-                    status_box.update(label="❌ Unexpected error", state="error", expanded=True)
-                    st.error(str(exc))
-
-            final_text = _render_workflow_output(run_result, command)
-            result_placeholder.markdown(final_text)
-
-        # Record to PA-level memory (not skill-level)
-        try:
-            from src.agent.memory.agent_memory import get_agent_memory
-            _mem = get_agent_memory(pa_id)
-            _mem.add_interaction(
-                command=command,
-                action="multi_skill_workflow",
-                result={
-                    "status": run_result.get("status", "error"),
-                    "agents": agents_needed,
-                    "steps": len(run_result.get("steps", [])),
-                },
-                importance="High",
+    # Filter to only this PA's attached skills
+    if agents_needed is not None and pa_skills:
+        filtered = [a for a in agents_needed if a in pa_skills]
+        if not filtered:
+            _missing = [a for a in agents_needed if a not in pa_skills]
+            _m_str = " and ".join(f"**{s.title()}**" for s in _missing)
+            _sfx = "s" if len(_missing) > 1 else ""
+            _verb = "are" if len(_missing) > 1 else "is"
+            _no_skill_reply = (
+                f"⚠️ This request needs the {_m_str} skill{_sfx}, "
+                f"which {_verb} not enabled for **{pa_name}**.\n\n"
+                f"Go to the **Configure** tab → **Skills** to enable it."
             )
-            st.session_state[mk("count")] += 1
-        except Exception as _mem_err:
-            logger.debug("PA workflow memory record skipped: %s", _mem_err)
+            _result_ph.markdown(_no_skill_reply)
+            st.session_state[mk("messages")].append({"role": "assistant", "content": _no_skill_reply})
+            st.session_state[mk("processing")] = False
+            st.rerun()
+        agents_needed = filtered
 
-        st.session_state[mk("messages")].append({"role": "assistant", "content": final_text})
+    # ── Conversational (no skill needed) ─────────────────────────────────────
+    if agents_needed is None:
+        _card_ph.markdown(
+            _status_card("🤔 Thinking…",
+                         ["Reading your message…", "Reasoning & composing a reply…"]),
+            unsafe_allow_html=True)
+        reply = _chat_response(command, pa_name, pa_id, emotion_hint=_emotion_hint)
+        _card_ph.markdown(_status_card("✅ Done", [], "complete"), unsafe_allow_html=True)
+        _result_ph.markdown(reply)
+        st.session_state[mk("messages")].append({"role": "assistant", "content": reply})
         _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
         st.session_state[mk("processing")] = False
         st.rerun()
+
+    # ── Single-skill shortcut ─────────────────────────────────────────────────
+    if len(agents_needed) == 1:
+        single_agent = agents_needed[0]
+        _icons  = {"drive": "📁", "email": "✉️", "files": "🗂️", "calendar": "📅", "stock_market": "📈"}
+        _labels = {"drive": "Drive", "email": "Email", "files": "Files", "calendar": "Calendar", "stock_market": "Stock Market"}
+        icon  = _icons.get(single_agent, "🤖")
+        label = _labels.get(single_agent, single_agent.replace("_", " ").title())
+        _result_status = "success"
+
+        _card_ph.markdown(
+            _status_card("🤔 Analyzing your request…", ["Detecting required skill…"]),
+            unsafe_allow_html=True)
+        _card_ph.markdown(
+            _status_card(f"⚙️ Routing to {icon} {label}…",
+                         [f"Preparing {label} skill…", "Executing task…"]),
+            unsafe_allow_html=True)
+        try:
+            from src.agent.workflows.agent_registry import get_executor
+            executor = get_executor(single_agent)
+            result = executor(command, agent_id=None) if executor else {"action": "error", "message": f"Skill '{single_agent}' not loaded."}
+            _result_status = result.get("status", "success")
+            action = result.get("action", "react_response")
+            if action == "react_response" or "message" in result:
+                reply = result.get("message", str(result))
+            else:
+                try:
+                    import importlib
+                    mod = importlib.import_module(f"src.agent.ui.{single_agent}_agent.app")
+                    compose_fn = getattr(mod, f"_compose_{single_agent}_response", None)
+                    reply = compose_fn(result, action, command) if compose_fn else str(result.get("message", result))
+                except Exception:
+                    reply = str(result.get("message", result))
+            _card_ph.markdown(
+                _status_card(f"✅ Done — {icon} {label}", [], "complete"),
+                unsafe_allow_html=True)
+        except Exception as exc:
+            logger.exception("Single-skill shortcut error: %s", exc)
+            reply = f"❌ Something went wrong: {exc}"
+            _result_status = "error"
+            _card_ph.markdown(
+                _status_card("❌ Error", [str(exc)[:120]], "error"),
+                unsafe_allow_html=True)
+
+        if _result_status == "auth_error":
+            _result_ph.markdown(
+                "🔑 **Gmail authorization required.** "
+                "The re-authorization panel is shown at the top of this chat — please click it."
+            )
+            _save_msg = "🔑 Gmail authorization required — use the Re-authorize button at the top."
+        else:
+            # Prepend a brief empathy opener for emotional messages
+            if _empathy_opener and not reply.startswith(("❌", "⚠️")):
+                reply = _empathy_opener + reply
+            _result_ph.markdown(reply)
+            _save_msg = reply
+
+        st.session_state[mk("messages")].append({"role": "assistant", "content": _save_msg})
+        _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+        st.session_state[mk("processing")] = False
+        st.rerun()
+
+    # ── Multi-skill workflow ──────────────────────────────────────────────────
+    _agent_display = {"drive": "📁 Drive", "email": "✉️ Email", "files": "🗂️ Files",
+                      "calendar": "📅 Calendar", "stock_market": "📈 Stocks"}
+    _agents_str = " + ".join(
+        _agent_display.get(a, f"🤖 {a.replace('_',' ').title()}") for a in agents_needed
+    )
+
+    _card_ph.markdown(
+        _status_card("🤔 Thinking…", ["Analyzing your request…", "Detecting required skills…"]),
+        unsafe_allow_html=True)
+    _card_ph.markdown(
+        _status_card(f"📋 Planning workflow for: {_agents_str}",
+                     ["Designing step-by-step execution plan…"]),
+        unsafe_allow_html=True)
+    _card_ph.markdown(
+        _status_card("⚙️ Executing…", ["Running agents — this may take a moment…"]),
+        unsafe_allow_html=True)
+
+    try:
+        run_result = run_workflow(command)
+        _total_steps = len(run_result.get("steps", []))
+        _step_lines = []
+        for _i, sr in enumerate(run_result.get("steps", []), 1):
+            _s_icon  = "✅" if sr.get("status") == "success" else "❌"
+            _s_badge = _format_step_badge(sr.get("agent", "?"))
+            _s_tool  = sr.get("tool", "?")
+            _step_lines.append(f"{_s_icon} Step {_i}/{_total_steps} — {_s_badge} › {_s_tool}")
+        wf_status = run_result.get("status", "error")
+        _elapsed  = run_result.get("elapsed", 0)
+        _done_state = "complete" if wf_status == "success" else "error"
+        _done_label = (
+            f"✅ Done — {_total_steps} step(s) in {_elapsed:.1f}s"
+            if wf_status == "success"
+            else f"⚠️ Partial / Error — {_total_steps} step(s) in {_elapsed:.1f}s"
+        )
+        _card_ph.markdown(_status_card(_done_label, _step_lines, _done_state), unsafe_allow_html=True)
+    except Exception as exc:
+        logger.exception("Workflow execution error: %s", exc)
+        run_result = {"status": "error", "steps": [], "elapsed": 0, "plan": None, "summary": str(exc)}
+        _card_ph.markdown(_status_card("❌ Unexpected error", [str(exc)[:120]], "error"), unsafe_allow_html=True)
+
+    final_text = _render_workflow_output(run_result, command)
+    # Prepend empathy opener for emotional messages (multi-skill workflow)
+    if _empathy_opener and not final_text.startswith(("❌", "⚠️")):
+        final_text = _empathy_opener + final_text
+    _result_ph.markdown(final_text)
+
+    # Record to PA-level memory (not skill-level)
+    try:
+        from src.agent.memory.agent_memory import get_agent_memory
+        _mem = get_agent_memory(pa_id)
+        _mem.add_interaction(
+            command=command,
+            action="multi_skill_workflow",
+            result={
+                "status": run_result.get("status", "error"),
+                "agents": agents_needed,
+                "steps": len(run_result.get("steps", [])),
+            },
+            importance="High",
+        )
+        st.session_state[mk("count")] += 1
+    except Exception as _mem_err:
+        logger.debug("PA workflow memory record skipped: %s", _mem_err)
+
+    st.session_state[mk("messages")].append({"role": "assistant", "content": final_text})
+    _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+    st.session_state[mk("processing")] = False
+    st.rerun()
 
 
 # ── PA Settings ───────────────────────────────────────────────────────────────
@@ -1197,7 +1363,7 @@ def _render_pa_configure(pa: dict) -> None:
 
 def main() -> None:
     logger.debug("=== MULTI-AGENT MAIN() CALLED ===")
-    agent_id = os.getenv("AGENT_ID", "__multi_agent__")
+    agent_id = os.getenv("AGENT_ID", "_collective_memory_")
 
     # ── Single-PA mode: launched by process_manager for a specific PA ─────────
     pa_id_filter = os.getenv("PA_ID", "").strip()
@@ -1331,7 +1497,7 @@ def main() -> None:
             unsafe_allow_html=True,
         )
         running = get_running_agents()
-        agent_agents = [a for a in running if a.get("id") != "__multi_agent__"]
+        agent_agents = [a for a in running if a.get("id") != "_collective_memory_"]
         if agent_agents:
             for a in agent_agents:
                 atype = a.get("type") or a.get("agent_type", "agent")

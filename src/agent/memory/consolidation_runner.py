@@ -1,7 +1,7 @@
 """
 Global Consolidation Runner
 
-Runs memory consolidation for all Personal Assistants (including __multi_agent__)
+Runs memory consolidation for all Personal Assistants (including _collective_memory_)
 in a smart background thread.
 
 Skills (gmail, google_drive, files, whatsapp, telegram, calendar) are stateless
@@ -33,14 +33,15 @@ from datetime import datetime
 logger = logging.getLogger("Octa Bot.consolidation_runner")
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
-_CHECK_INTERVAL_SECONDS = 30 * 60   # poll every 30 minutes
-_TICK_SECONDS = 5                   # granularity for stop responsiveness
+CHECK_EVERY_HOURS = 8              # full consolidation cycle period
+_CHECK_INTERVAL_SECONDS = CHECK_EVERY_HOURS * 60 * 60
+_TICK_SECONDS = 30                 # granularity for stop responsiveness
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 _ASSISTANTS_JSON = _PROJECT_ROOT / "data" / "assistants.json"   # Personal Assistants only
 _HUB_CONV_JSON   = _PROJECT_ROOT / "data" / "hub_conversations.json"  # Live Channels
 _MEMORY_ROOT     = _PROJECT_ROOT / "memory"
-_MULTI_AGENT_ID  = "__multi_agent__"
+from src.agent.memory.agent_memory import COLLECTIVE_AGENT_ID as _MULTI_AGENT_ID
 
 
 class ConsolidationRunner:
@@ -97,7 +98,7 @@ class ConsolidationRunner:
             elapsed += _TICK_SECONDS
             if elapsed >= _CHECK_INTERVAL_SECONDS:
                 elapsed = 0
-                logger.info("[ConsolidationRunner] 30-minute check triggered.")
+                logger.info("[ConsolidationRunner] 8-hour consolidation cycle triggered.")
                 self._ingest_live_channels()
                 self._run_cycle()
 

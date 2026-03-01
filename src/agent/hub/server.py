@@ -70,7 +70,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="The user's text message")
     session_id: str = Field(..., description="Unique ID for the conversation (e.g. 'telegram_12345')")
     source: str = Field("api", description="Channel source: telegram | whatsapp | api | …")
-    agent_id: Optional[str] = Field("__multi_agent__", description="Octa Bot agent ID to use")
+    agent_id: Optional[str] = Field("_collective_memory_", description="Octa Bot agent ID to use")
     agent_name: Optional[str] = Field("Personal Assistant", description="Display name of the agent")
 
 
@@ -129,7 +129,7 @@ async def chat(
         message=body.message,
         session_id=body.session_id,
         source=body.source,
-        agent_id=body.agent_id or "__multi_agent__",
+        agent_id=body.agent_id or "_collective_memory_",
         agent_name=body.agent_name or "Personal Assistant",
     )
 

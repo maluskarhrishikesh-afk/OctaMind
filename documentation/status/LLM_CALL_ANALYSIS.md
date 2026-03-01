@@ -1,226 +1,331 @@
-# LLM Call Analysis — How Many AI Calls Happen Per Query?
+# LLM Call Analysis � Hybrid Planner + Deterministic Execution
 
-> **Purpose:** This document explains, in plain English, exactly how many LLM (AI model) calls happen for different types of user requests. Use this as a baseline when planning optimisations.
+> **Purpose:** This document explains how LLM calls happen in the new architecture that uses a single planning call, DAG-based execution, topological sort, and deterministic tool execution � with an optional fallback to ReAct only when required.
 
-Last updated: 2026-02-27
+Last updated: 2026-03-01 (added total LLM call count to completion log; fixed Python-bool JSON parse bug in skill_react_engine; fixed tilde path expansion in dag_planner; updated website)
 
 ---
 
-## The Short Answer
+## Executive Summary
 
-| What you say | LLM calls (typical) | LLM calls (worst case) |
+| Request Type | Old (Pure ReAct) | New Hybrid |
 |---|:---:|:---:|
-| Casual chat ("How are you?") | **2** | 2 |
-| Single task ("Send an email to Alice") | **2–4** | 7 |
-| Two-agent task ("Zip folder X and email me") | **5–8** | 25 |
-| Three-agent task ("Download, zip, and email") | **7–12** | 31 |
+| Casual chat | 2 calls | 1 call |
+| Single tool command | 3�7 calls | 1 call + sub-agent |
+| Two-agent task | 7�25 calls | 1 call + sub-agents |
+| Three-agent task | 9�31 calls | 1 call + sub-agents |
+| Complex / unknown task | 7�31 calls | 1�3 calls + sub-agents |
+
+> **Sub-agents** (drive, email, files, etc.) still run their own focused ReAct loops for actual tool execution. The massive reduction comes from eliminating the master orchestration loop � previously 1�12 LLM calls for coordination alone.
 
 ---
 
-## What is an "LLM Call"?
+## New Architecture Overview
 
-Every time the system asks the AI model a question and waits for an answer, that is **one LLM call**. Each call takes time (~1–5 seconds) and costs tokens.
+**Old (Pure ReAct):**
 
-Think of it like sending a text message to a very smart assistant. Each back-and-forth exchange is one call.
+```
+Master ReAct loop (1�12 LLM calls)
+    ? detect agents needed (1 LLM call)
+    ? delegate to sub-agent
+        ? Sub ReAct loop (1�6 LLM calls)
+            ? think ? tool ? think ? tool
+    ? delegate to next sub-agent
+        ? Sub ReAct loop (1�6 LLM calls)
+    ? final_answer (1 LLM call)
+```
+
+**New (Hybrid Planner + Deterministic Execution):**
+
+```
+User Input
+   ?
+Keyword Pre-Filter (0 LLM calls)
+   ? [if agents clearly needed]
+LLM Planner (1 call) ? Structured DAG Plan (JSON with depends_on)
+   ?
+Topological Sort (0 LLM calls � pure algorithm)
+   ?
+Deterministic Execution Engine (0 orchestration LLM calls)
+   +- Step 1: Sub-Agent A (runs own focused ReAct loop)
+   +- Step 2: Sub-Agent B (runs own focused ReAct loop, receives A''s output)
+   +- Step 3: Sub-Agent C (runs own focused ReAct loop, receives B''s output)
+   ?
+Optional LLM (only for content generation or ambiguous recovery)
+```
 
 ---
 
-## The Two Loops Explained Simply
+## Step 1 � Keyword Pre-Filter (0 LLM Calls)
 
-### Loop 1 — Per-Skill Loop (`run_skill_react`)
-
-When one agent (e.g. the Email Agent) needs to do its job, it has a conversation with the AI:
+Before any LLM call is made, a fast regex/keyword scan checks whether the command references no agents at all. This eliminates the old `detect_agents_needed()` LLM classification call for clear cases.
 
 ```
-Turn 1:  User: "Send email to bob@gmail.com"
-         AI:   "I'll call send_email tool"
-               → Tool runs → result comes back
-
-Turn 2:  "Tool result: email sent"
-         AI:   "OK, task is done. Final answer: ✅ Email sent."
+# router.py � keyword pre-filter runs before LLM routing
+if keyword_pre_filter(command) == "no_agents":
+    return None   # skip LLM entirely ? chat_response() handles it
 ```
 
-This loop runs **up to 6 turns** per skill. Simple tasks finish in **1–2 turns**. Complex tasks (multiple tools needed) may take 3–6 turns.
-
-**Each turn = 1 LLM call.**
+- **Zero-keyword-match commands ? 0 LLM router calls** (then 1 call for the chat reply)
+- Ambiguous commands ? LLM routing fires as before
 
 ---
 
-### Loop 2 — Master Orchestrator Loop (`react_workflow`)
+## Step 2 � Planner Call (Single LLM Call)
 
-When the user's request needs **more than one agent** (e.g. Files agent + Email agent), a master loop coordinates them:
+The LLM receives the user command and returns a complete Directed Acyclic Graph (DAG) as structured JSON:
 
+```json
+[
+  {
+    "id": "download1",
+    "agent": "drive",
+    "instruction": "Download report.pdf from Google Drive",
+    "depends_on": [],
+    "description": "Download report.pdf"
+  },
+  {
+    "id": "zip1",
+    "agent": "files",
+    "instruction": "Zip the file at {download1.file_path} into an archive",
+    "depends_on": ["download1"],
+    "description": "Zip downloaded file"
+  },
+  {
+    "id": "email1",
+    "agent": "email",
+    "instruction": "Send the zip at {zip1.file_path} to {__user_email__} with subject ''Report''",
+    "depends_on": ["zip1"],
+    "description": "Email the zip"
+  }
+]
 ```
-Turn 1:  User: "Zip my Documents folder and email me the zip"
-         AI:   "I'll start by delegating to the Files agent"
-               → Files agent runs its own 6-turn loop (Loop 1)
-               → Files agent reports: "Done, zip is at C:\docs.zip"
 
-Turn 2:  "Observation: zip created at C:\docs.zip"
-         AI:   "Now I'll delegate to the Email agent"
-               → Email agent runs its own 6-turn loop (Loop 1)
-               → Email agent reports: "Email sent"
-
-Turn 3:  "Observation: email sent"
-         AI:   "Both done. Final answer: ✅ All complete."
-```
-
-This master loop runs **up to 12 turns**. Each delegation call triggers a full per-skill sub-loop.
-
-**Each master turn = 1 LLM call. Each sub-agent turn = 1 more LLM call.**
+This is **one LLM call** that replaces the entire master orchestration loop.
 
 ---
 
-## Detailed Breakdown by Query Type
+## Step 3 � Topological Sort (0 LLM Calls)
+
+The system resolves execution order algorithmically from the `depends_on` graph:
+
+```
+download1 ? zip1 ? email1
+```
+
+Steps with no shared dependencies are independent and can run concurrently. No LLM involvement.
+
+---
+
+## Step 4 � Deterministic Execution
+
+Each step is dispatched to the registered agent executor. `{step_id.file_path}` tokens in instructions are resolved from the previous step''s output before the agent is called:
+
+```python
+# dag_planner.py � deterministic execution loop
+for step in sorted_steps:
+    resolved_instruction = resolve_tokens(step.instruction, context_results)
+    executor = AGENT_REGISTRY[step.agent]
+    result = executor(user_query=resolved_instruction, ...)
+    context_results[step.id] = result
+```
+
+- **Zero orchestration LLM calls** during this phase
+- Sub-agents (drive, email, files, etc.) still use their own focused ReAct loops
+- File paths and artifacts are wired between steps automatically
+
+---
+
+## LLM Calls Per Scenario (New System)
 
 ### 1. Casual Chat
-**Example:** "What's the weather like?" / "How are you?"
 
 ```
-classify_intent()  → 1 call  (is this a command or chat?)
-_chat_response()   → 1 call  (write the reply)
-─────────────────────────────
-Total: 2 calls
+Pre-filter: no agents detected ? 0 router calls
+chat_response()               ? 1 call
+-----------------------------------------
+Total orchestration: 1 call
 ```
 
----
-
-### 2. Single-Skill Command (via Personal Assistant)
-**Example:** "Send an email to alice@example.com saying hello"
+### 2. Single Tool Command
+**Example:** "Send email to Alice"
 
 ```
-classify_intent()          → 1 call   (COMMAND detected)
-run_skill_react()
-  Turn 1: think + call tool → 1 call   (AI decides to call send_email)
-  Tool: send_email runs     → 0 calls  (just code, no AI)
-  Turn 2: confirm done      → 1 call   (AI writes final answer)
-─────────────────────────────────────────
-Typical total: 3 calls
-Max total:     7 calls  (if 6 iterations needed)
+Keyword pre-filter detects email ? skip LLM router
+DAG planner call               ? 1 call
+email agent ReAct loop         ? 1�3 calls  (tool execution)
+-----------------------------------------
+Total: 2�4 calls  (was 3�8 with old system)
 ```
 
----
-
-### 3. Single-Skill Command (via Workflow Dashboard)
-**Example:** "Download my latest invoice from Drive"
+### 3. Two-Agent Command
+**Example:** "Zip my Documents folder and email me the zip"
 
 ```
-react_workflow() master loop
-  Turn 1: AI decides to delegate to Drive agent  → 1 call
-  run_skill_react() - Drive agent
-    Turn 1: AI calls search_files tool            → 1 call
-    Turn 2: AI calls download_file tool           → 1 call
-    Turn 3: AI confirms done                      → 1 call
-  Turn 2: Master AI sees result, calls final_answer → 1 call
-─────────────────────────────────────────
-Typical total: 5 calls
-Max total:     13 calls (12 master + 6 sub-agent - 5 overlap minimum)
+DAG planner call             ? 1 call
+Step: files agent (zip)      ? 1�2 calls  (tool execution)
+Step: email agent (send)     ? 1�2 calls  (tool execution)
+-----------------------------------------
+Total: 3�5 calls  (was 7�25 with old system)
 ```
 
----
-
-### 4. Two-Agent Command
-**Example:** "Zip my Documents folder and email me the zip file"
+### 4. Three-Agent Command
+**Example:** "Download report.pdf from Drive, zip it, and email me"
 
 ```
-react_workflow() master loop
-  Turn 1: AI → delegate to Files agent           → 1 call
-  ┌─ Files agent: run_skill_react()
-  │  Turn 1: AI calls zip_folder tool            → 1 call
-  │  Turn 2: AI confirms zip done                → 1 call
-  └─ Returns: "zip at C:\Documents.zip"
-  Turn 2: AI → delegate to Email agent           → 1 call
-  ┌─ Email agent: run_skill_react()
-  │  Turn 1: AI calls send_email_with_attachment → 1 call
-  │  Turn 2: AI confirms email sent              → 1 call
-  └─ Returns: "email sent"
-  Turn 3: AI → final_answer                      → 1 call
-─────────────────────────────────────────
-Typical total: 7 calls
-Max total:     25 calls (12 master + 6 files + 6 email + 1 classify)
+DAG planner call             ? 1 call
+Step: drive agent (download) ? 1�3 calls
+Step: files agent (zip)      ? 1�2 calls
+Step: email agent (send)     ? 1�2 calls
+-----------------------------------------
+Total: 4�8 calls  (was 9�31 with old system)
 ```
 
 ---
 
-### 5. Three-Agent Command
-**Example:** "Download report.pdf from Drive, zip it with the Notes folder, then email me both"
+## When Do Additional Orchestration LLM Calls Happen?
+
+Only these edge cases require extra calls at the orchestration level:
+
+### Case A � Content Generation Required
+**Example:** "Summarise report.pdf and send it to Alice"
+
+The summarisation is handled inside the email agent''s sub-loop. No additional orchestration calls.
+
+### Case B � Ambiguous User Input / Planning Failure
 
 ```
-react_workflow() master loop
-  Turn 1: delegate to Drive agent                → 1 call
-  ┌─ Drive agent: 1–3 turns                      → 1–3 calls
-  Turn 2: delegate to Files agent                → 1 call
-  ┌─ Files agent: 1–3 turns                      → 1–3 calls
-  Turn 3: delegate to Email agent                → 1 call
-  ┌─ Email agent: 1–3 turns                      → 1–3 calls
-  Turn 4: final_answer                           → 1 call
-─────────────────────────────────────────
-Typical total: 9–13 calls
-Max total:     31 calls (12 master + 6 + 6 + 6 + 1 classify)
+DAG planner call (failed or invalid) ? 1 call
+Fallback: ReAct loop                 ? 1�12 calls
+-----------------------------------------
+Total: 2�13 calls  (worst-case same as old, but rare)
+```
+
+### Case C � Tool Failure Recovery
+
+Handled by the sub-agent''s internal ReAct loop. The orchestration layer does not add extra LLM calls for retries.
+
+---
+
+## Comparison: Old vs New
+
+### Old Pure ReAct Model � Worst Case (3-agent task)
+
+```
+detect_agents_needed()   =  1 call  (router)
+react_workflow() loop    = 12 calls (master orchestrator)
+drive sub-agent loop     =  6 calls
+files sub-agent loop     =  6 calls
+email sub-agent loop     =  6 calls
+-----------------------------------------
+Total worst case: 31 calls
+```
+
+**Problems with old model:**
+- Master loop re-reasons about coordination at every turn
+- Predictable workflows (zip ? email) still required multi-turn deliberation
+- Delegation overhead: LLM call to decide what was already obvious from context
+- Context window grows with every observation, increasing token cost
+
+### New Hybrid Planner + DAG Model � Worst Case (3-agent task)
+
+```
+DAG planner call         =  1 call  (single orchestration call)
+drive sub-agent loop     =  1�6 calls
+files sub-agent loop     =  1�6 calls
+email sub-agent loop     =  1�6 calls
+-----------------------------------------
+Total typical: 5�10 calls
+Total worst case: 19 calls
+```
+
+**Fallback worst case (planning fails):**
+
+```
+DAG planner (failed)     =  1 call
+ReAct fallback           = 12 + 6 + 6 + 6 = 30 calls
+-----------------------------------------
+Total: 31 calls  (same as before, but only when planning fails � rare)
 ```
 
 ---
 
-## Where Each Loop Lives in Code
+## Why This Is Better
 
-| What | File | Key function | Max iterations |
-|------|------|------|:---:|
-| Master multi-agent loop | `src/agent/workflows/master_orchestrator.py` | `react_workflow()` | 12 |
-| Per-skill loop (all agents) | `src/agent/workflows/skill_react_engine.py` | `run_skill_react()` | 6 |
-| Per-agent loop (legacy path) | `src/agent/ui/*/orchestrator.py` | `reason_and_act()` | 6 |
-| Intent classification | `src/agent/workflows/router.py` | `detect_agents_needed()` | 1 (always) |
-| Chat response | `src/agent/ui/personal_assistant/app.py` | `_chat_response()` | 1 (always) |
-
----
-
-## Why So Many Calls?
-
-The current design uses **Reason + Act (ReAct)** loops. This means the AI thinks step-by-step, one tool at a time. Each step needs a fresh LLM call to decide what to do next.
-
-**Advantages:**
-- Handles unexpected situations (tool fails → AI retries differently)
-- Works for completely open-ended requests
-- No upfront knowledge of what tools will be needed
-
-**Disadvantages:**
-- Many LLM calls = slow response times (10–30 seconds for complex queries)
-- Each call costs tokens
-- Predictable multi-step tasks (zip + email) don't need this flexibility
+| Property | Old ReAct | New Hybrid |
+|---|---|---|
+| Orchestration calls | 1�12 per workflow | 1 (always) |
+| Predictable flow | Re-reasoned every turn | Determined upfront |
+| Execution order | Emergent from loop | Topological sort |
+| Debuggability | Inspect LLM reasoning | Read structured DAG JSON |
+| Parallelism | Sequential by design | Independent branches run concurrently |
+| Cost (orchestration layer) | 12� master loop tokens | 1 plan call |
+| Fallback safety | N/A | Full ReAct if DAG planning fails |
 
 ---
 
-## Optimisation Opportunities
+## Code Structure
 
-These are the main patterns where LLM calls can be reduced:
-
-### Option A — Fast-Plan Path (Structured Execution)
-For predictable request patterns (e.g. "zip folder X and email me"):
-- Instead of letting the master loop figure it out turn-by-turn, make **1 LLM planning call** upfront
-- Get back a complete JSON plan: `[zip_folder, send_email_with_attachment]`
-- Execute the plan directly by calling service functions (no sub-agent loops)
-- **Result:** 7 calls → 1 call for supported flows
-
-### Option B — Tool Batching
-Allow the per-skill ReAct loop to emit **multiple tool calls** in one turn instead of one.
-- Currently: think → 1 tool → observe → think → 1 tool → ...
-- Batched: think → [tool1, tool2, tool3] → observe all → final_answer
-- **Result:** 3–6 calls per skill → 1–2 calls
-
-### Option C — Cached Planning
-For repeated requests (same user, same type of command), cache the step-plan and skip re-planning.
-- **Result:** removes the master loop LLM cost on repeat queries
-
-### Option D — Remove Classification Call
-`detect_agents_needed()` uses 1 LLM call just to classify. A fast regex/keyword pre-filter could handle 80% of cases with 0 LLM calls.
-- **Result:** saves 1 call on every request
+| Layer | File | Function | LLM Calls |
+|---|---|---|:---:|
+| Intent pre-filter | `src/agent/workflows/router.py` | `keyword_pre_filter()` | 0 |
+| Intent routing (if needed) | `src/agent/workflows/router.py` | `detect_agents_needed()` | 0�1 |
+| DAG planning | `src/agent/workflows/dag_planner.py` | `plan_dag_workflow()` | 1 |
+| Topological sort | `src/agent/workflows/dag_planner.py` | `topological_sort()` | 0 |
+| Deterministic execution | `src/agent/workflows/dag_planner.py` | `execute_dag_workflow()` | 0 |
+| Sub-agent execution | `src/agent/workflows/skill_react_engine.py` | `run_skill_react()` | 1�6 |
+| ReAct fallback | `src/agent/workflows/master_orchestrator.py` | `react_workflow()` | 1�12 |
+| Workflow entry point | `src/agent/workflows/master_orchestrator.py` | `run_workflow()` | � |
 
 ---
 
-## Summary for Planning
+## Total LLM Call Counting (added 2026-03-01)
 
-The biggest wins are:
-1. **Fast-plan path** for zip/upload/email patterns → saves ~6 calls per request
-2. **Tool batching** in per-skill loops → saves ~2–4 calls per skill used
-3. **Keyword-first routing** before the LLM classifier → saves 1 call on every request
+Every completed workflow now logs a total LLM call summary:
 
-Current bottleneck: the master orchestrator's turn-by-turn delegation model calls the LLM every time it decides to hand off to a sub-agent, even when the sequence is completely predictable from the user's original request.
+```
+Total LLM calls: 4  (router=1  planner=1  sub_agents=2)
+```
+
+Counting breakdown:
+- **`router=1`** � `detect_agents_needed()` always makes 1 call (unless keyword pre-filter exits early)
+- **`planner=1`** � `plan_dag_workflow()` uses exactly 1 call
+- **`sub_agents=N`** � sum of `llm_calls` returned by each `run_skill_react()` call
+- **`planner=0`** when DAG planning fails and the ReAct fallback is used
+
+This is visible in the logs next to the `Workflow complete:` line and makes optimization progress instantly measurable.
+
+---
+
+## Optimisation Summary
+
+| Optimisation | Status | Saving |
+|---|---|---|
+| DAG planner replaces master ReAct loop | ? Implemented | Saves 1�11 orchestration calls per request |
+| Keyword pre-filter before LLM router | ? Implemented | Saves 1 call for casual chat + obvious commands |
+| Topological sort for dependency resolution | ? Implemented | 0 calls � purely algorithmic |
+| Parallel execution of independent DAG branches | ? Architecture-ready | Speed improvement |
+| ReAct fallback when DAG planning fails | ? Implemented | Graceful degradation |
+| Total LLM call count logged per workflow | ? Implemented | Visibility into optimization progress |
+| Python-bool JSON normalization in skill engine | ? Implemented | Prevents cascading unknown-action failures |
+| Tilde path expansion in instruction resolver | ? Implemented | Prevents wrong path guesses by LLM |
+| Cached planning for repeated commands | ?? Future work | Would save 1 call on repeat queries |
+| Tool batching inside sub-agent loops | ?? Future work | Would save 2�4 calls per sub-agent |
+
+---
+
+## Final Architecture Decision
+
+| Layer | Technology |
+|---|---|
+| Intent Pre-filter | Keyword regex (0 LLM calls) |
+| Intent Routing (fallback only) | LLM (1 call) |
+| Workflow Planning | LLM (1 call, JSON DAG output) |
+| Dependency Resolution | Topological sort (algorithmic) |
+| Orchestration Execution | Deterministic � no LLM |
+| Sub-agent Tool Execution | Focused ReAct per agent (1�6 calls) |
+| Error Handling | Retry + sub-agent loop recovery |
+| Multi-agent coordination | DAG with depends_on, not nested master loops |
+| Fallback | Full ReAct if DAG planning fails |
+
+**Net effect:** The previous 1�12 master orchestration LLM calls collapse to exactly 1. Sub-agent loops remain intact for their focused tool-execution work. Total system LLM calls reduce by 60�90% for typical multi-agent workflows.

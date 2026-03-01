@@ -131,19 +131,19 @@ def _generate_and_send(chat_id: int | str, user_text: str) -> None:
             try:
                 from src.agent.hub.pa_manager import get_assistant
                 pa = get_assistant(pa_id_env)
-                pa_id   = pa["id"]   if pa else "__multi_agent__"
+                pa_id   = pa["id"]   if pa else "_collective_memory_"
                 pa_name = pa["name"] if pa else "Personal Assistant"
             except Exception:
-                pa_id, pa_name = "__multi_agent__", "Personal Assistant"
+                pa_id, pa_name = "_collective_memory_", "Personal Assistant"
         else:
             # Legacy global poller — use routing table or default first PA
             try:
                 from .pa_router import get_pa_for_chat
                 pa = get_pa_for_chat(chat_id)
-                pa_id   = pa["id"]   if pa else "__multi_agent__"
+                pa_id   = pa["id"]   if pa else "_collective_memory_"
                 pa_name = pa["name"] if pa else "Personal Assistant"
             except Exception:
-                pa_id, pa_name = "__multi_agent__", "Personal Assistant"
+                pa_id, pa_name = "_collective_memory_", "Personal Assistant"
 
         processor = HubProcessor()
         result = processor.process(

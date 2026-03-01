@@ -1,4 +1,4 @@
-ï»¿# LinkedIn Agent Setup Guide
+# LinkedIn Agent Setup Guide
 
 This guide walks you through configuring the LinkedIn Agent so that Octa can publish posts, images, videos, and articles to your personal profile or LinkedIn Company Page.
 
@@ -52,7 +52,7 @@ This guide walks you through configuring the LinkedIn Agent so that Octa can pub
 
 ## Request the Required Scopes
 
-LinkedIn restricts posting API access â€” you need to request the following products from the **Products** tab of your app:
+LinkedIn restricts posting API access — you need to request the following products from the **Products** tab of your app:
 
 | Product | Scopes it enables | Required for |
 |---|---|---|
@@ -60,7 +60,7 @@ LinkedIn restricts posting API access â€” you need to request the following prod
 | Sign In with LinkedIn using OpenID Connect | `openid`, `profile`, `email` | Identifying yourself |
 | Marketing Developer Platform (optional) | `r_organization_social`, `w_organization_social` | Company page posting |
 
-> **Note:** Some products require LinkedIn review (1â€“5 business days). `Share on LinkedIn` is approved automatically for personal use.
+> **Note:** Some products require LinkedIn review (1–5 business days). `Share on LinkedIn` is approved automatically for personal use.
 
 ---
 
@@ -89,7 +89,7 @@ print('Access token:', token)
 "
 ```
 
-5. Copy the printed access token â€” you will paste it into `settings.json` next.
+5. Copy the printed access token — you will paste it into `settings.json` next.
 
 > **Access tokens expire** after 60 days for personal use. Run this flow again when it expires, or request a long-lived token through the Marketing Developer Platform.
 
@@ -99,14 +99,14 @@ print('Access token:', token)
 
 If you want Octa to post on behalf of a **LinkedIn Company Page** (not your personal profile), you need the page's Organisation URN.
 
-### Method 1 â€” LinkedIn Admin URL
+### Method 1 — LinkedIn Admin URL
 
 1. Go to your Company Page admin panel.
 2. The URL will look like: `https://www.linkedin.com/company/12345678/admin/`
 3. The numeric ID (`12345678`) is your org ID.
 4. Your URN is: `urn:li:organization:12345678`
 
-### Method 2 â€” API call
+### Method 2 — API call
 
 ```bash
 python -c "
@@ -149,7 +149,7 @@ Open `config/settings.json` and fill in the `linkedin` section:
 | `access_token` | Obtained from the OAuth2 flow above |
 | `redirect_uri` | Must match what you added in the Developer Portal |
 | `org_urn` | Leave as `""` to post to your personal profile |
-| `post_as_org` | `true` â†’ post as company page; `false` â†’ post as personal profile |
+| `post_as_org` | `true` ? post as company page; `false` ? post as personal profile |
 | `image_gen_backend` | `"dalle3"` (requires OpenAI key) or `"stable_diffusion"` |
 
 ---
@@ -163,7 +163,7 @@ The LinkedIn Agent is already registered in the code. To use it:
    python run_agent_hub.py
    ```
 2. Open the dashboard at [http://localhost:8501](http://localhost:8501).
-3. Click **+ Add Agent / Skill** â†’ select **LinkedIn**.
+3. Click **+ Add Agent / Skill** ? select **LinkedIn**.
 4. Give it a name (e.g., "Company Page Manager") and save.
 
 The agent will now appear in your Hub and respond to natural language requests like:
@@ -197,9 +197,9 @@ If you see an error, check the [Troubleshooting](#troubleshooting) section.
 
 ## AI Image Generation (Optional)
 
-The LinkedIn Agent can generate images using DALLÂ·E 3 or Stable Diffusion before attaching them to posts.
+The LinkedIn Agent can generate images using DALL·E 3 or Stable Diffusion before attaching them to posts.
 
-### DALLÂ·E 3 (OpenAI)
+### DALL·E 3 (OpenAI)
 
 1. Make sure `openai` is installed:
    ```bash
@@ -235,18 +235,18 @@ The LinkedIn Agent can generate images using DALLÂ·E 3 or Stable Diffusion befor
 
 ### `403 Forbidden`
 
-- You are missing a required scope. Go to your LinkedIn Developer App â†’ Products and verify `Share on LinkedIn` is active.
+- You are missing a required scope. Go to your LinkedIn Developer App ? Products and verify `Share on LinkedIn` is active.
 - If posting to a company page, verify you are a Page Admin and `w_organization_social` scope is granted.
 
 ### `POST https://api.linkedin.com/v2/ugcPosts` returns `404`
 
 - The `author` URN is incorrect. Make sure `org_urn` is in the exact format `urn:li:organization:12345678` (no trailing spaces).
-- If posting as personal profile, leave `org_urn` empty â€” the agent will use your member URN from `/v2/me`.
+- If posting as personal profile, leave `org_urn` empty — the agent will use your member URN from `/v2/me`.
 
 ### Image upload fails
 
 - Verify your token has the `w_member_social` (or `w_organization_social`) scope.
-- Image must be JPEG or PNG, â‰¤ 10 MB. The agent resizes automatically if using DALLÂ·E 3 output.
+- Image must be JPEG or PNG, = 10 MB. The agent resizes automatically if using DALL·E 3 output.
 
 ### Agent not appearing in the dashboard
 

@@ -47,6 +47,33 @@ def _truncate_logs(root: str) -> None:
             pass
 
 
+def _start_consolidation(root: str, python: str) -> None:
+    """
+    Spawn the memory consolidation runner as an independent detached process.
+
+    Using --loop so it keeps running every 8 hours alongside the dashboard.
+    A separate process means heavy LLM consolidation calls never slow down
+    the Streamlit UI and survives dashboard hot-reloads cleanly.
+    """
+    consolidation_script = os.path.join(
+        root, "src", "agent", "memory", "run_consolidation.py"
+    )
+    if not os.path.exists(consolidation_script):
+        print("  Consolidation script not found — skipping.")
+        return
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = root
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+    subprocess.Popen(
+        [python, consolidation_script, "--loop"],
+        cwd=root,
+        env=env,
+        creationflags=creationflags,
+    )
+    print("Memory consolidation process started (8-hour cycle).")
+
+
 def _start_dashboard(root: str, python: str) -> None:
     """Spawn the Streamlit dashboard as a detached subprocess."""
     app_path = os.path.join(root, "src", "agent", "ui", "dashboard", "app.py")
@@ -81,6 +108,10 @@ def main():
 
     print("Starting OctaMind dashboard on http://localhost:8501 ...")
     _start_dashboard(root, venv_python)
+
+    # Launch memory consolidation as an independent background process.
+    # Runs immediately on startup (one-shot pass) then loops every 8 hours.
+    _start_consolidation(root, venv_python)
     # Note: per-PA Telegram pollers are started from within the Streamlit
     # process (dashboard configure tab) — not here.
 

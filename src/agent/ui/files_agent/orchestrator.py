@@ -1,8 +1,15 @@
 """
 Local Files skill orchestrator.
+
+Key corrections vs. older version:
+- search_by_name first argument is ``query`` (not ``pattern``).
+- _build_skill_context() is dynamic so the LLM receives the real
+  system paths (home / Downloads / Desktop / Documents) rather than
+  guessing platform-specific placeholders.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from src.agent.workflows.skill_react_engine import run_skill_react
@@ -16,8 +23,8 @@ delete_file(path, permanent=False) – Delete a file (recycle bin by default).
 create_folder(path) – Create a new directory.
 rename_file(path, new_name) – Rename a file or folder.
 open_file(path) – Open a file with its default application.
-search_by_name(directory, pattern, recursive=True, limit=50) – Search for files by name pattern.
-search_by_extension(directory, extension, recursive=True, limit=50) – Search by file extension.
+search_by_name(query, directory="~", recursive=True, limit=50) – Search files/folders whose name matches query (glob or substring). First arg is the search term, second is the directory to search.
+search_by_extension(ext, directory="~", recursive=True, limit=100) – Find all files with a given extension (e.g. 'pdf' or '.pdf').
 search_by_date(directory, date_from=None, date_to=None, recursive=True, limit=50) – Search by modification date.
 search_by_size(directory, min_bytes=None, max_bytes=None, recursive=True, limit=50) – Search by file size.
 find_duplicates(directory, recursive=True) – Find duplicate files.
@@ -28,13 +35,34 @@ unzip_file(archive_path, destination="") – Extract a zip archive. destination 
 list_archive_contents(archive_path) – List contents of a zip archive without extracting.
 """.strip()
 
-_SKILL_CONTEXT = """
-You are the Local Files Skill Agent.
-You can browse, search, copy, move, delete, rename and organise files on the user's local filesystem.
-Always use absolute paths when calling tools; expand relative paths if given.
-Be careful with delete_file — prefer permanent=False (recycle bin) unless the user asks for permanent deletion.
-For zip/compression requests ALWAYS use zip_folder (for a whole folder) or zip_files (for specific files). Never suggest manual steps — you have the tools to do it directly.
-""".strip()
+
+def _build_skill_context() -> str:
+    """Build the files-agent system prompt with real OS paths injected."""
+    home = Path.home()
+    downloads = home / "Downloads"
+    desktop   = home / "Desktop"
+    documents = home / "Documents"
+    return (
+        "You are the Local Files Skill Agent.\n"
+        "You can browse, search, copy, move, delete, rename and organise files on the user's local filesystem.\n"
+        "Always use ABSOLUTE paths when calling tools.\n"
+        "\n"
+        "System path reference (use these exact paths):\n"
+        f"  Home:      {home}\n"
+        f"  Downloads: {downloads}\n"
+        f"  Desktop:   {desktop}\n"
+        f"  Documents: {documents}\n"
+        "\n"
+        "Examples of correct absolute paths on this machine:\n"
+        f"  Downloads folder       \u2192 {downloads}\n"
+        f"  A folder in Downloads  \u2192 {downloads / 'MyFolder'}\n"
+        f"  A file on Desktop      \u2192 {desktop / 'report.pdf'}\n"
+        "\n"
+        "Rules:\n"
+        "- Be careful with delete_file \u2014 prefer permanent=False (recycle bin) unless the user asks for permanent deletion.\n"
+        "- For zip/compression ALWAYS use zip_folder (whole folder) or zip_files (specific files).\n"
+        "- When the user mentions a folder like 'Downloads', always expand it to the full absolute path shown above.\n"
+    ).strip()
 
 
 def _get_tools() -> Dict[str, Any]:
@@ -80,7 +108,7 @@ def execute_with_llm_orchestration(
     try:
         return run_skill_react(
             skill_name="files",
-            skill_context=_SKILL_CONTEXT,
+            skill_context=_build_skill_context(),  # dynamic — includes real OS paths
             tool_map=_get_tools(),
             tool_docs=_TOOL_DOCS,
             user_query=user_query,
