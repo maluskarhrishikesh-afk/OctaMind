@@ -76,3 +76,6 @@ replacements.txt
 # Ignore local error notes generated during development
 errors/errors.txt
 errors/new_implementation.txt
+
+# ── Research papers (local only — not for public repo) ────────────────────────
+research/
