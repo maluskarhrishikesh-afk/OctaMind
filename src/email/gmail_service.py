@@ -660,6 +660,933 @@ class GmailServiceClient:
     def export_contacts(self, format: str = 'csv', limit: int = 100) -> Dict:
         return self._feature('contacts', 'ContactIntelligence').export_contacts(format, limit)
 
+    # --- Label / folder management ---
+
+    def create_label(self, label_name: str) -> Dict:
+        """
+        Create a Gmail label (folder) if it does not already exist.
+
+        Args:
+            label_name: Display name for the label (e.g. "MasterCard").
+
+        Returns:
+            Dictionary with status and the label id/name.
+        """
+        try:
+            # Check if the label already exists
+            all_labels = self.gmail_service.users().labels().list(
+                userId=self.user_id
+            ).execute().get('labels', [])
+
+            existing = next(
+                (l for l in all_labels if l['name'].lower() == label_name.lower()),
+                None,
+            )
+            if existing:
+                return {
+                    'status': 'success',
+                    'label_id': existing['id'],
+                    'label_name': existing['name'],
+                    'message': f"Label '{label_name}' already exists.",
+                }
+
+            created = self.gmail_service.users().labels().create(
+                userId=self.user_id,
+                body={
+                    'name': label_name,
+                    'labelListVisibility': 'labelShow',
+                    'messageListVisibility': 'show',
+                },
+            ).execute()
+
+            return {
+                'status': 'success',
+                'label_id': created['id'],
+                'label_name': created['name'],
+                'message': f"Label '{label_name}' created successfully.",
+            }
+
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error creating label: {exc}"}
+
+    def move_emails_to_label(
+        self,
+        query: str,
+        label_name: str,
+        max_results: int = 50,
+    ) -> Dict:
+        """
+        Move emails matching *query* to the Gmail label *label_name*.
+        Creates the label automatically if it does not exist.
+        Removes the INBOX label so the emails no longer appear in inbox.
+
+        Args:
+            query:       Gmail search query (e.g. "from:mastercard.com").
+            label_name:  Target label / folder name.
+            max_results: Maximum number of emails to move.
+
+        Returns:
+            Dictionary with status, moved_count and label details.
+        """
+        try:
+            # Ensure the label exists (creates it if missing)
+            label_result = self.create_label(label_name)
+            if label_result['status'] != 'success':
+                return label_result
+            label_id = label_result['label_id']
+
+            # Find matching messages
+            response = self.gmail_service.users().messages().list(
+                userId=self.user_id,
+                q=query,
+                maxResults=max_results,
+            ).execute()
+            messages = response.get('messages', [])
+
+            if not messages:
+                return {
+                    'status': 'success',
+                    'moved_count': 0,
+                    'label_name': label_name,
+                    'message': f"No emails found matching query '{query}'.",
+                }
+
+            msg_ids = [m['id'] for m in messages]
+
+            # Move: add the target label, remove from INBOX
+            self.gmail_service.users().messages().batchModify(
+                userId=self.user_id,
+                body={
+                    'ids': msg_ids,
+                    'addLabelIds': [label_id],
+                    'removeLabelIds': ['INBOX'],
+                },
+            ).execute()
+
+            return {
+                'status': 'success',
+                'moved_count': len(msg_ids),
+                'label_name': label_name,
+                'label_id': label_id,
+                'message': (
+                    f"Moved {len(msg_ids)} email(s) to label '{label_name}'."
+                ),
+            }
+
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error moving emails: {exc}"}
+
+    # ── Out-of-Office / Vacation Responder ────────────────────────────────────
+
+    def set_vacation_responder(
+        self,
+        enabled: bool,
+        subject: str = "",
+        body: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        restrict_to_contacts: bool = False,
+    ) -> Dict:
+        """
+        Enable or disable Gmail's built-in Vacation / Out-of-Office auto-reply.
+
+        Uses the Gmail Settings API ``users.settings.updateVacation`` endpoint.
+
+        Args:
+            enabled:              True to turn on, False to turn off.
+            subject:              Auto-reply subject (e.g. 'Out of Office').
+            body:                 Auto-reply message body.
+            start_date:           ISO date string 'YYYY-MM-DD' (optional).
+            end_date:             ISO date string 'YYYY-MM-DD' (optional).
+            restrict_to_contacts: If True only known contacts get the auto-reply.
+        """
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+
+            vacation_body: Dict = {
+                'enableAutoReply': enabled,
+                'responseSubject': subject,
+                'responseBodyPlainText': body,
+                'restrictToContacts': restrict_to_contacts,
+                'restrictToDomain': False,
+            }
+            if start_date:
+                ts = int(_dt.fromisoformat(start_date).replace(tzinfo=_tz.utc).timestamp() * 1000)
+                vacation_body['startTime'] = ts
+            if end_date:
+                ts = int(_dt.fromisoformat(end_date).replace(tzinfo=_tz.utc).timestamp() * 1000)
+                vacation_body['endTime'] = ts
+
+            self.gmail_service.users().settings().updateVacation(
+                userId=self.user_id,
+                body=vacation_body,
+            ).execute()
+
+            state = "enabled" if enabled else "disabled"
+            date_range = ""
+            if start_date or end_date:
+                date_range = f" ({start_date or '?'} → {end_date or 'indefinite'})"
+            return {
+                'status': 'success',
+                'enabled': enabled,
+                'subject': subject,
+                'body': body,
+                'message': (
+                    f"✅ Out-of-Office auto-reply {state}{date_range}. "
+                    f"Subject: '{subject}'"
+                ),
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error setting vacation responder: {exc}"}
+
+    def get_vacation_responder(self) -> Dict:
+        """Return the current state of the Gmail vacation / OOO responder."""
+        try:
+            result = self.gmail_service.users().settings().getVacation(
+                userId=self.user_id,
+            ).execute()
+            return {'status': 'success', 'settings': result}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error fetching vacation settings: {exc}"}
+
+    def fetch_emails_to_markdown(
+        self,
+        query: str = "in:inbox",
+        max_results: int = 5,
+        cap: int = 20,
+        output_dir: str = "",
+    ) -> Dict:
+        """Fetch multiple emails matching a Gmail query, save them as a Markdown
+        file and return the file path + structured list.  This is the correct tool
+        for "summarize the latest N emails from X" requests — it retrieves all
+        emails in one shot (no per-email LLM round-trips) so the orchestrator can
+        summarise the entire batch in its single final response.
+
+        Args:
+            query:      Gmail search query, e.g. ``"from:quora"`` or
+                        ``"subject:invoice is:unread"``. Defaults to ``"in:inbox"``.
+            max_results: Number of emails to fetch (default 5, capped at ``cap``).
+            cap:        Hard upper limit to prevent runaway fetches (default 20).
+            output_dir: Directory to write the .md file.  Falls back to
+                        ``C:\\Users\\<user>\\_octamind_reports``.
+
+        Returns:
+            dict with keys: status, file_path, email_count, emails (list), content.
+        """
+        import os
+        from datetime import datetime as _dt
+        from pathlib import Path as _Path
+
+        MAX_CAP = 50  # absolute ceiling
+        cap = min(cap, MAX_CAP)
+
+        if max_results > cap:
+            return {
+                'status': 'error',
+                'message': (
+                    f"❌ Requested {max_results} emails but the cap is {cap}. "
+                    f"Please reduce max_results to {cap} or fewer."
+                ),
+            }
+
+        try:
+            emails = self.list_emails(query=query, max_results=max_results)
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error fetching emails: {exc}"}
+
+        if not emails:
+            return {
+                'status': 'success',
+                'email_count': 0,
+                'emails': [],
+                'content': f"No emails found for query: {query}",
+                'file_path': '',
+                'message': f"No emails matched: '{query}'",
+            }
+
+        # ── Build Markdown ──────────────────────────────────────────────────
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        safe_query = "".join(c if c.isalnum() or c in "-_" else "_" for c in query)[:40]
+        filename = f"emails_{safe_query}_{ts}.md"
+
+        if not output_dir:
+            output_dir = os.path.join(os.path.expanduser("~"), "_octamind_reports")
+        _Path(output_dir).mkdir(parents=True, exist_ok=True)
+        file_path = os.path.join(output_dir, filename)
+
+        lines = [
+            f"# Email Batch: `{query}`",
+            f"*Fetched {len(emails)} email(s) — {_dt.now().strftime('%Y-%m-%d %H:%M')}*",
+            "",
+        ]
+
+        structured: List[Dict] = []
+        for i, em in enumerate(emails, 1):
+            subject = em.get('subject', 'No Subject')
+            sender  = em.get('sender', 'Unknown')
+            date    = em.get('date', '')
+            body    = em.get('body', em.get('snippet', '')).strip()
+
+            lines += [
+                "---",
+                f"## {i}. {subject}",
+                f"**From:** {sender}  ",
+                f"**Date:** {date}",
+                "",
+                body,
+                "",
+            ]
+            structured.append({
+                'index': i,
+                'subject': subject,
+                'sender': sender,
+                'date': date,
+                'body_preview': body[:300],
+                'message_id': em.get('id', ''),
+            })
+
+        content = "\n".join(lines)
+        try:
+            with open(file_path, "w", encoding="utf-8") as fh:
+                fh.write(content)
+        except Exception as exc:
+            file_path = ""
+            logger.warning("Could not write email markdown file: %s", exc)
+
+        return {
+            'status': 'success',
+            'email_count': len(emails),
+            'emails': structured,
+            'content': content,
+            'file_path': file_path,
+            'message': (
+                f"Fetched {len(emails)} email(s) for '{query}'. "
+                + (f"Saved to {file_path}" if file_path else "(file save failed)")
+            ),
+        }
+
+    # ── Unsubscribe ───────────────────────────────────────────────────────────
+
+    def unsubscribe_email(self, message_id: str) -> Dict:
+        """Extract the List-Unsubscribe header from an email and return the
+        unsubscribe URL/mailto so the user can action it.  Automatically opens
+        the one-click unsubscribe endpoint when available (RFC 8058 POST)."""
+        import re, urllib.request
+        try:
+            msg = self.gmail_service.users().messages().get(
+                userId=self.user_id, id=message_id, format='metadata',
+                metadataHeaders=['List-Unsubscribe', 'List-Unsubscribe-Post', 'From', 'Subject'],
+            ).execute()
+            hdrs = {h['name'].lower(): h['value'] for h in msg['payload']['headers']}
+            unsub_hdr = hdrs.get('list-unsubscribe', '')
+            post_hdr  = hdrs.get('list-unsubscribe-post', '')
+            subject   = hdrs.get('subject', 'Unknown')
+            sender    = hdrs.get('from', 'Unknown')
+
+            if not unsub_hdr:
+                return {
+                    'status': 'not_supported',
+                    'subject': subject,
+                    'sender': sender,
+                    'message': (
+                        f"'{subject}' from {sender} has no List-Unsubscribe header. "
+                        "Try replying with 'Unsubscribe' or visiting the link in the email body."
+                    ),
+                }
+
+            urls    = re.findall(r'<(https?://[^>]+)>', unsub_hdr)
+            mailtos = re.findall(r'<(mailto:[^>]+)>', unsub_hdr)
+
+            # RFC 8058 one-click POST
+            one_click_done = False
+            if urls and post_hdr.strip().lower() == 'list-unsubscribe=one-click':
+                try:
+                    urllib.request.urlopen(
+                        urllib.request.Request(
+                            urls[0], data=b'List-Unsubscribe=One-Click', method='POST',
+                            headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                        ), timeout=10,
+                    )
+                    one_click_done = True
+                except Exception:
+                    pass
+
+            action = "One-click unsubscribe sent!" if one_click_done else (
+                f"Visit: {urls[0]}" if urls else
+                f"Send blank email to: {mailtos[0].replace('mailto:', '') if mailtos else 'N/A'}"
+            )
+            return {
+                'status': 'success',
+                'subject': subject,
+                'sender': sender,
+                'one_click_done': one_click_done,
+                'unsubscribe_urls': urls,
+                'unsubscribe_mailto': mailtos,
+                'message': f"Unsubscribe for '{subject}' from {sender}. {action}",
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error processing unsubscribe: {exc}"}
+
+    # ── Archive / Thread ops ──────────────────────────────────────────────────
+
+    def archive_emails(self, query: str, max_results: int = 50) -> Dict:
+        """Remove emails from Inbox without deleting them (archive)."""
+        try:
+            messages = self.gmail_service.users().messages().list(
+                userId=self.user_id, q=query, maxResults=max_results,
+            ).execute().get('messages', [])
+            if not messages:
+                return {'status': 'success', 'archived_count': 0,
+                        'message': f"No emails found for '{query}'."}
+            ids = [m['id'] for m in messages]
+            self.gmail_service.users().messages().batchModify(
+                userId=self.user_id,
+                body={'ids': ids, 'removeLabelIds': ['INBOX']},
+            ).execute()
+            return {'status': 'success', 'archived_count': len(ids),
+                    'message': f"Archived {len(ids)} email(s). They remain in All Mail."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error archiving emails: {exc}"}
+
+    def thread_mute(self, thread_id: str) -> Dict:
+        """Mute a Gmail thread — future replies skip the Inbox."""
+        try:
+            self.gmail_service.users().threads().modify(
+                userId=self.user_id, id=thread_id,
+                body={'addLabelIds': ['MUTED'], 'removeLabelIds': ['INBOX']},
+            ).execute()
+            return {'status': 'success', 'thread_id': thread_id,
+                    'message': f"Thread {thread_id} muted. Future replies will skip your Inbox."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error muting thread: {exc}"}
+
+    def thread_archive(self, thread_id: str) -> Dict:
+        """Archive an entire Gmail thread (removes from Inbox, keeps in All Mail)."""
+        try:
+            self.gmail_service.users().threads().modify(
+                userId=self.user_id, id=thread_id,
+                body={'removeLabelIds': ['INBOX']},
+            ).execute()
+            return {'status': 'success', 'thread_id': thread_id,
+                    'message': f"Thread {thread_id} archived."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error archiving thread: {exc}"}
+
+    def thread_delete(self, thread_id: str) -> Dict:
+        """Move an entire Gmail thread to Trash."""
+        try:
+            self.gmail_service.users().threads().trash(
+                userId=self.user_id, id=thread_id,
+            ).execute()
+            return {'status': 'success', 'thread_id': thread_id,
+                    'message': f"Thread {thread_id} moved to Trash."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error deleting thread: {exc}"}
+
+    # ── Smart Labels ──────────────────────────────────────────────────────────
+
+    def create_smart_label_rule(
+        self,
+        label_name: str,
+        from_email: str = "",
+        subject_contains: str = "",
+        to_email: str = "",
+        also_archive: bool = False,
+    ) -> Dict:
+        """Label all existing emails matching criteria and report the Gmail
+        filter-creation URL for automating future emails.
+
+        Args:
+            label_name:       Target label to create/apply.
+            from_email:       Filter by sender address.
+            subject_contains: Filter by text in subject.
+            to_email:         Filter by recipient address.
+            also_archive:     If True also remove matching emails from Inbox.
+        """
+        try:
+            parts = []
+            if from_email:       parts.append(f"from:{from_email}")
+            if subject_contains: parts.append(f"subject:{subject_contains}")
+            if to_email:         parts.append(f"to:{to_email}")
+            if not parts:
+                return {'status': 'error',
+                        'message': "Specify at least one of: from_email, subject_contains, to_email"}
+
+            query = " ".join(parts)
+            label_r = self.create_label(label_name)
+            if label_r['status'] != 'success':
+                return label_r
+            label_id = label_r['label_id']
+
+            messages = self.gmail_service.users().messages().list(
+                userId=self.user_id, q=query, maxResults=500,
+            ).execute().get('messages', [])
+
+            if messages:
+                remove = ['INBOX'] if also_archive else []
+                self.gmail_service.users().messages().batchModify(
+                    userId=self.user_id,
+                    body={'ids': [m['id'] for m in messages],
+                          'addLabelIds': [label_id],
+                          'removeLabelIds': remove},
+                ).execute()
+
+            return {
+                'status': 'success',
+                'label_name': label_name,
+                'query': query,
+                'emails_labeled': len(messages),
+                'message': (
+                    f"Applied label '{label_name}' to {len(messages)} existing email(s) "
+                    f"matching '{query}'. To auto-label future emails, open Gmail → Settings → "
+                    "Filters and Blocked Addresses → Create new filter."
+                ),
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error creating label rule: {exc}"}
+
+    def find_unanswered_emails(self, days: int = 3, max_results: int = 20) -> Dict:
+        """Find sent emails that received no reply within the last N days."""
+        from datetime import datetime as _dt, timedelta as _td
+        try:
+            cutoff = (_dt.now() - _td(days=days)).strftime("%Y/%m/%d")
+            sent_msgs = self.gmail_service.users().messages().list(
+                userId=self.user_id,
+                q=f"in:sent after:{cutoff}",
+                maxResults=max_results,
+            ).execute().get('messages', [])
+
+            unanswered = []
+            for item in sent_msgs:
+                msg = self.gmail_service.users().messages().get(
+                    userId=self.user_id, id=item['id'], format='metadata',
+                    metadataHeaders=['Subject', 'To', 'Date'],
+                ).execute()
+                hdrs   = {h['name'].lower(): h['value'] for h in msg['payload']['headers']}
+                thread = self.gmail_service.users().threads().get(
+                    userId=self.user_id, id=msg['threadId'], format='minimal',
+                ).execute()
+                if len(thread.get('messages', [])) == 1:
+                    unanswered.append({
+                        'message_id': item['id'],
+                        'thread_id': msg['threadId'],
+                        'subject': hdrs.get('subject', 'No Subject'),
+                        'to': hdrs.get('to', ''),
+                        'date': hdrs.get('date', ''),
+                    })
+
+            return {
+                'status': 'success',
+                'unanswered_count': len(unanswered),
+                'unanswered': unanswered,
+                'message': f"Found {len(unanswered)} sent email(s) in the last {days} day(s) awaiting reply.",
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error finding unanswered emails: {exc}"}
+
+    # ── Trash management ──────────────────────────────────────────────────────
+
+    def empty_trash(self) -> Dict:
+        """Permanently delete all emails currently in Trash."""
+        try:
+            # Paginate and batchDelete in chunks of 1000
+            deleted = 0
+            page_token = None
+            while True:
+                kwargs: Dict = {'userId': self.user_id, 'q': 'in:trash', 'maxResults': 1000}
+                if page_token:
+                    kwargs['pageToken'] = page_token
+                resp = self.gmail_service.users().messages().list(**kwargs).execute()
+                msgs = resp.get('messages', [])
+                if msgs:
+                    self.gmail_service.users().messages().batchDelete(
+                        userId=self.user_id,
+                        body={'ids': [m['id'] for m in msgs]},
+                    ).execute()
+                    deleted += len(msgs)
+                page_token = resp.get('nextPageToken')
+                if not page_token:
+                    break
+            return {'status': 'success', 'deleted_count': deleted,
+                    'message': f"Trash emptied — {deleted} email(s) permanently deleted."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error emptying trash: {exc}"}
+
+    # ── Spam ──────────────────────────────────────────────────────────────────
+
+    def batch_mark_spam(self, query: str, max_results: int = 50) -> Dict:
+        """Move emails matching *query* to Spam."""
+        try:
+            messages = self.gmail_service.users().messages().list(
+                userId=self.user_id, q=query, maxResults=max_results,
+            ).execute().get('messages', [])
+            if not messages:
+                return {'status': 'success', 'count': 0,
+                        'message': f"No emails found for '{query}'."}
+            ids = [m['id'] for m in messages]
+            self.gmail_service.users().messages().batchModify(
+                userId=self.user_id,
+                body={'ids': ids, 'addLabelIds': ['SPAM'], 'removeLabelIds': ['INBOX']},
+            ).execute()
+            return {'status': 'success', 'count': len(ids),
+                    'message': f"Moved {len(ids)} email(s) to Spam."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error marking emails as spam: {exc}"}
+
+    # ── Forwarding ────────────────────────────────────────────────────────────
+
+    def add_forwarding_address(self, forward_to: str) -> Dict:
+        """Register a forwarding address (requires gmail.settings.sharing scope).
+        Gmail sends a verification email — the recipient must confirm."""
+        try:
+            result = self.gmail_service.users().settings().forwardingAddresses().create(
+                userId=self.user_id,
+                body={'forwardingEmail': forward_to},
+            ).execute()
+            status = result.get('verificationStatus', 'pending')
+            return {
+                'status': 'success',
+                'forward_to': forward_to,
+                'verification_status': status,
+                'message': (
+                    f"Forwarding address '{forward_to}' registered. "
+                    f"Verification: {status}. "
+                    f"A confirmation email has been sent to {forward_to}."
+                ),
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error adding forwarding address: {exc}"}
+
+    def enable_email_forwarding(self, forward_to: str) -> Dict:
+        """Enable auto-forwarding of all incoming email to *forward_to* (requires
+        gmail.settings.sharing scope and the address to be pre-verified)."""
+        try:
+            self.gmail_service.users().settings().updateAutoForwarding(
+                userId=self.user_id,
+                body={
+                    'enabled': True,
+                    'emailAddress': forward_to,
+                    'disposition': 'leaveInInbox',
+                },
+            ).execute()
+            return {'status': 'success', 'forward_to': forward_to,
+                    'message': f"Auto-forwarding enabled → {forward_to}. Copies kept in Inbox."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error enabling forwarding: {exc}"}
+
+    # ── Signatures ────────────────────────────────────────────────────────────
+
+    def get_signature(self, send_as_email: str = "me") -> Dict:
+        """Get the Gmail signature for the given send-as address."""
+        try:
+            # Resolve 'me' to the actual address
+            if send_as_email == 'me':
+                profile = self.gmail_service.users().getProfile(userId='me').execute()
+                send_as_email = profile.get('emailAddress', 'me')
+            settings = self.gmail_service.users().settings().sendAs().get(
+                userId=self.user_id, sendAsEmail=send_as_email,
+            ).execute()
+            return {
+                'status': 'success',
+                'email': send_as_email,
+                'display_name': settings.get('displayName', ''),
+                'signature': settings.get('signature', ''),
+                'is_primary': settings.get('isPrimary', False),
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error getting signature: {exc}"}
+
+    def set_signature(self, signature_html: str, send_as_email: str = "me") -> Dict:
+        """Set the Gmail signature (HTML allowed) for the given send-as address."""
+        try:
+            if send_as_email == 'me':
+                profile = self.gmail_service.users().getProfile(userId='me').execute()
+                send_as_email = profile.get('emailAddress', 'me')
+            self.gmail_service.users().settings().sendAs().patch(
+                userId=self.user_id, sendAsEmail=send_as_email,
+                body={'signature': signature_html},
+            ).execute()
+            return {'status': 'success',
+                    'message': f"Signature updated for {send_as_email}."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error setting signature: {exc}"}
+
+    # ── Email Templates ───────────────────────────────────────────────────────
+
+    def save_email_template(self, name: str, subject: str, body: str) -> Dict:
+        """Save an email template to data/email_templates.json.
+        Use {{variable}} placeholders in subject/body."""
+        import json
+        from pathlib import Path as _P
+        tpl_file = _P("data/email_templates.json")
+        try:
+            templates = json.loads(tpl_file.read_text(encoding='utf-8')) if tpl_file.exists() else {}
+            templates[name] = {'subject': subject, 'body': body}
+            tpl_file.write_text(json.dumps(templates, indent=2, ensure_ascii=False), encoding='utf-8')
+            return {'status': 'success', 'name': name,
+                    'message': f"Template '{name}' saved. Use {{{{variable}}}} placeholders."}
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error saving template: {exc}"}
+
+    def list_email_templates(self) -> Dict:
+        """List all saved email templates from data/email_templates.json."""
+        import json
+        from pathlib import Path as _P
+        tpl_file = _P("data/email_templates.json")
+        try:
+            if not tpl_file.exists():
+                return {'status': 'success', 'templates': [], 'count': 0,
+                        'message': "No templates saved yet. Use save_email_template()."}
+            templates = json.loads(tpl_file.read_text(encoding='utf-8'))
+            return {
+                'status': 'success',
+                'templates': [{'name': k, 'subject': v.get('subject', '')} for k, v in templates.items()],
+                'count': len(templates),
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error listing templates: {exc}"}
+
+    def send_from_template(self, template_name: str, to: str, variables: Dict = None) -> Dict:
+        """Send an email using a saved template, substituting {{key}} placeholders.
+
+        Args:
+            template_name: Name of the saved template.
+            to:            Recipient email address.
+            variables:     Dict of placeholder values e.g. {"name": "John", "date": "5 March"}.
+        """
+        import json
+        from pathlib import Path as _P
+        tpl_file = _P("data/email_templates.json")
+        try:
+            templates = json.loads(tpl_file.read_text(encoding='utf-8')) if tpl_file.exists() else {}
+            if template_name not in templates:
+                return {
+                    'status': 'error',
+                    'message': f"Template '{template_name}' not found. Available: {list(templates.keys())}",
+                }
+            tpl = templates[template_name]
+            subject = tpl.get('subject', '')
+            body    = tpl.get('body', '')
+            if variables:
+                for k, v in variables.items():
+                    subject = subject.replace(f"{{{{{k}}}}}", str(v))
+                    body    = body.replace(f"{{{{{k}}}}}", str(v))
+            return self.send_email(to, subject, body)
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error sending from template: {exc}"}
+
+    # ── Recovery ──────────────────────────────────────────────────────────────
+
+    def recover_deleted_emails(self, query: str = "", max_results: int = 20) -> Dict:
+        """Search for emails in Trash and restore them to Inbox.
+
+        Args:
+            query:       Optional Gmail search string to narrow the Trash search.
+            max_results: Maximum emails to restore (default 20).
+        """
+        try:
+            search_q = f"in:trash {query}".strip() if query else "in:trash"
+            resp = self.gmail_service.users().messages().list(
+                userId=self.user_id, q=search_q, maxResults=max_results,
+            ).execute()
+            messages = resp.get('messages', [])
+            if not messages:
+                return {'status': 'success', 'restored': 0,
+                        'message': 'No matching emails found in Trash.'}
+            ids = [m['id'] for m in messages]
+            self.gmail_service.users().messages().batchModify(
+                userId=self.user_id,
+                body={'ids': ids, 'addLabelIds': ['INBOX'], 'removeLabelIds': ['TRASH']},
+            ).execute()
+            return {
+                'status': 'success',
+                'restored': len(ids),
+                'message_ids': ids,
+                'message': f"Restored {len(ids)} email(s) from Trash to Inbox.",
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error recovering emails: {exc}"}
+
+    # ── Sentiment & Content Analysis ──────────────────────────────────────────
+
+    def analyze_email_sentiment(self, message_id: str) -> Dict:
+        """Heuristic (keyword-based) sentiment / tone analysis of an email.
+
+        Returns tone: urgent | negative | positive | neutral, plus the signals detected.
+        No LLM required — works fully offline.
+        """
+        import re as _re, base64 as _b64
+
+        URGENT_WORDS = {
+            "urgent", "asap", "immediately", "critical", "emergency", "deadline",
+            "overdue", "action required", "must", "required by", "due today",
+            "time sensitive", "by end of day", "eod", "as soon as possible",
+        }
+        POSITIVE_WORDS = {
+            "thank", "congrats", "congratulations", "great", "excellent", "well done",
+            "appreciate", "happy", "excited", "fantastic", "awesome", "good news",
+            "pleased", "wonderful", "brilliant", "outstanding",
+        }
+        NEGATIVE_WORDS = {
+            "complaint", "disappointed", "frustrated", "angry", "unacceptable",
+            "problem", "issue", "failure", "broken", "failed", "error", "wrong",
+            "terrible", "poor", "worst", "dissatisfied", "escalate", "refund",
+        }
+        try:
+            msg = self.gmail_service.users().messages().get(
+                userId=self.user_id, id=message_id, format='full',
+            ).execute()
+            subject = ""
+            for h in msg.get('payload', {}).get('headers', []):
+                if h['name'].lower() == 'subject':
+                    subject = h['value']
+                    break
+            body = ""
+            for part in msg.get('payload', {}).get('parts', [msg.get('payload', {})]):
+                if part.get('mimeType', '').startswith('text/'):
+                    data = part.get('body', {}).get('data', '')
+                    if data:
+                        body += _b64.urlsafe_b64decode(data + '==').decode('utf-8', errors='ignore')
+            text = (subject + ' ' + body).lower()
+            urgent_hits  = [w for w in URGENT_WORDS if w in text]
+            positive_hits = [w for w in POSITIVE_WORDS if w in text]
+            negative_hits = [w for w in NEGATIVE_WORDS if w in text]
+            if urgent_hits:
+                tone, confidence = 'urgent', ('high' if len(urgent_hits) >= 2 else 'medium')
+            elif negative_hits:
+                tone, confidence = 'negative', ('high' if len(negative_hits) >= 2 else 'medium')
+            elif positive_hits:
+                tone, confidence = 'positive', ('high' if len(positive_hits) >= 2 else 'medium')
+            else:
+                tone, confidence = 'neutral', 'medium'
+            recommendation = {
+                'urgent':   'Flag for immediate attention — respond or escalate today.',
+                'negative': 'Prompt, empathetic reply recommended.',
+                'positive': 'No urgent action needed.',
+                'neutral':  'Normal priority.',
+            }[tone]
+            return {
+                'status': 'success',
+                'message_id': message_id,
+                'subject': subject,
+                'tone': tone,
+                'confidence': confidence,
+                'urgent_signals': urgent_hits,
+                'positive_signals': positive_hits,
+                'negative_signals': negative_hits,
+                'recommendation': recommendation,
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error analysing sentiment: {exc}"}
+
+    def extract_urls_from_email(self, message_id: str) -> Dict:
+        """Extract and classify all hyperlinks found in an email body.
+
+        Returns three buckets: links (regular), tracking_pixels, unsubscribe_urls.
+        """
+        import re as _re, base64 as _b64
+        URL_RE = _re.compile(r'https?://[^\s"\'<>\]\)]+', _re.IGNORECASE)
+        try:
+            msg = self.gmail_service.users().messages().get(
+                userId=self.user_id, id=message_id, format='full',
+            ).execute()
+            subject = ""
+            for h in msg.get('payload', {}).get('headers', []):
+                if h['name'].lower() == 'subject':
+                    subject = h['value']
+            raw_text = ""
+            for part in msg.get('payload', {}).get('parts', [msg.get('payload', {})]):
+                data = part.get('body', {}).get('data', '')
+                if data:
+                    raw_text += _b64.urlsafe_b64decode(data + '==').decode('utf-8', errors='ignore')
+            urls = list(dict.fromkeys(URL_RE.findall(raw_text)))  # dedup, order-preserved
+            links, tracking, unsubscribe = [], [], []
+            for u in urls:
+                lo = u.lower()
+                if any(k in lo for k in ('unsubscribe', 'optout', 'opt-out', 'remove-me')):
+                    unsubscribe.append(u)
+                elif any(k in lo for k in ('track', 'click.', 'open.php', 'pixel', 'beacon', 'img.', '/t/')):
+                    tracking.append(u)
+                else:
+                    links.append(u)
+            return {
+                'status': 'success',
+                'message_id': message_id,
+                'subject': subject,
+                'total_urls': len(urls),
+                'links': links,
+                'tracking_pixels': tracking,
+                'unsubscribe_urls': unsubscribe,
+                'all_urls': urls,
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error extracting URLs: {exc}"}
+
+    def get_email_chains_summary(self, max_results: int = 10) -> Dict:
+        """Return the most active email threads sorted by reply count.
+
+        Useful for finding long conversations that may need attention.
+        """
+        try:
+            resp = self.gmail_service.users().threads().list(
+                userId=self.user_id, maxResults=min(max_results * 3, 50),
+            ).execute()
+            threads = resp.get('threads', [])
+            summaries = []
+            for t in threads[:max_results * 2]:
+                td = self.gmail_service.users().threads().get(
+                    userId=self.user_id, id=t['id'], format='metadata',
+                    metadataHeaders=['Subject', 'From', 'Date'],
+                ).execute()
+                msgs = td.get('messages', [])
+                if not msgs:
+                    continue
+                subject = from_addr = date_str = ""
+                for h in msgs[0].get('payload', {}).get('headers', []):
+                    n = h['name'].lower()
+                    if n == 'subject':   subject = h['value']
+                    elif n == 'from':    from_addr = h['value']
+                    elif n == 'date':    date_str = h['value']
+                summaries.append({
+                    'thread_id': t['id'],
+                    'subject': subject or '(no subject)',
+                    'from': from_addr,
+                    'date': date_str,
+                    'message_count': len(msgs),
+                    'latest_snippet': msgs[-1].get('snippet', ''),
+                })
+            summaries.sort(key=lambda x: x['message_count'], reverse=True)
+            summaries = summaries[:max_results]
+            return {
+                'status': 'success',
+                'count': len(summaries),
+                'chains': summaries,
+                'message': f"Top {len(summaries)} email thread(s) by activity.",
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error getting email chains: {exc}"}
+
+    def send_completion_reminder(self, message_id: str, days: int = 3) -> Dict:
+        """Schedule a self-reminder if no reply is received within N days.
+
+        Delegates to mark_for_followup() with an auto-generated note derived
+        from the email subject and recipient.
+        """
+        try:
+            msg = self.gmail_service.users().messages().get(
+                userId=self.user_id, id=message_id, format='metadata',
+                metadataHeaders=['Subject', 'To'],
+            ).execute()
+            subject = to_addr = ""
+            for h in msg.get('payload', {}).get('headers', []):
+                n = h['name'].lower()
+                if n == 'subject': subject = h['value']
+                elif n == 'to':    to_addr = h['value']
+            note = f"Auto-reminder: check for reply to '{subject}' sent to {to_addr}"
+            return self.mark_for_followup(message_id=message_id, days=days, note=note)
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error scheduling reminder: {exc}"}
+
 
 # Convenient module-level functions
 _client = None
@@ -988,6 +1915,135 @@ def suggest_vip_contacts() -> Dict:
 
 def export_contacts(format: str = 'csv', limit: int = 100) -> Dict:
     return _get_client().export_contacts(format, limit)
+
+
+def create_label(label_name: str) -> Dict:
+    return _get_client().create_label(label_name)
+
+
+def move_emails_to_label(query: str, label_name: str, max_results: int = 50) -> Dict:
+    return _get_client().move_emails_to_label(query, label_name, max_results)
+
+
+def set_vacation_responder(
+    enabled: bool,
+    subject: str = "",
+    body: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    restrict_to_contacts: bool = False,
+) -> Dict:
+    """Enable or disable Gmail's Out-of-Office / Vacation auto-reply (module-level)."""
+    return _get_client().set_vacation_responder(
+        enabled, subject, body, start_date, end_date, restrict_to_contacts,
+    )
+
+
+def get_vacation_responder() -> Dict:
+    """Return the current Gmail vacation / OOO responder settings (module-level)."""
+    return _get_client().get_vacation_responder()
+
+
+def fetch_emails_to_markdown(
+    query: str = "in:inbox",
+    max_results: int = 5,
+    cap: int = 20,
+    output_dir: str = "",
+) -> Dict:
+    """Fetch N emails matching *query*, save as a Markdown file, return content + file_path."""
+    return _get_client().fetch_emails_to_markdown(query, max_results, cap, output_dir)
+
+
+def unsubscribe_email(message_id: str) -> Dict:
+    return _get_client().unsubscribe_email(message_id)
+
+
+def archive_emails(query: str, max_results: int = 50) -> Dict:
+    return _get_client().archive_emails(query, max_results)
+
+
+def thread_mute(thread_id: str) -> Dict:
+    return _get_client().thread_mute(thread_id)
+
+
+def thread_archive(thread_id: str) -> Dict:
+    return _get_client().thread_archive(thread_id)
+
+
+def thread_delete(thread_id: str) -> Dict:
+    return _get_client().thread_delete(thread_id)
+
+
+def create_smart_label_rule(
+    label_name: str,
+    from_email: str = "",
+    subject_contains: str = "",
+    to_email: str = "",
+    also_archive: bool = False,
+) -> Dict:
+    return _get_client().create_smart_label_rule(
+        label_name, from_email, subject_contains, to_email, also_archive
+    )
+
+
+def find_unanswered_emails(days: int = 3, max_results: int = 20) -> Dict:
+    return _get_client().find_unanswered_emails(days, max_results)
+
+
+def empty_trash() -> Dict:
+    return _get_client().empty_trash()
+
+
+def batch_mark_spam(query: str, max_results: int = 50) -> Dict:
+    return _get_client().batch_mark_spam(query, max_results)
+
+
+def add_forwarding_address(forward_to: str) -> Dict:
+    return _get_client().add_forwarding_address(forward_to)
+
+
+def enable_email_forwarding(forward_to: str) -> Dict:
+    return _get_client().enable_email_forwarding(forward_to)
+
+
+def get_signature(send_as_email: str = "me") -> Dict:
+    return _get_client().get_signature(send_as_email)
+
+
+def set_signature(signature_html: str, send_as_email: str = "me") -> Dict:
+    return _get_client().set_signature(signature_html, send_as_email)
+
+
+def save_email_template(name: str, subject: str, body: str) -> Dict:
+    return _get_client().save_email_template(name, subject, body)
+
+
+def list_email_templates() -> Dict:
+    return _get_client().list_email_templates()
+
+
+def send_from_template(template_name: str, to: str, variables: Dict = None) -> Dict:
+    return _get_client().send_from_template(template_name, to, variables)
+
+
+def recover_deleted_emails(query: str = "", max_results: int = 20) -> Dict:
+    return _get_client().recover_deleted_emails(query, max_results)
+
+
+def analyze_email_sentiment(message_id: str) -> Dict:
+    return _get_client().analyze_email_sentiment(message_id)
+
+
+def extract_urls_from_email(message_id: str) -> Dict:
+    return _get_client().extract_urls_from_email(message_id)
+
+
+def get_email_chains_summary(max_results: int = 10) -> Dict:
+    return _get_client().get_email_chains_summary(max_results)
+
+
+def send_completion_reminder(message_id: str, days: int = 3) -> Dict:
+    return _get_client().send_completion_reminder(message_id, days)
 
 
 if __name__ == "__main__":
