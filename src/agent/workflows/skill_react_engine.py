@@ -212,6 +212,7 @@ def run_skill_react(
         "message":   final_message,
         "action":    "react_response",
         "llm_calls": _llm_calls,
+        "file_path": artifacts_out.get("file_path", ""),
     }
 
 
@@ -306,7 +307,13 @@ def _parse_json(raw: str) -> dict:
 
 
 def _format_observation(tool_name: str, result: Any) -> str:
-    """Convert a tool result into a short, LLM-readable observation string."""
+    """Convert a tool result into an LLM-readable observation string.
+
+    Lists are shown in full (not just the first 3 items) so the LLM can act
+    on every element returned — e.g. all email IDs, not just the first two.
+    Caps are generous enough to avoid losing information while still keeping
+    the prompt manageable.
+    """
     if result is None:
         return f"{tool_name} returned nothing."
     if isinstance(result, dict):
@@ -314,10 +321,23 @@ def _format_observation(tool_name: str, result: Any) -> str:
         message = result.get("message", "")
         if status == "error":
             return f"{tool_name} failed: {result.get('error', message)}"
-        # Return the first 600 chars of the JSON
-        return str(result)[:600]
+        # Prefer structured JSON for dicts so IDs / fields are easy to read
+        try:
+            formatted = json.dumps(result, indent=2, default=str)
+        except Exception:
+            formatted = str(result)
+        return formatted[:1200]
     if isinstance(result, list):
         count = len(result)
-        preview = str(result[:3])[:400]
-        return f"{tool_name} returned {count} item(s). Preview: {preview}"
-    return str(result)[:600]
+        # Show ALL items — truncate total length rather than item count.
+        # Previously only showed result[:3] which caused the LLM to lose
+        # track of items 4+ and loop over the same earlier items.
+        try:
+            full_repr = json.dumps(result, indent=2, default=str)
+        except Exception:
+            full_repr = str(result)
+        preview = full_repr[:1500]
+        if len(full_repr) > 1500:
+            preview += f"\n… ({count} items total, truncated)"
+        return f"{tool_name} returned {count} item(s):\n{preview}"
+    return str(result)[:1200]

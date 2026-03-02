@@ -1,0 +1,89 @@
+GMAIL AGENT — Missing critical tools:
+Email Organization & Filtering:
+
+create_smart_label_rule(label, criteria) — Auto-label emails matching a query pattern (e.g., "invoice" → Label "Finance")
+unsubscribe_email(message_id) — Auto-detect and click unsubscribe link (from List-Unsubscribe header)
+mark_as_spam_bulk(query, max_results) — Move multiple matching emails to spam at once
+archive_emails(query, max_results) — Archive emails matching query (non-destructive removal from inbox)
+thread_operations(thread_id, action) — Mute entire thread, archive thread, delete thread (one call vs. message-by-message)
+Templates & Quick Send:
+
+create_email_template(name, subject, body) — Save reusable email template
+list_email_templates() — List saved templates
+send_from_template(template_name, to, custom_fields) — Send email using template with variable substitution
+Email Recovery & Management:
+
+recover_deleted_emails(query, max_results) — Search and restore from Trash
+empty_trash() — Permanent delete all trash (avoid data loss)
+set_email_forwarding(from_address, to_address) — Auto-forward incoming emails
+manage_signatures(action, signature_name, content) — Switch between signatures, create custom ones
+Smart Analytics & Reminders:
+
+find_unanswered_emails(days=7) — Search for emails with no reply
+send_completion_reminder(message_id, days=3) — "Send me a reminder if no reply in 3 days"
+analyze_email_sentiment(message_id) — "Is this email angry/urgent/neutral?" (for priority inbox)
+extract_urls_from_email(message_id) — Parse all links in an email body
+get_email_chains_summary() — Summarize longest/most-active threads
+DRIVE AGENT — Missing file productivity tools:
+Batch Operations (high-demand):
+
+batch_move_files(query, destination_folder) — Move multiple files in one call
+batch_delete_files(query, confirm=False) — Delete multiple matching files
+batch_copy_files(query, destination, rename_pattern) — Copy multiple files with optional rename
+File Sharing & Permissions:
+
+share_file(file_id, email, role="viewer") — Share file and get shareable link
+manage_file_permissions(file_id, action, email, role) — Add/remove/change permissions
+revoke_access_all(file_id) — Remove all shared access (make private)
+list_shared_with_me() — Show all files shared to me
+get_sharing_stats() — How many people have access, who has what
+Storage Management:
+
+find_large_files(min_size_mb=100, limit=50) — Disk hog detective
+find_duplicates(by="hash") — Find identical files (same content)
+cleanup_old_versions() — Archive/delete old versions of files
+get_storage_quota() — Current usage vs. limit
+suggest_archival() — "These PDFs haven't been opened in 6 months" → suggest moving to archive folder
+File Conversion & Format:
+
+convert_document(file_id, output_format) — Convert Docs→PDF, Sheets→CSV, etc.
+extract_text_from_pdf(file_id) — OCR text extraction
+create_merged_pdf(file_ids, output_name) — Combine multiple PDFs
+Sync & Backup:
+
+monitor_sync_status() — Check if local Drive folder is synced
+backup_drive_to_local(folder_id, output_dir) — Export entire folder locally
+sync_local_folder_to_drive(local_path, drive_folder_id) — Upload changes
+FILES AGENT — Missing system-level tools:
+Search & Discovery:
+
+search_files_by_content(query, file_types, search_depth) — Find files containing text (grep-like)
+find_files_by_size(min_mb, max_mb) — "Find all files between 100-500 MB"
+find_duplicate_files(min_size_mb=1) — Detect duplicates by hash
+search_by_date(created_after, modified_after, extensions) — Find recently created/modified
+Cleanup & Organization:
+
+analyze_disk_usage(path) — Show folder sizes, find space-wasters
+cleanup_temp_files() — Remove Windows temp, recycle, caches safely
+cleanup_app_caches() — Remove Browser caches, installer files, log archives
+organize_by_date(source_folder, pattern) — Auto-folder files by creation date
+organize_by_extension(source_folder) — Auto-categorize into subfolders by type
+archive_old_files(folder, months_old=6, output_zip) — Compress old files
+File Operations:
+
+batch_rename(folder, pattern, new_pattern) — Rename multiple files (regex support)
+batch_compress(query, format="zip") — Compress multiple files
+secure_delete(file_path) — Overwrite before deletion (for sensitive files)
+resolve_shortcut(lnk_path) — Get target path from Windows .lnk shortcut
+get_file_hash(file_path) — MD5/SHA256 for duplicate detection
+System Insights:
+
+get_drive_info() — Space used per drive, which is fastest
+monitor_folder(folder_path, timeout_minutes) — Watch for new/modified files
+list_running_apps() — What's currently open (for context)
+Priority Matrix — Build in this order:
+Priority	Impact	Effort	Tools
+P0 (Critical)	High	Low	Gmail: unsubscribe, archive_emails, thread_mute<br/>Drive: batch_move, batch_delete, share_file<br/>Files: cleanup_temp, analyze_disk_usage, find_duplicates
+P1 (High-Impact)	High	Medium	Gmail: smart_labels, find_unanswered, forwarding<br/>Drive: convert_document, get_storage_quota<br/>Files: search_by_content, organize_by_date
+P2 (Nice-to-Have)	Medium	Medium	Gmail: sentiment analysis, signature management<br/>Drive: sync monitoring, backup<br/>Files: batch_compress, secure_delete
+P3 (Specialized)	Low	High	Gmail: PGP encryption, calendar conflict detection<br/>Drive: OCR, PDF merge<br/>Files: app cache cleanup, shortcut resolution

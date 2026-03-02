@@ -46,6 +46,7 @@ def resolve_path(raw: str) -> Path:
         resolve_path("Downloads/rtofraud")       → ~/Downloads/rtofraud
         resolve_path("~/Documents/report.pdf")   → ~/Documents/report.pdf
         resolve_path("C:/Projects/data")         → C:/Projects/data  (unchanged)
+        resolve_path("hrishikesh")               → C:\\Hrishikesh   (if found at drive root)
     """
     raw = raw.strip().replace("\\", "/")
     p = Path(os.path.expandvars(os.path.expanduser(raw)))
@@ -61,7 +62,19 @@ def resolve_path(raw: str) -> Path:
                 rest = Path(*parts[1:]) if len(parts) > 1 else Path("")
                 p = Path.home() / canonical / rest if str(rest) != "." else Path.home() / canonical
 
-    return p.resolve()
+    resolved = p.resolve()
+
+    # On Windows: if the resolved path doesn't exist and the original input
+    # was a bare name (no directory separator), try treating it as a top-level
+    # folder on each available drive (e.g. "hrishikesh" → C:\Hrishikesh).
+    if not resolved.exists() and "/" not in raw and "\\" not in raw and os.name == "nt":
+        import string as _string
+        for drive_letter in _string.ascii_uppercase:
+            candidate = Path(f"{drive_letter}:\\") / raw
+            if candidate.exists():
+                return candidate.resolve()
+
+    return resolved
 
 
 def _fmt_size(size_bytes: int) -> str:

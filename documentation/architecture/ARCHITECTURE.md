@@ -1,6 +1,8 @@
-# Octa Bot — Architecture
+# Octa Bot â€” Architecture
 
-Last updated: 2026-02-27
+Last updated: 2026-03-15
+
+> **See also:** [DAG_WALKTHROUGH.md](DAG_WALKTHROUGH.md) for a complete step-by-step trace of the DAG algorithm through two worked examples (simple single-skill and complex multi-agent).
 
 ---
 
@@ -8,20 +10,20 @@ Last updated: 2026-02-27
 
 ```
 +----------------------------------------------------------+
-¦  Agent Hub Dashboard  (port 8501, always on)              ¦
-¦  Streamlit UI for creating / starting / stopping agents.  ¦
-¦  State persisted in running_agents.json.                  ¦
+ï¿½  Agent Hub Dashboard  (port 8501, always on)              ï¿½
+ï¿½  Streamlit UI for creating / starting / stopping agents.  ï¿½
+ï¿½  State persisted in running_agents.json.                  ï¿½
 +----------------------------------------------------------+
-                      ¦  subprocess.Popen per agent
+                      ï¿½  subprocess.Popen per agent
  +-----------------------------------------------------------------------------------------------------------------------------------+
- ¦          ¦          ¦          ¦          ¦          ¦          ¦          ¦          ¦          ¦          ¦          ¦          ¦
+ ï¿½          ï¿½          ï¿½          ï¿½          ï¿½          ï¿½          ï¿½          ï¿½          ï¿½          ï¿½          ï¿½          ï¿½          ï¿½
 Email     Drive      Files   WhatsApp  Telegram  Calendar  Browser   Stock    LinkedIn  Habit    Scheduler  Personal
 Agent     Agent      Agent    Agent     Agent     Agent     Agent    Agent     Agent     Agent     Agent     Assistant
 (each is an isolated Streamlit process with its own st.session_state)
 ```
 
 **Skills vs Personal Assistants:**
-- **Skills** (Email, Drive, Files, WhatsApp, Telegram, Calendar, Browser, Stock, LinkedIn, Habit, Scheduler) are stateless executors — no memory, no personality. They execute a single task and return.
+- **Skills** (Email, Drive, Files, WhatsApp, Telegram, Calendar, Browser, Stock, LinkedIn, Habit, Scheduler) are stateless executors ï¿½ no memory, no personality. They execute a single task and return.
 - **Personal Assistants** have full 6-layer memory (working, episodic, semantic, personality, habits, consciousness) and a cross-domain `collective_consciousness.md`.
 
 ---
@@ -30,22 +32,22 @@ Agent     Agent      Agent    Agent     Agent     Agent     Agent    Agent     A
 
 ```
 User types a message
-        ¦
+        ï¿½
         ?
 classify_intent()          LLM call: is this COMMAND or CHAT?
-        ¦                  max_tokens=5, temperature=0
-   CHAT ¦ COMMAND
-        ¦       ¦
+        ï¿½                  max_tokens=5, temperature=0
+   CHAT ï¿½ COMMAND
+        ï¿½       ï¿½
         ?       ?
   llm.chat()  reason_and_act()           ReAct loop (up to 6 iterations)
   (casual)    +------------------+       Thought ? Action (tool call)
-              ¦ Tool executor    ¦  ?    ? Observation ? Thought ? ...
-              ¦ (Gmail/Drive API)¦       until final_answer
+              ï¿½ Tool executor    ï¿½  ?    ? Observation ? Thought ? ...
+              ï¿½ (Gmail/Drive API)ï¿½       until final_answer
               +------------------+
-                      ¦
+                      ï¿½
                       ?
             _compose_*_response()        Raw JSON result ? LLM ? friendly markdown
-                      ¦
+                      ï¿½
                       ?
                Streamlit chat UI
 ```
@@ -54,7 +56,7 @@ classify_intent()          LLM call: is this COMMAND or CHAT?
 
 ## Key Components
 
-### `src/agent/llm/llm_parser.py` — `GitHubModelsLLM`
+### `src/agent/llm/llm_parser.py` ï¿½ `GitHubModelsLLM`
 
 The single LLM client used by all agents.
 
@@ -65,18 +67,18 @@ The single LLM client used by all agents.
 | `reason_and_act()` | ReAct tool loop | 3000 per iter | Up to 6 iterations |
 | `orchestrate_mcp_tool()` | Single tool dispatch | 300 | Used by legacy path |
 
-### `src/agent/ui/*/orchestrator.py` — ReAct Orchestrators
+### `src/agent/ui/*/orchestrator.py` ï¿½ ReAct Orchestrators
 
 Each agent has its own orchestrator that:
 1. Builds memory context from the agent's memory files
 2. Runs `reason_and_act()` with the agent's tool list
-3. Returns `{"action": "react_response", "message": "<final_answer>"}` — a complete, LLM-formatted response
+3. Returns `{"action": "react_response", "message": "<final_answer>"}` ï¿½ a complete, LLM-formatted response
 
-### `src/agent/ui/*/app.py` — Response Composition
+### `src/agent/ui/*/app.py` ï¿½ Response Composition
 
 After a tool result comes back, `_compose_*_response()` sends the raw JSON directly to the LLM with a formatting prompt. The LLM writes the final response (tables, bullets, emojis, bold). No hardcoded formatters.
 
-### `src/agent/workflows/` — Multi-Agent Workflows
+### `src/agent/workflows/` ï¿½ Multi-Agent Workflows
 
 Multi-agent commands use a **two-level ReAct architecture**:
 
@@ -88,7 +90,9 @@ Multi-agent commands use a **two-level ReAct architecture**:
 
 **Context cost:** ~445 tokens for 2 agents (vs ~8,000 for a flat tool-list design). Adding an agent = one entry in `agent_registry.py`; orchestrator context does not grow.
 
-**Shared skill engine:** `src/agent/workflows/skill_react_engine.py` — `run_skill_react()` is the single ReAct loop implementation used by every skill orchestrator. Each skill passes its own `tool_map` and `skill_context`. This removes code duplication across agents.
+**Shared skill engine:** `src/agent/workflows/skill_react_engine.py` â€” `run_skill_react()` is the shared ReAct loop used by every skill orchestrator and serves as the **fallback path**.
+
+**Sub-agent DAG engine (new):** `src/agent/workflows/skill_dag_engine.py` â€” `run_skill_dag()` is the **primary path** for Email, Files and Drive agents. Instead of iterating 1-call-per-step, it uses exactly **2 LLM calls** per task regardless of complexity: one to plan a list of tool steps (JSON), then tools execute deterministically, then one synthesis call produces the friendly final answer. Falls back to `run_skill_react()` automatically if planning fails or returns an unknown tool.
 
 Single-agent commands routed through the Personal Assistant bypass the multi-agent planner and call the individual skill's ReAct orchestrator directly.
 
@@ -98,48 +102,47 @@ Single-agent commands routed through the Personal Assistant bypass the multi-age
 
 ```
 User command
-      ¦
+      ï¿½
       ?
 detect_agents_needed()          (1 LLM call, max_tokens=5)
-      ¦
+      ï¿½
    +------------------------------------------------+
    ?                     ?                           ?
  NEITHER             SINGLE AGENT               MULTI-AGENT
 (casual chat)      (any single skill)           (2+ agents needed)
-      ¦                  ?                           ?
+      ï¿½                  ?                           ?
       ?        execute_with_llm_orchestration() react_workflow()
- _chat_response()  run_skill_react()            MASTER ReAct loop
- (1 LLM call)      up to 6 LLM calls/skill      up to 12 iterations
-                                                      ¦
-                                          delegate_to_agent × N
-                                                      ¦
+ _chat_response()  run_skill_dag() [primary]    MASTER DAG plan
+ (1 LLM call)      run_skill_react() [fallback]  then per-step dispatch
+                   = 2 LLM calls/skill                ï¿½
+                                          delegate_to_agent ï¿½ N
+                                                      ï¿½
                                      +----------------+----------------+
                                      ?                ?                ?
                                   Email            Drive          Files/WA/TG
-                              run_skill_react  run_skill_react  run_skill_react
-                              up to 6 calls    up to 6 calls    up to 6 calls
+                              run_skill_dag    run_skill_dag    run_skill_dag
+                              2 calls each     2 calls each     2 calls each
                                      +----------------+----------------+
                                                       ?
                                            master: final_answer
-                                           (LLM composes summary)
 ```
 
-**Worst-case LLM call count per flow:**
+**Worst-case LLM call count per flow (with sub-agent DAG):**
 
 | Flow | Path | Typical calls | Max possible |
 |------|------|:---:|:---:|
 | Casual chat | chat_response | 2 | 2 |
-| Single-skill command | skill ReAct only | 2–4 | 7 |
-| 2-agent command (e.g. zip + email) | master + 2 sub-agents | 5–8 | 25 |
-| 3-agent command | master + 3 sub-agents | 7–12 | 31 |
+| Single-skill command | skill DAG (2) | 3 | 4 |
+| 2-agent command (e.g. zip + email) | master + 2 sub-agents DAG | 5 | 7 |
+| 3-agent command | master + 3 sub-agents DAG | 7 | 10 |
 
-*Master loop: up to 12 calls. Each sub-agent: up to 6 calls. Intent classify: 1 call.*
+*Master planner: 1 call. Each sub-agent DAG: 2 calls. Intent classify: 1 call. Fallback: ReAct (2â€“10 calls per agent).*
 
 ---
 
 ## Memory System
 
-**Only Personal Assistants (PAs) have memory.** Skill agents (Email, Drive, WhatsApp, Telegram, Files) are stateless — they execute a single request with no context from past interactions.
+**Only Personal Assistants (PAs) have memory.** Skill agents (Email, Drive, WhatsApp, Telegram, Files) are stateless ï¿½ they execute a single request with no context from past interactions.
 
 Each PA has a dedicated memory folder at `memory/<pa_id>/`. The system uses 6 layers (7 for the PA hub with collective memory):
 
@@ -147,17 +150,17 @@ Each PA has a dedicated memory folder at `memory/<pa_id>/`. The system uses 6 la
 |------|---------|------------|
 | `working_memory.md` | Last 10 interactions | ? Always |
 | `episodic_memory.md` | Timestamped events | On-demand recall only |
-| `semantic_memory.md` | Learned facts about the user — preferences, recurring needs, background | ? Last 3000 chars |
+| `semantic_memory.md` | Learned facts about the user ï¿½ preferences, recurring needs, background | ? Last 3000 chars |
 | `personality.md` | Agent tone + identity. **PA hub: hard-coded protective persona, never overwritten by trait sliders** | ? Full file |
-| `habits.md` | Confirmed user behavioural patterns — time-of-day, day-of-week, action type. Requires 3+ occurrences | ? Last 3000 chars |
-| `consciousness.md` | Big-picture mental model of the user synthesised from ALL memory layers. Updated every 2–4 weeks | ? Full file |
-| `collective_consciousness.md` | **PA hub only.** Synthesis of every skill agent’s `consciousness.md`. Cross-domain user model | ? Full file |
+| `habits.md` | Confirmed user behavioural patterns ï¿½ time-of-day, day-of-week, action type. Requires 3+ occurrences | ? Last 3000 chars |
+| `consciousness.md` | Big-picture mental model of the user synthesised from ALL memory layers. Updated every 2ï¿½4 weeks | ? Full file |
+| `collective_consciousness.md` | **PA hub only.** Synthesis of every skill agentï¿½s `consciousness.md`. Cross-domain user model | ? Full file |
 
 ### Consolidation
 
 A `ConsolidationRunner` daemon thread starts automatically when the dashboard boots. It:
 1. Runs an immediate consolidation pass across all registered **Personal Assistants** on startup
-2. Repeats every 24 hours — covers **all** PAs, including those not actively running
+2. Repeats every 24 hours ï¿½ covers **all** PAs, including those not actively running
 
 Consolidation cycle per agent:
 1. Extract patterns from working memory ? update `semantic_memory.md`
@@ -169,15 +172,15 @@ Consolidation cycle per agent:
 
 ### `_collective_memory_` Memory (Personal Assistant Hub)
 
-The Personal Assistant hub’s memory files are created on first dashboard launch (not on first chat). Its `personality.md` is always restored to the hard-coded protective personal-assistant character on each init — it cannot be changed via the trait-slider UI.
+The Personal Assistant hubï¿½s memory files are created on first dashboard launch (not on first chat). Its `personality.md` is always restored to the hard-coded protective personal-assistant character on each init ï¿½ it cannot be changed via the trait-slider UI.
 
 ---
 
 ## Process & Port Management
 
 - **Dashboard:** always port `8501`
-- **Agent sub-processes:** ports `8502–8599`, assigned dynamically
-- **State file:** `running_agents.json` — tracks PID + port per agent, survives dashboard reruns
+- **Agent sub-processes:** ports `8502ï¿½8599`, assigned dynamically
+- **State file:** `running_agents.json` ï¿½ tracks PID + port per agent, survives dashboard reruns
 - **Watchdog:** each agent watches for browser disconnect and self-terminates + removes itself from state
 
 ---
@@ -195,6 +198,6 @@ Three categories of log files, **truncated on every `start.py` run**:
 
 ## Memory Folder
 
-PA memories are stored under `memory/<pa_id>/`. Only Personal Assistants have folders here — Skills are stateless and have no memory. Each PA folder holds 6 `.md` memory layers.
+PA memories are stored under `memory/<pa_id>/`. Only Personal Assistants have folders here ï¿½ Skills are stateless and have no memory. Each PA folder holds 6 `.md` memory layers.
 
 The `_collective_memory_` PA hub is the only agent that also maintains a `collective_consciousness.md` file, synthesising all skill consciousness files on each consolidation cycle.

@@ -60,6 +60,7 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.settings.basic",  # OOO / vacation responder
 ]
 
 DRIVE_SCOPES = [
@@ -68,7 +69,11 @@ DRIVE_SCOPES = [
     "https://www.googleapis.com/auth/drive.metadata.readonly",
 ]
 
-ALL_SCOPES = list(dict.fromkeys(GMAIL_SCOPES + DRIVE_SCOPES))  # deduplicated
+CONTACTS_SCOPES = [
+    "https://www.googleapis.com/auth/contacts.readonly",  # Google People API – read contacts
+]
+
+ALL_SCOPES = list(dict.fromkeys(GMAIL_SCOPES + DRIVE_SCOPES + CONTACTS_SCOPES))  # deduplicated
 
 
 def _authorize(scopes: list, token_path: Path, label: str) -> bool:

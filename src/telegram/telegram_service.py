@@ -62,21 +62,41 @@ def get_me() -> Dict[str, Any]:
 def send_text(
     chat_id: int | str,
     text: str,
-    parse_mode: str = "Markdown",
+    parse_mode: Optional[str] = "Markdown",
     reply_to_message_id: Optional[int] = None,
     disable_notification: bool = False,
 ) -> Dict[str, Any]:
-    """Send a plain-text message to a chat."""
+    """Send a plain-text message to a chat.
+
+    Pass ``parse_mode=None`` to send completely unformatted plain text,
+    bypassing all Telegram entity parsing.
+
+    Automatically retries without ``parse_mode`` if Telegram rejects the
+    message with a "can't parse entities" error (e.g. Windows paths with
+    backslashes or other characters that break Markdown v1 parsing).
+    """
     payload: Dict[str, Any] = {
         "chat_id": chat_id,
         "text": text,
-        "parse_mode": parse_mode,
         "disable_notification": disable_notification,
     }
+    if parse_mode:  # Only include parse_mode when non-None and non-empty
+        payload["parse_mode"] = parse_mode
     if reply_to_message_id:
         payload["reply_to_message_id"] = reply_to_message_id
+
     resp = requests.post(f"{_base_url()}/sendMessage", json=payload, timeout=_TIMEOUT)
-    return _unwrap(resp)
+    try:
+        return _unwrap(resp)
+    except RuntimeError as exc:
+        if "can't parse entities" in str(exc).lower() and parse_mode:
+            logger.warning(
+                "Markdown entity error for chat %s — retrying as plain text. err=%s", chat_id, exc
+            )
+            payload.pop("parse_mode", None)
+            resp2 = requests.post(f"{_base_url()}/sendMessage", json=payload, timeout=_TIMEOUT)
+            return _unwrap(resp2)
+        raise
 
 
 def send_photo(
@@ -108,6 +128,33 @@ def send_document(
         payload["caption"] = caption
         payload["parse_mode"] = "Markdown"
     resp = requests.post(f"{_base_url()}/sendDocument", json=payload, timeout=_TIMEOUT)
+    return _unwrap(resp)
+
+
+def send_document_file(
+    chat_id: int | str,
+    file_path: str,
+    caption: str = "",
+) -> Dict[str, Any]:
+    """Upload and send a local file as a Telegram document.
+
+    Unlike ``send_document`` (which takes a URL / file_id), this function
+    opens the file from disk and POSTs it as a multipart upload — the only
+    way to send a brand-new file that Telegram hasn't seen before.
+    """
+    import os
+    filename = os.path.basename(file_path)
+    with open(file_path, "rb") as fh:
+        resp = requests.post(
+            f"{_base_url()}/sendDocument",
+            data={
+                "chat_id": str(chat_id),
+                "caption": caption,
+                "parse_mode": "Markdown",
+            },
+            files={"document": (filename, fh)},
+            timeout=120,  # file uploads can be slow
+        )
     return _unwrap(resp)
 
 
@@ -191,17 +238,35 @@ def edit_message_text(
     chat_id: int | str,
     message_id: int,
     text: str,
-    parse_mode: str = "Markdown",
+    parse_mode: Optional[str] = "Markdown",
 ) -> Dict[str, Any]:
-    """Edit the text of a previously sent message."""
-    payload = {
+    """Edit the text of a previously sent message.
+
+    Pass ``parse_mode=None`` to edit without any Markdown parsing.
+
+    Automatically retries without ``parse_mode`` if Telegram rejects the
+    edit with a "can't parse entities" error.
+    """
+    payload: Dict[str, Any] = {
         "chat_id": chat_id,
         "message_id": message_id,
         "text": text,
-        "parse_mode": parse_mode,
     }
+    if parse_mode:  # Only include parse_mode when non-None and non-empty
+        payload["parse_mode"] = parse_mode
     resp = requests.post(f"{_base_url()}/editMessageText", json=payload, timeout=_TIMEOUT)
-    return _unwrap(resp)
+    try:
+        return _unwrap(resp)
+    except RuntimeError as exc:
+        if "can't parse entities" in str(exc).lower() and parse_mode:
+            logger.warning(
+                "Markdown entity error editing msg %s in chat %s — retrying as plain text. err=%s",
+                message_id, chat_id, exc,
+            )
+            payload.pop("parse_mode", None)
+            resp2 = requests.post(f"{_base_url()}/editMessageText", json=payload, timeout=_TIMEOUT)
+            return _unwrap(resp2)
+        raise
 
 
 def delete_message_api(chat_id: int | str, message_id: int) -> bool:

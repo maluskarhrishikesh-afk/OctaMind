@@ -10,19 +10,26 @@ from src.agent.core.agent_manager import get_agent_manager
 
 # Plain-language abilities per agent type — shown in the hover tooltip
 _SKILL_ABILITIES: dict[str, list[str]] = {
-    "gmail": [
+    "email": [
         "📨 Read, search & send emails",
         "🔗 Smart labels & auto-sort",
         "⏰ Schedule emails for later",
         "✅ Extract to-dos from threads",
         "⚠️ Detect urgent & unread mail",
     ],
-    "google_drive": [
+    "drive": [
         "📄 Browse, upload & download files",
         "🔗 Share files with anyone",
         "🔍 Find & remove duplicates",
         "📂 Auto-organise folders",
         "📊 Storage reports & analytics",
+    ],
+    "linkedin": [
+        "📝 Publish text, image & video posts",
+        "🤖 AI-generate post copy & DALL·E images",
+        "⏰ Schedule posts for future dates",
+        "📊 Post & page-level analytics",
+        "👥 Track follower count & engagement",
     ],
     "files": [
         "🖥️ Browse & search your computer",

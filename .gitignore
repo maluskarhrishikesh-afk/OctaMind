@@ -52,6 +52,7 @@ config/settings.json
 #   - assistants.json      → Telegram bot tokens, channel configs
 #   - *_messages.json      → private message histories
 #   - habits/links/etc.    → personal user data
+#   - exports/             → user data exports (contacts, analysis PDFs, reports)
 data/
 
 # Agent registry & runtime state (machine-specific, may contain tokens)

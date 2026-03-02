@@ -57,7 +57,10 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "reply to messages, manage contacts and groups, search conversations, "
             "schedule messages, set auto-reply, summarize chats, extract action items, "
             "draft and translate messages, detect urgent messages, sentiment analysis, "
-            "message analytics, and cross-agent forwarding to email or Drive."
+            "message analytics, and cross-agent forwarding to email or Drive. "
+            "IMPORTANT: Do NOT use for 'send it here', 'send here for downloading', "
+            "'show me the file', or 'deliver the file' — those mean deliver in the CURRENT "
+            "chat channel (Telegram/Dashboard), which is handled by the files agent."
         ),
         "module": "src.agent.ui.whatsapp_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
@@ -65,10 +68,15 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
     "files": {
         "description": (
             "Files Agent. Handles: list/copy/move/delete/rename local files and folders, "
-            "search by name/extension/date/size, find duplicates, zip/unzip archives, "
-            "bulk organise by type or date, read text/CSV/JSON files, disk usage analytics, "
-            "AI file summarisation and folder analysis, and cross-agent workflows "
-            "(zip+email, zip+Drive upload, attach file to email)."
+            "search by name/extension/date/size across all drives (search_file_all_drives), "
+            "find duplicates, zip/unzip archives, "
+            "organise folder by extension/date/name/size with dry-run preview (organize_folder), "
+            "read text/CSV/JSON files, disk usage analytics, "
+            "write reports to notepad/txt (write_text_file), PDF (write_pdf_report), Excel (write_excel_report), "
+            "full laptop scan (all drives + user directories via list_laptop_structure — always saves a .txt report), "
+            "DELIVER any file for direct download in the current chat (deliver_file — use when user says "
+            "'send it here', 'send here for downloading', 'show me the file', 'download this'), "
+            "and cross-agent workflows (zip+email, zip+Drive upload, attach file to email)."
         ),
         "module": "src.agent.ui.files_agent.orchestrator",
         "function": "execute_with_llm_orchestration",

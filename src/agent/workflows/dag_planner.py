@@ -175,6 +175,13 @@ Rules:
 - When a step uses a local folder the user named (e.g. "Text folder in Downloads"),
   write the full absolute path directly in the instruction — never use a placeholder.
 - Keep the plan minimal — only generate steps directly needed.
+- If the user says "this", "the above", "the list", or refers to output from a
+  previous assistant message, embed that information as literal text directly
+  in the instruction — do NOT create a new fetch/list step for it.
+- CRITICAL — "send here" / "send it here for downloading" / "show me the file": use a SINGLE
+  `files` step with instruction telling the agent to find the file AND set file_path for delivery.
+  The system automatically sends the file to the user's current chat. Do NOT use `whatsapp`.
+  Example: "Search for any payslip PDF file (not .lnk shortcuts) and deliver it for download"
 - Return ONLY the JSON array. No surrounding text, no markdown code fences.
 
 Example for "Download report.pdf from Drive, zip it, and email it to me":
@@ -182,6 +189,11 @@ Example for "Download report.pdf from Drive, zip it, and email it to me":
   {{"id": "download1", "agent": "drive", "instruction": "Download report.pdf from Google Drive and save it locally", "depends_on": [], "description": "Download report.pdf"}},
   {{"id": "zip1", "agent": "files", "instruction": "Zip the file at {{download1.file_path}} into an archive", "depends_on": ["download1"], "description": "Zip the file"}},
   {{"id": "email1", "agent": "email", "instruction": "Send the zip archive at {{zip1.file_path}} as an attachment to {{__user_email__}} with subject \\"Report\\"", "depends_on": ["zip1"], "description": "Email the zip"}}
+]
+
+Example for "find my payslip and send it here for downloading":
+[
+  {{"id": "deliver1", "agent": "files", "instruction": "Search for any payslip PDF file on the laptop (skip .lnk shortcuts, look for actual .pdf files). Use search_file_all_drives if available. Deliver the found file for download by the user.", "depends_on": [], "description": "Find and deliver payslip"}}
 ]
 """
 

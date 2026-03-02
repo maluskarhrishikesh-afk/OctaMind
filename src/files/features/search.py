@@ -57,6 +57,10 @@ def search_by_name(
             if len(results) >= min(limit, _MAX_RESULTS):
                 break
 
+        # Sort: real files (non .lnk) first, then shortcuts — so callers get
+        # actual documents in position 0 rather than Windows shortcut files.
+        results.sort(key=lambda r: (1 if r.get("extension", "").lower() == ".lnk" else 0))
+
         return {
             "status": "success",
             "query": query,
@@ -352,4 +356,116 @@ def find_empty_folders(directory: str, recursive: bool = True) -> Dict[str, Any]
         }
     except Exception as exc:
         logger.error("find_empty_folders failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def search_file_all_drives(
+    query: str,
+    extensions: Optional[List[str]] = None,
+    limit: int = 20,
+) -> Dict[str, Any]:
+    """
+    Search ALL drives and the full home-directory tree for files matching *query*.
+
+    Unlike ``search_by_name`` (which defaults to ``~`` only), this function
+    discovers every mounted drive on Windows (C:, D:, …) or ``/`` on Unix and
+    scans each one, making it suitable for finding files anywhere on the laptop.
+
+    Args:
+        query:      Filename glob pattern or plain substring (e.g. ``payslip``,
+                    ``*.pdf``, ``salary_slip*``).
+        extensions: Optional list of extensions to restrict (e.g. ``["pdf","docx"]``).
+                    Matched case-insensitively.  If omitted, all files are considered.
+        limit:      Maximum number of results to return (default 20).
+
+    Returns a result dict with ``file_path`` set to the path of the first (best)
+    match, so the caller can pass it directly to ``deliver_file`` or an email
+    attachment without additional steps.
+    """
+    import platform
+    import string as _string
+    from pathlib import Path as _P
+
+    try:
+        # Build normalised glob / substring pattern
+        if not any(c in query for c in ("*", "?", "[")):
+            pattern = f"*{query}*"
+        else:
+            pattern = query
+
+        ext_filter: Optional[set] = (
+            {e.lstrip(".").lower() for e in extensions} if extensions else None
+        )
+
+        # Discover drives
+        drives: List[_P] = []
+        if platform.system() == "Windows":
+            for letter in _string.ascii_uppercase:
+                d = _P(f"{letter}:\\")
+                try:
+                    if d.exists():
+                        drives.append(d)
+                except Exception:
+                    pass
+        else:
+            drives = [_P("/")]
+
+        # Extensions to always skip — Windows shortcuts and cache/temp files
+        _SKIP_EXTENSIONS = {".lnk", ".tmp", ".cache", ".lock", ".partial", ".crdownload"}
+
+        results: List[Dict[str, Any]] = []
+
+        for drive in drives:
+            if len(results) >= limit:
+                break
+            try:
+                for p in drive.rglob(pattern):
+                    if not p.is_file():
+                        continue
+                    # Skip Windows shortcuts and cache files unless explicitly requested
+                    if p.suffix.lower() in _SKIP_EXTENSIONS:
+                        continue
+                    if ext_filter and p.suffix.lstrip(".").lower() not in ext_filter:
+                        continue
+                    try:
+                        stat = p.stat()
+                        size_str = (
+                            f"{stat.st_size / 1024:.1f} KB"
+                            if stat.st_size < 1_048_576
+                            else f"{stat.st_size / 1_048_576:.1f} MB"
+                        )
+                        results.append({
+                            "name": p.name,
+                            "path": str(p),
+                            "size": size_str,
+                            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                        })
+                    except Exception:
+                        results.append({"name": p.name, "path": str(p)})
+                    if len(results) >= limit:
+                        break
+            except (PermissionError, OSError):
+                # Skip drives / dirs we can't access
+                continue
+            except Exception as exc:
+                logger.debug("search_file_all_drives drive %s error: %s", drive, exc)
+
+        best_path = results[0]["path"] if results else ""
+        return {
+            "status": "success",
+            "query": query,
+            "drives_searched": [str(d) for d in drives],
+            "count": len(results),
+            "results": results,
+            # Set file_path to the first match so artifact collector picks it up
+            # for Telegram/Dashboard download delivery automatically.
+            "file_path": best_path,
+            "message": (
+                f"Found {len(results)} file(s) matching '{query}' across {len(drives)} drive(s)."
+                if results
+                else f"No files found matching '{query}' on any drive."
+            ),
+        }
+    except Exception as exc:
+        logger.error("search_file_all_drives failed: %s", exc)
         return {"status": "error", "message": str(exc)}

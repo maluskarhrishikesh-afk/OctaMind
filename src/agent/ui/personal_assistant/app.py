@@ -98,11 +98,172 @@ def _detect_emotion(message: str) -> tuple[str, str] | None:
     return None
 
 
+# ── Scheduling follow-up enrichment ─────────────────────────────────────────
+# When a user replies with a bare time (e.g. "2 PM to 3 PM") after the
+# scheduler agent has suggested slots, the router's keyword pre-filter
+# finds no agent keywords and treats the message as conversational —
+# leading the LLM to say "I've scheduled…" without actually booking anything.
+# This helper detects that pattern and enriches the command so the router
+# correctly routes it to the scheduler agent, which will create the event.
+
+_BARE_TIME_PATTERN = _re.compile(
+    r"""^\s*
+    \d{1,2}(?::\d{2})?          # start hour (e.g. 2 or 10:30)
+    \s*(?:am|pm|AM|PM)          # AM/PM
+    (?:
+        \s*(?:to|\-|–|till|until)\s*   # optional range separator
+        \d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)  # end hour
+    )?
+    \s*$""",
+    _re.VERBOSE | _re.IGNORECASE,
+)
+
+_SCHEDULING_CONTEXT_KEYWORDS = frozenset({
+    "schedule", "meeting", "slot", "free", "available", "book",
+    "calendar", "appointment", "block", "time", "best time",
+})
+
+# Temporal references to carry forward into the enriched scheduling command.
+# Scans BOTH user and assistant messages so dates spoken by either party
+# are captured and injected into the new command.
+_TEMPORAL_PATTERN = _re.compile(
+    r"\b("
+    # Ordinal day + month with SPACE before ordinal suffix (e.g. "8 th March", "3 rd April")
+    r"\d{1,2}\s+(?:st|nd|rd|th)\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*"
+    # Ordinal day + month with NO space before suffix (e.g. "8th March", "3rd April")
+    r"|\d{1,2}(?:st|nd|rd|th)\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*"
+    # Bare day + month name (e.g. "8 March", "3 April")
+    r"|\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)"
+    r"|tomorrow|today|tonight|yesterday"
+    r"|next\s+\w+"
+    r"|this\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|weekend|morning|afternoon|evening)"
+    r"|monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+    r"|january|february|march|april|may|june|july|august|september|october|november|december"
+    r"|\d{4}-\d{2}-\d{2}"
+    r"|\d{1,2}[/\-]\d{1,2}(?:[/\-]\d{2,4})?"
+    r")\b",
+    _re.IGNORECASE,
+)
+
+
+# Detect when the assistant's last reply was soliciting the event title / details.
+# Covers phrasings like "What event title shall I use?", "provide event details", etc.
+_ASSISTANT_ASKING_TITLE_RE = _re.compile(
+    r"(what.*event|event.*title|event.*name|name.*event|title.*event"
+    r"|what would you like to (name|call)|title.*meeting|meeting.*title"
+    r"|provide.*title|provide.*name|provide.*detail|what.*detail"
+    r"|event/appointment title|appointment.*title|title.*appointment"
+    r"|shall i use|what.*call (it|the)|title.*use\?)",
+    _re.IGNORECASE,
+)
+
+
+def _enrich_scheduling_followup(command: str, history: list) -> str:
+    """
+    Enriches follow-up messages in a scheduling conversation so the router
+    correctly dispatches them to the calendar agent instead of treating them
+    as conversational noise.
+
+    Handles two cases:
+    1. Bare time reply — e.g. '2 PM to 3 PM' after the bot suggested slots.
+    2. Event-title reply — e.g. 'Abs Gym' after the bot asked for a title.
+
+    Temporal context (dates like '7th March', 'tomorrow') is extracted from
+    recent history and injected into the enriched command so the calendar agent
+    books on the right date.
+    """
+    stripped = command.strip()
+
+    # ── Case 1: bare time reply ──────────────────────────────────────────────
+    if _BARE_TIME_PATTERN.match(stripped):
+        recent_messages = history[-6:] if len(history) >= 6 else history
+        recent_text = " ".join(m.get("content", "") for m in recent_messages).lower()
+
+        if any(kw in recent_text for kw in _SCHEDULING_CONTEXT_KEYWORDS):
+            date_context = ""
+            all_temporal = _TEMPORAL_PATTERN.findall(recent_text)
+            if all_temporal:
+                best_match = max(all_temporal, key=len)
+                date_context = f" on {best_match}"
+            return f"Schedule a calendar meeting / book the time slot for {stripped}{date_context}"
+
+    # ── Case 2: event-title follow-up ───────────────────────────────────────
+    # Trigger when: the phrase is short (≤8 words, ≤80 chars), is not itself
+    # a question, the recent conversation is about scheduling, AND the last
+    # assistant message was asking for a title / event details.
+    if (
+        len(stripped) <= 80
+        and not stripped.endswith("?")
+        and len(stripped.split()) <= 8
+    ):
+        recent_messages = history[-8:] if len(history) >= 8 else history
+        recent_text_full = " ".join(m.get("content", "") for m in recent_messages)
+        recent_text_lower = recent_text_full.lower()
+
+        if any(kw in recent_text_lower for kw in _SCHEDULING_CONTEXT_KEYWORDS):
+            last_assistant_msg = ""
+            for m in reversed(recent_messages):
+                if m.get("role") == "assistant":
+                    last_assistant_msg = m.get("content", "")
+                    break
+
+            if last_assistant_msg and _ASSISTANT_ASKING_TITLE_RE.search(last_assistant_msg):
+                # Extract date context from history
+                date_context = ""
+                all_temporal = _TEMPORAL_PATTERN.findall(recent_text_lower)
+                if all_temporal:
+                    best_match = max(all_temporal, key=len)
+                    date_context = f" on {best_match}"
+                # Extract time context from history (reuse for completeness)
+                time_context = ""
+                _time_m = _re.search(
+                    r"\d{1,2}(?::\d{2})?\s*(?:am|pm)\s*(?:to\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))?",
+                    recent_text_lower, _re.IGNORECASE,
+                )
+                if _time_m:
+                    time_context = f" at {_time_m.group()}"
+                return (
+                    f"Schedule a '{stripped}' event{date_context}{time_context}"
+                    f" in my calendar"
+                )
+
+    return command
+
+
+def _inject_conversation_context(command: str, history: list) -> str:
+    """
+    For short follow-up commands (≤ 80 chars), prepend the last 2 conversation
+    exchanges so the skill agent has context to work with.
+
+    Example: 'Make it 3 PM instead' becomes
+    '(Context — User: schedule gym on 7th march at 2 PM  Assistant: ...)
+    Make it 3 PM instead'
+    """
+    if len(command.strip()) > 80 or len(history) < 2:
+        return command  # Standalone command — no injection needed
+
+    # Collect the last 2 assistant+user pairs (up to 4 messages)
+    recent = history[-4:] if len(history) >= 4 else history
+    context_lines = []
+    for m in recent[:-1]:  # Exclude the current user message (already = command)
+        role = "User" if m["role"] == "user" else "Assistant"
+        snippet = str(m.get("content", ""))[:120].replace("\n", " ")
+        context_lines.append(f"{role}: {snippet}")
+    if not context_lines:
+        return command
+    context_str = "  |  ".join(context_lines)
+    return f"(Recent context — {context_str})\n{command}"
+
+
 def _chat_response(message: str, agent_name: str, agent_id: str = None,
-                   emotion_hint: str = "") -> str:
+                   emotion_hint: str = "", history: list = None) -> str:
     """
     Handle conversational (non-workflow) messages via the LLM.
     Used when the command doesn't involve multiple agents.
+
+    history: the PA-namespaced message list from session state so the LLM
+    receives proper conversation context.  When omitted the last 10 messages
+    from st.session_state are used as a safe fallback.
     """
     try:
         from src.agent.llm.llm_parser import get_llm_client
@@ -134,10 +295,12 @@ def _chat_response(message: str, agent_name: str, agent_id: str = None,
                 logger.debug("Recall skipped: %s", mem_err)
 
         conversation_history = []
-        if "chat_messages" in st.session_state:
-            for m in st.session_state.chat_messages[-10:]:
-                conversation_history.append(
-                    {"role": m["role"], "content": m["content"]})
+        # Use the caller-supplied history (PA-namespaced) for accurate context;
+        # fall back to any chat_messages key as a last resort.
+        _hist_source = history if history is not None else st.session_state.get("chat_messages", [])
+        for m in _hist_source[-10:]:
+            conversation_history.append(
+                {"role": m["role"], "content": m["content"]})
 
         llm = get_llm_client()
         response = llm.chat(
@@ -485,47 +648,66 @@ def _render_live_channels() -> None:
                     st.caption("No messages yet.")
                     continue
 
-                for msg in reversed(messages[-12:]):
-                    role = msg.get("role", "user")
-                    content = msg.get("content", "")
-                    ts = msg.get("ts", "")
-                    elapsed = msg.get("elapsed")
-
-                    try:
-                        ts_str = _dt.fromisoformat(ts).strftime("%H:%M:%S")
-                    except Exception:
-                        ts_str = ""
-
-                    ts_html = (
-                        f"<span style='font-size:0.72rem;color:#9ca3af;white-space:nowrap;"
-                        f"min-width:62px;padding-top:4px;display:inline-block;'>{ts_str}</span>"
-                    )
-
-                    if role == "user":
-                        st.markdown(
-                            f"<div style='display:flex;gap:8px;margin:6px 0;align-items:flex-start;'>"
-                            f"{ts_html}"
-                            f"<div style='background:#1e1e2e;border-left:3px solid {color};"
-                            f"border-radius:0 8px 8px 0;padding:8px 12px;flex:1;font-size:0.86rem;"
-                            f"color:#e2e8f0;line-height:1.5;'>{content}</div>"
-                            f"</div>",
-                            unsafe_allow_html=True,
-                        )
+                # Group messages into (user, assistant) pairs so that when
+                # we reverse for newest-first display, user always appears
+                # before the assistant's reply within each pair.
+                msg_list = messages[-12:]
+                _pairs: list = []
+                _i = 0
+                while _i < len(msg_list):
+                    if (
+                        _i + 1 < len(msg_list)
+                        and msg_list[_i].get("role") == "user"
+                        and msg_list[_i + 1].get("role") == "assistant"
+                    ):
+                        _pairs.append([msg_list[_i], msg_list[_i + 1]])
+                        _i += 2
                     else:
-                        elapsed_badge = (
-                            f" <span style='font-size:0.7rem;color:#a78bfa;'>({elapsed:.1f}s)</span>"
-                            if elapsed else ""
+                        _pairs.append([msg_list[_i]])
+                        _i += 1
+
+                for _pair in reversed(_pairs):
+                    for msg in _pair:
+                        role = msg.get("role", "user")
+                        content = msg.get("content", "")
+                        ts = msg.get("ts", "")
+                        elapsed = msg.get("elapsed")
+
+                        try:
+                            ts_str = _dt.fromisoformat(ts).strftime("%H:%M:%S")
+                        except Exception:
+                            ts_str = ""
+
+                        ts_html = (
+                            f"<span style='font-size:0.72rem;color:#9ca3af;white-space:nowrap;"
+                            f"min-width:62px;padding-top:4px;display:inline-block;'>{ts_str}</span>"
                         )
-                        st.markdown(
-                            f"<div style='display:flex;gap:8px;margin:6px 0;align-items:flex-start;'>"
-                            f"{ts_html}"
-                            f"<div style='background:#2d1f4e;border-left:3px solid #8b5cf6;"
-                            f"border-radius:0 8px 8px 0;padding:8px 12px;flex:1;font-size:0.86rem;"
-                            f"color:#e2e8f0;line-height:1.5;'>"
-                            f"{content}{elapsed_badge}</div>"
-                            f"</div>",
-                            unsafe_allow_html=True,
-                        )
+
+                        if role == "user":
+                            st.markdown(
+                                f"<div style='display:flex;gap:8px;margin:6px 0;align-items:flex-start;'>"
+                                f"{ts_html}"
+                                f"<div style='background:#1e1e2e;border-left:3px solid {color};"
+                                f"border-radius:0 8px 8px 0;padding:8px 12px;flex:1;font-size:0.86rem;"
+                                f"color:#e2e8f0;line-height:1.5;'>{content}</div>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            elapsed_badge = (
+                                f" <span style='font-size:0.7rem;color:#a78bfa;'>({elapsed:.1f}s)</span>"
+                                if elapsed else ""
+                            )
+                            st.markdown(
+                                f"<div style='display:flex;gap:8px;margin:6px 0;align-items:flex-start;'>"
+                                f"{ts_html}"
+                                f"<div style='background:#2d1f4e;border-left:3px solid #8b5cf6;"
+                                f"border-radius:0 8px 8px 0;padding:8px 12px;flex:1;font-size:0.86rem;"
+                                f"color:#e2e8f0;line-height:1.5;'>"
+                                f"{content}{elapsed_badge}</div>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
     except Exception as exc:
         st.error(f"Could not load conversations: {exc}")
 
@@ -852,8 +1034,13 @@ def _render_pa_chat(pa: dict) -> None:
     if _result_ph is None:
         _result_ph = st.empty()
 
-    # Decide which skill(s) are needed
-    agents_needed = detect_agents_needed(command)
+    # Decide which skill(s) are needed.
+    # Enrich bare time-slot replies (e.g. "2 PM to 3 PM") so the router
+    # recognises them as scheduling tasks instead of casual conversation.
+    _routing_command = _enrich_scheduling_followup(
+        command, st.session_state.get(mk("messages"), [])
+    )
+    agents_needed = detect_agents_needed(_routing_command)
 
     # Filter to only this PA's attached skills
     if agents_needed is not None and pa_skills:
@@ -880,7 +1067,8 @@ def _render_pa_chat(pa: dict) -> None:
             _status_card("🤔 Thinking…",
                          ["Reading your message…", "Reasoning & composing a reply…"]),
             unsafe_allow_html=True)
-        reply = _chat_response(command, pa_name, pa_id, emotion_hint=_emotion_hint)
+        _pa_history = st.session_state.get(mk("messages"), [])
+        reply = _chat_response(command, pa_name, pa_id, emotion_hint=_emotion_hint, history=_pa_history)
         _card_ph.markdown(_status_card("✅ Done", [], "complete"), unsafe_allow_html=True)
         _result_ph.markdown(reply)
         st.session_state[mk("messages")].append({"role": "assistant", "content": reply})
@@ -907,7 +1095,12 @@ def _render_pa_chat(pa: dict) -> None:
         try:
             from src.agent.workflows.agent_registry import get_executor
             executor = get_executor(single_agent)
-            result = executor(command, agent_id=None) if executor else {"action": "error", "message": f"Skill '{single_agent}' not loaded."}
+            # Inject prior conversation context so the skill agent has follow-up awareness
+            _ctx_command = _inject_conversation_context(
+                _routing_command,
+                st.session_state.get(mk("messages"), []),
+            )
+            result = executor(_ctx_command, agent_id=None) if executor else {"action": "error", "message": f"Skill '{single_agent}' not loaded."}
             _result_status = result.get("status", "success")
             action = result.get("action", "react_response")
             if action == "react_response" or "message" in result:
@@ -943,6 +1136,30 @@ def _render_pa_chat(pa: dict) -> None:
                 reply = _empathy_opener + reply
             _result_ph.markdown(reply)
             _save_msg = reply
+
+            # ── File artifact download button ─────────────────────────────────
+            # Executors that produce downloadable files return a "file_path" key.
+            # Present a download button directly inside the chat for instant access.
+            _artifact_path = (result or {}).get("file_path", "")
+            if _artifact_path:
+                try:
+                    import mimetypes as _mimetypes
+                    if os.path.isfile(_artifact_path):
+                        _fname = os.path.basename(_artifact_path)
+                        with open(_artifact_path, "rb") as _fh:
+                            _fdata = _fh.read()
+                        _mime, _ = _mimetypes.guess_type(_artifact_path)
+                        _mime = _mime or "application/octet-stream"
+                        st.download_button(
+                            label=f"⬇️ Download {_fname}",
+                            data=_fdata,
+                            file_name=_fname,
+                            mime=_mime,
+                            key=f"dl_{pa_id}_{len(st.session_state[mk('messages')])}",
+                        )
+                        _save_msg += f"\n\n📎 File produced: `{_fname}`"
+                except Exception as _dl_err:
+                    logger.debug("Download button render error: %s", _dl_err)
 
         st.session_state[mk("messages")].append({"role": "assistant", "content": _save_msg})
         _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
@@ -995,6 +1212,46 @@ def _render_pa_chat(pa: dict) -> None:
     if _empathy_opener and not final_text.startswith(("❌", "⚠️")):
         final_text = _empathy_opener + final_text
     _result_ph.markdown(final_text)
+
+    # ── File artifact download button (multi-skill) ───────────────────────────
+    # Collect file_path values from each workflow step result.
+    # DAG steps nest the path under result.artifacts.file_path, so we check
+    # both the top-level key and the nested location.
+    def _step_file_path(sr: dict) -> str:
+        if sr.get("file_path"):
+            return sr["file_path"]
+        _res = sr.get("result") or {}
+        if isinstance(_res, dict):
+            if _res.get("file_path"):
+                return _res["file_path"]
+            _art = _res.get("artifacts") or {}
+            if isinstance(_art, dict) and _art.get("file_path"):
+                return _art["file_path"]
+        return ""
+
+    _wf_artifacts = [
+        _fp for sr in run_result.get("steps", [])
+        if (_fp := _step_file_path(sr))
+    ]
+    for _wf_fp in _wf_artifacts:
+        try:
+            import mimetypes as _mimetypes
+            if os.path.isfile(_wf_fp):
+                _wf_fname = os.path.basename(_wf_fp)
+                with open(_wf_fp, "rb") as _wf_fh:
+                    _wf_fdata = _wf_fh.read()
+                _wf_mime, _ = _mimetypes.guess_type(_wf_fp)
+                _wf_mime = _wf_mime or "application/octet-stream"
+                st.download_button(
+                    label=f"⬇️ Download {_wf_fname}",
+                    data=_wf_fdata,
+                    file_name=_wf_fname,
+                    mime=_wf_mime,
+                    key=f"wfdl_{pa_id}_{_wf_fname}_{len(st.session_state[mk('messages')])}",
+                )
+                final_text += f"\n\n📎 File produced: `{_wf_fname}`"
+        except Exception as _wf_dl_err:
+            logger.debug("Workflow download button error: %s", _wf_dl_err)
 
     # Record to PA-level memory (not skill-level)
     try:
