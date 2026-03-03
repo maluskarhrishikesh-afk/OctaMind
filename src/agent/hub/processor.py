@@ -64,6 +64,50 @@ def _persist_conversation(session_id: str, source: str, history: List[Dict[str, 
         logger.debug("Could not persist conversation: %s", exc)
 
 
+def _load_session_history() -> None:
+    """Restore _SESSION_HISTORY from hub_conversations.json on startup.
+
+    This ensures conversation context survives process restarts.  Only the
+    last _MAX_HISTORY messages per session are loaded to keep memory bounded.
+    Sessions older than 24 hours are skipped — they're stale context that
+    would confuse rather than help the LLM.
+    """
+    if not _CONV_PATH.exists():
+        return
+    try:
+        data = json.loads(_CONV_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Could not load conversation history from disk: %s", exc)
+        return
+
+    sessions = data.get("sessions", {})
+    cutoff = datetime.now(timezone.utc).timestamp() - 24 * 3600  # 24-hour window
+
+    loaded = 0
+    for session_id, session_data in sessions.items():
+        try:
+            last_updated = session_data.get("last_updated", "")
+            if last_updated:
+                # Parse ISO timestamp; skip stale sessions
+                ts = datetime.fromisoformat(last_updated).timestamp()
+                if ts < cutoff:
+                    continue
+            messages: List[Dict[str, str]] = session_data.get("messages", [])
+            if messages:
+                # Keep only the most recent _MAX_HISTORY turns
+                _SESSION_HISTORY[session_id] = messages[-_MAX_HISTORY:]
+                loaded += 1
+        except Exception:
+            pass  # corrupted session — skip silently
+
+    if loaded:
+        logger.info("Restored conversation history for %d session(s) from disk.", loaded)
+
+
+# Restore history immediately when the module is imported
+_load_session_history()
+
+
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------

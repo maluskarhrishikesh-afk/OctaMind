@@ -420,6 +420,35 @@ def execute_dag_workflow(
 
         resolved = _resolve_instruction(step.instruction, ctx_results, user_email)
 
+        # If any {step_id.field} tokens remain unresolved, the upstream step
+        # failed silently (returned "success" but produced no artifact).
+        # Skip this step so the user gets a clear error instead of the agent
+        # receiving a literal "{zip1.file_path}" string.
+        unresolved = re.findall(r"\{([\w]+\.[\w]+)\}", resolved)
+        if unresolved:
+            skip_msg = (
+                f"Skipped because required output(s) from a previous step were "
+                f"not produced: {unresolved}. "
+                "The upstream step likely failed to create the expected file/resource."
+            )
+            logger.warning(
+                "│  ⏭ DAG step [%-12s]  SKIPPED (unresolved tokens: %s)",
+                step.id, unresolved,
+            )
+            failed_step_ids.add(step.id)
+            ctx_results[step.id] = {"text": skip_msg, "artifacts": {}}
+            steps_results.append({
+                "step":        step.id,
+                "agent":       step.agent,
+                "tool":        step.description or step.instruction[:60],
+                "instruction": step.instruction,
+                "status":      "skipped",
+                "error":       skip_msg,
+                "result":      None,
+                "elapsed":     time.time() - t0,
+            })
+            continue
+
         logger.info(
             "│  ▶ DAG step [%-12s]  agent=%-10s  resolved_instruction=%.120s",
             step.id, step.agent, resolved,
