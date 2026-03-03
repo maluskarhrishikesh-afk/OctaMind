@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900">
+  <defs>
+    <style type="text/css"><![CDATA[
+      .title { font: 24px 'Helvetica-Bold', Arial, sans-serif; fill: #0f3b66 }
+      .subtitle { font: 13px 'Helvetica', Arial, sans-serif; fill: #1f5f8a }
+      .macro { fill: #f0f7ff; stroke: #1a3a5c; stroke-width:2px; rx:10; }
+      .agent { fill: #ffffff; stroke: #2c5f8a; stroke-width:1px; rx:6; }
+      .micro { fill: #eef9ef; stroke: #1b5e20; stroke-width:2px; rx:10; }
+      .arrow { stroke: #222222; stroke-width:1.4; marker-end: url(#arrowhead); }
+      .label { font: 12px 'Helvetica', Arial, sans-serif; fill: #102130 }
+      .bold { font-weight:700 }
+      .bullet { font: 12px 'Helvetica', Arial, sans-serif; fill: #102130 }
+    ]]></style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="8" refX="10" refY="4" orient="auto">
+      <polygon points="0 0, 10 4, 0 8" fill="#222" />
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="600" y="48" text-anchor="middle" class="title">LLM-Driven DAG Planning for Multi-Agent AI Orchestration</text>
+  <text x="600" y="72" text-anchor="middle" class="subtitle">Two-Level DAG Design — Macro planner and Micro execution engines</text>
+
+  <!-- User command label + arrow -->
+  <text x="600" y="92" text-anchor="middle" class="label bold">User Command</text>
+  <line x1="600" y1="100" x2="600" y2="110" class="arrow" />
+
+  <!-- Macro planner box -->
+  <rect x="140" y="110" width="920" height="180" class="macro" />
+  <text x="600" y="145" text-anchor="middle" class="label bold">LEVEL 1 — MACRO DAG PLANNER (dag_planner.py)</text>
+  <!-- Bullet list inside macro box -->
+  <text x="250" y="175" class="bullet">• Single LLM call → DAGPlan (JSON with <tspan font-family='monospace'>depends_on</tspan>)</text>
+  <text x="250" y="200" class="bullet">• Topological sort (Kahn's algorithm)</text>
+  <text x="250" y="225" class="bullet">• Deterministic dispatch to sub-agents</text>
+  <text x="250" y="250" class="bullet">• <tspan font-family='monospace'>{step_id.field}</tspan> token resolution between agents</text>
+
+  <!-- Agents row -->
+  <g id="agents">
+    <rect x="170" y="340" width="260" height="90" class="agent"/>
+    <text x="300" y="372" class="label" text-anchor="middle">
+      <tspan class="bold" x="300" dy="0">FILES</tspan>
+      <tspan x="300" dy="18">AGENT</tspan>
+    </text>
+
+    <rect x="470" y="340" width="260" height="90" class="agent"/>
+    <text x="600" y="372" class="label" text-anchor="middle">
+      <tspan class="bold" x="600" dy="0">EMAIL</tspan>
+      <tspan x="600" dy="18">AGENT</tspan>
+    </text>
+
+    <rect x="770" y="340" width="260" height="90" class="agent"/>
+    <text x="900" y="372" class="label" text-anchor="middle">
+      <tspan class="bold" x="900" dy="0">DRIVE</tspan>
+      <tspan x="900" dy="18">AGENT</tspan>
+    </text>
+  </g>
+
+  <!-- Micro engine box -->
+  <rect x="140" y="490" width="920" height="140" class="micro" />
+  <text x="600" y="530" text-anchor="middle" class="label bold">LEVEL 2 — MICRO DAG ENGINE (skill_dag_engine.py)</text>
+  <text x="250" y="570" class="bullet">• <tspan class="bold">LLM call 1:</tspan> Plan tool steps (JSON)</text>
+  <text x="250" y="595" class="bullet">• <tspan class="bold">0 LLM calls:</tspan> Execute tools (Deterministic)</text>
+  <text x="250" y="620" class="bullet">• <tspan class="bold">LLM call 2:</tspan> Synthesise final answer</text>
+
+  <!-- Arrows from macro box down to agents -->
+  <line x1="600" y1="290" x2="300" y2="340" class="arrow" />
+  <line x1="600" y1="290" x2="600" y2="340" class="arrow" />
+  <line x1="600" y1="290" x2="900" y2="340" class="arrow" />
+
+  <!-- Arrows from agents to micro engine -->
+  <line x1="300" y1="430" x2="320" y2="490" class="arrow" />
+  <line x1="600" y1="430" x2="600" y2="490" class="arrow" />
+  <line x1="900" y1="430" x2="880" y2="490" class="arrow" />
+
+  <!-- Caption -->
+  <text x="600" y="760" text-anchor="middle" class="subtitle">Figure 1: Two-Level DAG Orchestration Architecture (Macro → Agents → Micro)</text>
+
+</svg>
