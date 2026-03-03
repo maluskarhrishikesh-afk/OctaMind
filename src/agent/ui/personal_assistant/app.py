@@ -1704,7 +1704,7 @@ def main() -> None:
         st.markdown(
             f"""
             <div style="background:linear-gradient(135deg, rgba(124,58,237,0.18) 0%, rgba(139,92,246,0.12) 100%);
-                       border:1.5px solid rgba(124,58,237,0.5);padding:10px 16px;border-radius:12px;margin-bottom:6px;
+                       border:1.5px solid rgba(124,58,237,0.5);padding:10px 16px;border-radius:12px;margin-top:-2.5rem;margin-bottom:6px;
                        backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(124,58,237,0.12);">
               <div style="display:flex;align-items:center;gap:12px;">
                 <img src="{_logo_b64()}" style="width:40px;height:40px;border-radius:10px;object-fit:cover;box-shadow:0 2px 8px rgba(124,58,237,0.35);">

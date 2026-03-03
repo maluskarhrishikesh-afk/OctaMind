@@ -632,10 +632,6 @@ def inject_agent_css(
         [data-testid="stMainBlockContainer"] {{
             overflow-y: auto !important;
         }}
-        /* Reduce top whitespace — bring header close to viewport top */
-        .main .block-container {{
-            padding-top: 0.6rem !important;
-        }}
         /* Leave room so the last message isn't hidden behind the bar */
         section[data-testid="stMainBlockContainer"],
         .main .block-container {{
