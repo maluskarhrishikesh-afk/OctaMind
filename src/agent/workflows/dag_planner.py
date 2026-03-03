@@ -174,6 +174,12 @@ Rules:
   then use {{first_step_id.file_path}} in the receiving agent's instruction.
 - When a step uses a local folder the user named (e.g. "Text folder in Downloads"),
   write the full absolute path directly in the instruction — never use a placeholder.
+- IMPORTANT — ambiguous folder/file name (no absolute path given, and NOT a known
+  standard location like Downloads/Desktop/Documents/Home): NEVER guess the path.
+  Instead write the files agent instruction as: "Find the folder/file named '<name>'
+  using search_file_all_drives, then <operation> the found path".
+  Example: user says "zip xpanse folder" → instruction: "Find the folder named 'xpanse'
+  using search_file_all_drives, then zip the found folder and report the archive path".
 - Keep the plan minimal — only generate steps directly needed.
 - If the user says "this", "the above", "the list", or refers to output from a
   previous assistant message, embed that information as literal text directly

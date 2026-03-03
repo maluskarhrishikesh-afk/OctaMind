@@ -149,23 +149,33 @@ def run_skill_dag(
             result_raw = callable_fn(**kwargs) if kwargs else callable_fn()
             step_results[step_id] = result_raw
 
-            # Propagate file paths into artifacts_out
-            if isinstance(result_raw, dict):
-                for key in ("file_path", "local_path", "path", "archive"):
-                    if result_raw.get(key):
-                        artifacts_out["file_path"] = result_raw[key]
-                        break
-                if not artifacts_out.get("file_path"):
-                    for item in result_raw.get("results", []):
-                        fp = (
-                            item.get("file_path") or item.get("path")
-                            if isinstance(item, dict) else None
-                        )
-                        if fp:
-                            artifacts_out["file_path"] = fp
+            # If the tool itself returned status:error, treat this step as failed.
+            # This prevents downstream steps from receiving unresolved artifact tokens.
+            if isinstance(result_raw, dict) and result_raw.get("status") == "error":
+                logger.warning(
+                    "│    [%s] ✗ step=%s tool=%s returned error: %s",
+                    skill_name, step_id, tool_name,
+                    result_raw.get("message", "")[:120],
+                )
+                execution_error = True
+            else:
+                # Propagate file paths into artifacts_out
+                if isinstance(result_raw, dict):
+                    for key in ("file_path", "local_path", "path", "archive"):
+                        if result_raw.get(key):
+                            artifacts_out["file_path"] = result_raw[key]
                             break
+                    if not artifacts_out.get("file_path"):
+                        for item in result_raw.get("results", []):
+                            fp = (
+                                item.get("file_path") or item.get("path")
+                                if isinstance(item, dict) else None
+                            )
+                            if fp:
+                                artifacts_out["file_path"] = fp
+                                break
 
-            logger.info("│    [%s] ✔ step=%s succeeded", skill_name, step_id)
+                logger.info("│    [%s] ✔ step=%s succeeded", skill_name, step_id)
         except Exception as exc:
             logger.exception("│    [%s] ✗ step=%s tool=%s raised: %s", skill_name, step_id, tool_name, exc)
             step_results[step_id] = {"status": "error", "message": str(exc)}
@@ -178,7 +188,7 @@ def run_skill_dag(
     llm_calls += synth_calls
 
     elapsed = time.time() - t0
-    status = "error" if execution_error and "❌" in final_message else "success"
+    status = "error" if execution_error else "success"
 
     logger.info(
         "└─ [%s] Skill DAG DONE ✅  steps=%d  llm_calls=%d  elapsed=%.2fs  dag_used=True",
