@@ -363,24 +363,28 @@ def search_file_all_drives(
     query: str,
     extensions: Optional[List[str]] = None,
     limit: int = 20,
+    include_folders: bool = True,
 ) -> Dict[str, Any]:
     """
-    Search ALL drives and the full home-directory tree for files matching *query*.
+    Search ALL drives and the full home-directory tree for files **and folders**
+    matching *query*.
 
     Unlike ``search_by_name`` (which defaults to ``~`` only), this function
     discovers every mounted drive on Windows (C:, D:, …) or ``/`` on Unix and
-    scans each one, making it suitable for finding files anywhere on the laptop.
+    scans each one, making it suitable for finding files **or** folders anywhere
+    on the laptop.
 
     Args:
-        query:      Filename glob pattern or plain substring (e.g. ``payslip``,
-                    ``*.pdf``, ``salary_slip*``).
-        extensions: Optional list of extensions to restrict (e.g. ``["pdf","docx"]``).
-                    Matched case-insensitively.  If omitted, all files are considered.
-        limit:      Maximum number of results to return (default 20).
+        query:          Filename/folder glob pattern or plain substring.
+        extensions:     Optional list of extensions to restrict (files only).
+                        If omitted, all files AND folders are considered.
+        limit:          Maximum number of results to return (default 20).
+        include_folders: When True (default) also match directories whose name
+                        fits the query.  Set to False to return files only.
 
     Returns a result dict with ``file_path`` set to the path of the first (best)
-    match, so the caller can pass it directly to ``deliver_file`` or an email
-    attachment without additional steps.
+    match, so the caller can pass it directly to ``zip_folder``, ``deliver_file``
+    or an email attachment without additional steps.
     """
     import platform
     import string as _string
@@ -420,28 +424,48 @@ def search_file_all_drives(
                 break
             try:
                 for p in drive.rglob(pattern):
-                    if not p.is_file():
-                        continue
-                    # Skip Windows shortcuts and cache files unless explicitly requested
-                    if p.suffix.lower() in _SKIP_EXTENSIONS:
-                        continue
-                    if ext_filter and p.suffix.lstrip(".").lower() not in ext_filter:
-                        continue
+                    is_dir  = p.is_dir()
+                    is_file = p.is_file()
+
+                    if is_dir:
+                        # Include matching directories when include_folders is True
+                        # and no extension filter is active (extension filters are
+                        # file-only concepts).
+                        if not include_folders or ext_filter:
+                            continue
+                    elif is_file:
+                        # Skip Windows shortcuts and cache files
+                        if p.suffix.lower() in _SKIP_EXTENSIONS:
+                            continue
+                        if ext_filter and p.suffix.lstrip(".").lower() not in ext_filter:
+                            continue
+                    else:
+                        continue  # symlink or special — skip
+
                     try:
                         stat = p.stat()
-                        size_str = (
-                            f"{stat.st_size / 1024:.1f} KB"
-                            if stat.st_size < 1_048_576
-                            else f"{stat.st_size / 1_048_576:.1f} MB"
-                        )
-                        results.append({
-                            "name": p.name,
-                            "path": str(p),
-                            "size": size_str,
-                            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                        })
+                        if is_dir:
+                            results.append({
+                                "name": p.name,
+                                "path": str(p),
+                                "type": "folder",
+                                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                            })
+                        else:
+                            size_str = (
+                                f"{stat.st_size / 1024:.1f} KB"
+                                if stat.st_size < 1_048_576
+                                else f"{stat.st_size / 1_048_576:.1f} MB"
+                            )
+                            results.append({
+                                "name": p.name,
+                                "path": str(p),
+                                "type": "file",
+                                "size": size_str,
+                                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                            })
                     except Exception:
-                        results.append({"name": p.name, "path": str(p)})
+                        results.append({"name": p.name, "path": str(p), "type": "folder" if is_dir else "file"})
                     if len(results) >= limit:
                         break
             except (PermissionError, OSError):
@@ -461,9 +485,9 @@ def search_file_all_drives(
             # for Telegram/Dashboard download delivery automatically.
             "file_path": best_path,
             "message": (
-                f"Found {len(results)} file(s) matching '{query}' across {len(drives)} drive(s)."
+                f"Found {len(results)} item(s) matching '{query}' across {len(drives)} drive(s)."
                 if results
-                else f"No files found matching '{query}' on any drive."
+                else f"No files or folders found matching '{query}' on any drive."
             ),
         }
     except Exception as exc:

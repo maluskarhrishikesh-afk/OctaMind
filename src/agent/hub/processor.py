@@ -156,6 +156,18 @@ _BARE_TIME_PATTERN = re.compile(
     re.VERBOSE | re.IGNORECASE,
 )
 
+# Matches a scheduling verb at the start of a command ("schedule", "book", etc.)
+_SCHEDULING_VERB_PATTERN = re.compile(
+    r"\b(?:schedule|book|create|set up|add|plan)\b",
+    re.IGNORECASE,
+)
+
+# Matches a time reference inside a command ("at 8 PM", "9:30 am", etc.)
+_INLINE_TIME_PATTERN = re.compile(
+    r"\b(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)\b",
+    re.IGNORECASE,
+)
+
 _SCHEDULING_CONTEXT_KEYWORDS = frozenset({
     "schedule", "meeting", "slot", "free", "available", "book",
     "calendar", "appointment", "block", "time", "best time",
@@ -185,37 +197,67 @@ _TEMPORAL_PATTERN = re.compile(
 
 
 def _enrich_scheduling_followup(command: str, history: List[Dict[str, str]]) -> str:
-    """If *command* is a bare time reply following a scheduling conversation,
-    return an enriched command the router will route to the scheduler.
+    """Enrich a scheduling-related command with date context from recent history.
 
-    Also extracts any temporal context (tomorrow / Monday / March 3rd …) from
-    the recent conversation so the calendar agent books on the correct date
-    instead of defaulting to today.
+    Handles two cases:
+    1. Bare time reply ("3 PM") after a scheduling conversation — inject the
+       scheduling verb and any date extracted from history.
+    2. Full scheduling command ("Schedule Gym at 8 PM") that contains a time
+       but **no date** — inject the specific date from recent history so the
+       agent doesn't default to today.
+
+    This fixes the bug where "Schedule a meeting at 8 PM for Gym Session"
+    issued after discussing March 12th gets booked on today's date instead.
     """
-    if not _BARE_TIME_PATTERN.match(command.strip()):
+    stripped = command.strip()
+
+    # Scan recent messages from BOTH roles to extract temporal/scheduling context
+    recent_messages = history[-8:] if len(history) >= 8 else history
+    full_recent = " ".join(m.get("content", "") for m in recent_messages)
+    recent_lower = full_recent.lower()
+
+    # ── Case 1: bare time reply (old behaviour) ────────────────────────────
+    if _BARE_TIME_PATTERN.match(stripped):
+        if not any(kw in recent_lower for kw in _SCHEDULING_CONTEXT_KEYWORDS):
+            return command
+        date_context = ""
+        all_temporal = _TEMPORAL_PATTERN.findall(full_recent)
+        if all_temporal:
+            best_match = max(all_temporal, key=len)
+            date_context = f" on {best_match}"
+        return f"Schedule a calendar meeting / book the time slot for {command}{date_context}"
+
+    # ── Case 2: full scheduling command with time but no explicit date ──────
+    # Only applies when the command has a scheduling verb and an inline time
+    # reference but no date of its own.
+    if not _SCHEDULING_VERB_PATTERN.search(stripped):
+        return command
+    if not _INLINE_TIME_PATTERN.search(stripped):
+        return command
+    if _TEMPORAL_PATTERN.search(stripped):
+        # Command already has its own date — no enrichment needed
         return command
 
-    # Scan recent messages from BOTH roles to detect scheduling context
-    recent_messages = history[-6:] if len(history) >= 6 else history
-    recent_text = " ".join(
-        m.get("content", "")
-        for m in recent_messages
-    ).lower()
+    # Pull the most specific date from recent history (user + assistant messages)
+    # Prefer ordinal+month forms (e.g. "12th March") over vague ones ("march")
+    all_temporal = _TEMPORAL_PATTERN.findall(full_recent)
+    if not all_temporal:
+        return command  # no date in context either — leave as-is
 
-    if not any(kw in recent_text for kw in _SCHEDULING_CONTEXT_KEYWORDS):
-        return command
+    best_match = max(all_temporal, key=len)
+    # Avoid injecting generic weekday/month-only tokens unless nothing better exists
+    _GENERIC = {"monday", "tuesday", "wednesday", "thursday", "friday",
+                "saturday", "sunday", "january", "february", "march",
+                "april", "may", "june", "july", "august", "september",
+                "october", "november", "december"}
+    if best_match.lower() in _GENERIC and len(all_temporal) > 1:
+        # Try to find a more specific match (ordinal+month or ISO date)
+        specific = [t for t in all_temporal if t.lower() not in _GENERIC]
+        if specific:
+            best_match = max(specific, key=len)
 
-    # Look for the most specific temporal reference so the correct date is passed
-    # to the calendar agent (otherwise it defaults to today).
-    # Use findall to get ALL matches, then pick the longest (most specific) one
-    # — e.g. "8 th March" beats just "march".
-    date_context = ""
-    all_temporal = _TEMPORAL_PATTERN.findall(recent_text)
-    if all_temporal:
-        best_match = max(all_temporal, key=len)
-        date_context = f" on {best_match}"
-
-    return f"Schedule a calendar meeting / book the time slot for {command}{date_context}"
+    enriched = f"{stripped} on {best_match}"
+    return enriched
 
 
 # ---------------------------------------------------------------------------
