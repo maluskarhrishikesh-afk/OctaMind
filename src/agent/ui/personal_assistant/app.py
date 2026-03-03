@@ -878,6 +878,46 @@ def _reauth_gmail_ui(context: str = "", key_suffix: str = "") -> None:
             )
 
 
+# ── Channel status pills helper (used in tab-bar badge row) ──────────────────
+
+def _build_channel_status_pills_html(pa: dict) -> str:
+    """Return compact inline HTML pills for each channel assigned to *pa*.
+
+    Used to render status badges alongside the tab bar so users can see
+    channel health at a glance without opening the Live Channels tab.
+    Returns an empty string when the channel registry is unavailable.
+    """
+    try:
+        from src.agent.hub.channel_registry import CHANNEL_REGISTRY
+        pa_channels = pa.get("channels", [])
+        if not pa_channels:
+            return ""
+        ch_objects = [
+            (ch_name, CHANNEL_REGISTRY[ch_name])
+            for ch_name in pa_channels
+            if ch_name in CHANNEL_REGISTRY
+        ]
+        if not ch_objects:
+            return ""
+        pills = ""
+        for ch_name, ch in ch_objects:
+            running = ch.is_running()
+            dot_color = "#22c55e" if running else "#ef4444"
+            status_label = "Running" if running else "Stopped"
+            pills += (
+                f"<span style='display:inline-flex;align-items:center;gap:4px;"
+                f"background:#1a1a2e;border:1px solid {dot_color}44;"
+                f"border-radius:20px;padding:2px 9px 2px 7px;font-size:0.74rem;'>"
+                f"<span style='font-size:0.85rem'>{ch.icon}</span>"
+                f"<span style='color:#e2e8f0;font-weight:600;font-size:0.73rem'>{ch.display_name}</span>"
+                f"<span style='color:{dot_color};font-size:0.6rem;'>&#x25cf;&nbsp;{status_label}</span>"
+                f"</span>"
+            )
+        return pills
+    except Exception:
+        return ""
+
+
 def _render_pa_chat(pa: dict) -> None:
     """Render an independent chat panel for one Personal Assistant.
 
@@ -901,43 +941,17 @@ def _render_pa_chat(pa: dict) -> None:
 
     detect_agents_needed, run_workflow = _import_workflows()
 
-    # ── Channel status bar ────────────────────────────────────────────────────
+    # ── Stopped-channel nudge (compact — status pills live above the tab bar) ─
     try:
         from src.agent.hub.channel_registry import CHANNEL_REGISTRY
         pa_channels = pa.get("channels", [])
         if pa_channels:
-            ch_objects = [(ch_name, CHANNEL_REGISTRY[ch_name])
-                          for ch_name in pa_channels if ch_name in CHANNEL_REGISTRY]
+            ch_objects = [(c, CHANNEL_REGISTRY[c]) for c in pa_channels if c in CHANNEL_REGISTRY]
             any_stopped = any(not ch.is_running() for _, ch in ch_objects)
-
-            # ── Compact inline pill bar ────────────────────────────────────
-            pills_html = "<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;'>"
-            for ch_name, ch in ch_objects:
-                running = ch.is_running()
-                dot_color = "#22c55e" if running else "#ef4444"
-                status_label = "Running" if running else "Stopped"
-                pills_html += (
-                    f"<span style='display:inline-flex;align-items:center;gap:5px;"
-                    f"background:#1a1a2e;border:1px solid {dot_color}33;"
-                    f"border-radius:20px;padding:3px 10px 3px 8px;font-size:0.78rem;'>"
-                    f"<span style='font-size:0.9rem'>{ch.icon}</span>"
-                    f"<span style='color:#e2e8f0;font-weight:600'>{ch.display_name}</span>"
-                    f"<span style='font-size:0.65rem;color:{dot_color};'>&#x25cf;&nbsp;{status_label}</span>"
-                    f"</span>"
-                )
             if any_stopped:
-                pills_html += "</div>"
-                st.markdown(pills_html, unsafe_allow_html=True)
                 if st.button("▶️ Start Channels", key=f"start_ch_{pa_id}", type="primary"):
                     _start_pa_channels(pa)
                     st.rerun()
-            else:
-                pills_html += "</div>"
-                st.markdown(pills_html, unsafe_allow_html=True)
-            st.divider()
-        else:
-            st.caption("No channels assigned \u2014 go to PA Settings to add one.")
-            st.divider()
     except Exception as exc:
         logger.debug("Channel panel error: %s", exc)
 
@@ -988,6 +1002,12 @@ def _render_pa_chat(pa: dict) -> None:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
+        # Sentinel anchor — JS below scrollIntoViews this to auto-scroll bottom
+        st.markdown(
+            f'<div id="chat-bottom-{pa_id}"></div>',
+            unsafe_allow_html=True,
+        )
+
         # Pre-create the two live placeholders INSIDE the container (and inside
         # a chat_message bubble) so status cards and the reply appear in-line
         # with the conversation, not below the input bar.
@@ -997,6 +1017,34 @@ def _render_pa_chat(pa: dict) -> None:
             with st.chat_message("assistant"):
                 _card_ph = st.empty()   # status card (thinking/planning/executing/done)
                 _result_ph = st.empty() # final reply text
+
+    # ── Auto-scroll the chat container to the bottom (ChatGPT style) ─────────
+    try:
+        import streamlit.components.v1 as _components
+        _components.html(
+            f"""<script>
+            (function() {{
+                var anchor = window.parent.document.getElementById("chat-bottom-{pa_id}");
+                if (anchor) {{
+                    // scrollIntoView with block:"end" scrolls the overflow container, not page
+                    anchor.scrollIntoView({{behavior: "instant", block: "end"}});
+                }} else {{
+                    // Fallback: scroll all overflow-auto containers to bottom
+                    var scrollables = window.parent.document.querySelectorAll(
+                        '[data-testid="stVerticalBlockBorderWrapper"] > div'
+                    );
+                    scrollables.forEach(function(el) {{
+                        if (el.scrollHeight > el.clientHeight) {{
+                            el.scrollTop = el.scrollHeight;
+                        }}
+                    }});
+                }}
+            }})();
+            </script>""",
+            height=0,
+        )
+    except Exception:
+        pass  # Non-critical — auto-scroll is cosmetic only
 
     # ── Chat input — placed AFTER the container ───────────────────────────────
     # Streamlit positions chat_input at the bottom of the viewport when it is
@@ -1656,15 +1704,15 @@ def main() -> None:
         st.markdown(
             f"""
             <div style="background:linear-gradient(135deg, rgba(124,58,237,0.18) 0%, rgba(139,92,246,0.12) 100%);
-                       border:1.5px solid rgba(124,58,237,0.5);padding:20px 24px;border-radius:16px;margin-bottom:24px;
-                       backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(124,58,237,0.15);">
-              <div style="display:flex;align-items:center;gap:16px;">
-                <img src="{_logo_b64()}" style="width:56px;height:56px;border-radius:14px;object-fit:cover;box-shadow:0 4px 15px rgba(124,58,237,0.4);">
+                       border:1.5px solid rgba(124,58,237,0.5);padding:10px 16px;border-radius:12px;margin-bottom:6px;
+                       backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 4px 16px rgba(124,58,237,0.12);">
+              <div style="display:flex;align-items:center;gap:12px;">
+                <img src="{_logo_b64()}" style="width:40px;height:40px;border-radius:10px;object-fit:cover;box-shadow:0 2px 8px rgba(124,58,237,0.35);">
                 <div>
-                  <div style="font-size:1.9rem;font-weight:900;line-height:1.1;background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
+                  <div style="font-size:1.35rem;font-weight:900;line-height:1.1;background:linear-gradient(135deg,#8b5cf6 0%,#7c3aed 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">
                     🤖 {single_pa['name']}
                   </div>
-                  <div style="font-size:0.9rem;color:#c4b5fd;margin-top:4px;">
+                  <div style="font-size:0.78rem;color:#c4b5fd;margin-top:2px;">
                     {len(single_pa.get('skills', []))} skills &nbsp;•&nbsp; {len(single_pa.get('channels', []))} channels
                   </div>
                 </div>
@@ -1673,6 +1721,18 @@ def main() -> None:
             """,
             unsafe_allow_html=True,
         )
+
+        # ── Channel status pills — right-aligned beside the tab bar ──────────
+        _status_col_l, _status_col_r = st.columns([3, 2])
+        with _status_col_r:
+            _ch_pills_html = _build_channel_status_pills_html(single_pa)
+            if _ch_pills_html:
+                st.markdown(
+                    f"<div style='display:flex;justify-content:flex-end;align-items:center;"
+                    f"gap:6px;padding:4px 0 2px;'>{_ch_pills_html}</div>",
+                    unsafe_allow_html=True,
+                )
+
         tab_chat, tab_live, tab_cfg = st.tabs(["💬 Chat", "📡 Live Channels", "⚙️ Configure"])
         with tab_chat:
             _render_pa_chat(single_pa)
