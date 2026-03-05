@@ -391,11 +391,27 @@ def search_file_all_drives(
     from pathlib import Path as _P
 
     try:
-        # Build normalised glob / substring pattern
-        if not any(c in query for c in ("*", "?", "[")):
-            pattern = f"*{query}*"
-        else:
-            pattern = query
+        # Build normalised glob / substring patterns.
+        # Also generate space↔underscore↔hyphen variants so that a query
+        # like "octa bot" (space) finds a file named "octa_bot.jpg"
+        # (underscore) and vice-versa.
+        def _make_patterns(q: str) -> set:
+            variants = {q}
+            if " " in q:
+                variants.add(q.replace(" ", "_"))
+                variants.add(q.replace(" ", "-"))
+            if "_" in q:
+                variants.add(q.replace("_", " "))
+                variants.add(q.replace("_", "-"))
+            if "-" in q:
+                variants.add(q.replace("-", " "))
+                variants.add(q.replace("-", "_"))
+            return {
+                f"*{v}*" if not any(c in v for c in ("*", "?", "[")) else v
+                for v in variants
+            }
+
+        patterns = _make_patterns(query)
 
         ext_filter: Optional[set] = (
             {e.lstrip(".").lower() for e in extensions} if extensions else None
@@ -418,54 +434,62 @@ def search_file_all_drives(
         _SKIP_EXTENSIONS = {".lnk", ".tmp", ".cache", ".lock", ".partial", ".crdownload"}
 
         results: List[Dict[str, Any]] = []
+        _seen_paths: set = set()  # deduplicate across pattern variants
 
         for drive in drives:
             if len(results) >= limit:
                 break
             try:
-                for p in drive.rglob(pattern):
-                    is_dir  = p.is_dir()
-                    is_file = p.is_file()
+                for pat in patterns:
+                    for p in drive.rglob(pat):
+                        if str(p).lower() in _seen_paths:
+                            continue
+                        _seen_paths.add(str(p).lower())
 
-                    if is_dir:
-                        # Include matching directories when include_folders is True
-                        # and no extension filter is active (extension filters are
-                        # file-only concepts).
-                        if not include_folders or ext_filter:
-                            continue
-                    elif is_file:
-                        # Skip Windows shortcuts and cache files
-                        if p.suffix.lower() in _SKIP_EXTENSIONS:
-                            continue
-                        if ext_filter and p.suffix.lstrip(".").lower() not in ext_filter:
-                            continue
-                    else:
-                        continue  # symlink or special — skip
+                        is_dir  = p.is_dir()
+                        is_file = p.is_file()
 
-                    try:
-                        stat = p.stat()
                         if is_dir:
-                            results.append({
-                                "name": p.name,
-                                "path": str(p),
-                                "type": "folder",
-                                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                            })
+                            # Include matching directories when include_folders is True
+                            # and no extension filter is active (extension filters are
+                            # file-only concepts).
+                            if not include_folders or ext_filter:
+                                continue
+                        elif is_file:
+                            # Skip Windows shortcuts and cache files
+                            if p.suffix.lower() in _SKIP_EXTENSIONS:
+                                continue
+                            if ext_filter and p.suffix.lstrip(".").lower() not in ext_filter:
+                                continue
                         else:
-                            size_str = (
-                                f"{stat.st_size / 1024:.1f} KB"
-                                if stat.st_size < 1_048_576
-                                else f"{stat.st_size / 1_048_576:.1f} MB"
-                            )
-                            results.append({
-                                "name": p.name,
-                                "path": str(p),
-                                "type": "file",
-                                "size": size_str,
-                                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
-                            })
-                    except Exception:
-                        results.append({"name": p.name, "path": str(p), "type": "folder" if is_dir else "file"})
+                            continue  # symlink or special — skip
+
+                        try:
+                            stat = p.stat()
+                            if is_dir:
+                                results.append({
+                                    "name": p.name,
+                                    "path": str(p),
+                                    "type": "folder",
+                                    "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                                })
+                            else:
+                                size_str = (
+                                    f"{stat.st_size / 1024:.1f} KB"
+                                    if stat.st_size < 1_048_576
+                                    else f"{stat.st_size / 1_048_576:.1f} MB"
+                                )
+                                results.append({
+                                    "name": p.name,
+                                    "path": str(p),
+                                    "type": "file",
+                                    "size": size_str,
+                                    "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M"),
+                                })
+                        except Exception:
+                            results.append({"name": p.name, "path": str(p), "type": "folder" if is_dir else "file"})
+                        if len(results) >= limit:
+                            break
                     if len(results) >= limit:
                         break
             except (PermissionError, OSError):

@@ -26,13 +26,17 @@ def _get_tools() -> Dict[str, Any]:
         return svc.send_email_with_attachment(to, subject, message, attachment_path)
 
     def list_emails(query: str = "in:inbox", max_results: int = 10) -> dict:
-        return svc.list_emails(query, max_results)
+        from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
+        result = svc.list_emails(query, max_results)
+        return auto_save_email_context(result, query)
 
     def get_inbox_count() -> dict:
         return svc.get_inbox_count()
 
     def get_todays_emails() -> dict:
-        return svc.get_todays_emails()
+        from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
+        result = svc.get_todays_emails()
+        return auto_save_email_context(result, "today")
 
     def delete_emails(query: str, max_results: int = 10) -> dict:
         return svc.delete_emails(query, max_results)
@@ -115,7 +119,12 @@ def _get_tools() -> Dict[str, Any]:
         max_results: int = 5,
         cap: int = 20,
     ) -> dict:
-        return svc.fetch_emails_to_markdown(query, max_results, cap)
+        from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
+        result = svc.fetch_emails_to_markdown(query, max_results, cap)
+        # fetch_emails_to_markdown returns a dict with a 'messages' key
+        msgs = result.get("messages", []) if isinstance(result, dict) else []
+        auto_save_email_context(msgs, query)
+        return result
 
     def unsubscribe_email(message_id: str) -> dict:
         return svc.unsubscribe_email(message_id)
@@ -233,12 +242,16 @@ def _get_tools() -> Dict[str, Any]:
         "save_email_template": save_email_template,
         "list_email_templates": list_email_templates,
         "send_from_template": send_from_template,
-        # ── NEW ─────────────────────────────────────────────────
+        # ── NEW ────────────────────────────────────────────────────────
         "recover_deleted_emails": recover_deleted_emails,
         "analyze_email_sentiment": analyze_email_sentiment,
         "extract_urls_from_email": extract_urls_from_email,
         "get_email_chains_summary": get_email_chains_summary,
         "send_completion_reminder": send_completion_reminder,
+        # ── Context Manifest ──────────────────────────────────────────────
+        "save_context": __import__(
+            "src.agent.manifest.context_manifest", fromlist=["make_save_context_tool"]
+        ).make_save_context_tool("email"),
     }
 
 
@@ -292,6 +305,7 @@ analyze_email_sentiment(message_id) – Detect tone of an email: urgent / positi
 extract_urls_from_email(message_id) – Extract all hyperlinks from an email body, classified as: links, tracking_pixels, unsubscribe_urls.
 get_email_chains_summary(max_results=10) – List the most active email threads sorted by reply count. Useful for 'show me long conversations' or 'which threads need attention'.
 send_completion_reminder(message_id, days=3) – Set a follow-up reminder on a sent email. Triggers a self-reminder if no reply arrives within N days.
+save_context(topic, resolved_entities, awaiting="") – Persist the current email list for the next turn so the user can say "reply to the first one" without listing again. topic="email_list", resolved_entities={"listed_emails":[{"id":"...","subject":"...","sender":"..."}]}, awaiting="email_action".
 """.strip()
 
 _SKILL_CONTEXT = """
@@ -317,6 +331,21 @@ For sentiment / priority triage: call analyze_email_sentiment(message_id) to qui
 For extracting links from an email: use extract_urls_from_email(message_id) — returns regular links and unsubscribe URLs separately.
 For showing busy threads / long conversations: use get_email_chains_summary() to rank threads by reply count.
 For follow-up reminders ('remind me if they don't reply in 3 days'): use send_completion_reminder(message_id, days=N).
+
+CONTEXT MANIFEST (cross-turn awareness):
+After EVERY call to list_emails or get_todays_emails, context is AUTOMATICALLY saved to the manifest — no extra step needed.
+This means the user can reply "reply to the first one" or "delete Alice's email" on the next turn without listing again.
+If you need to save context for edge cases not covered by the auto-wrap, use the save_context tool via call_tool.
+
+## Handling '## Session State' context (CRITICAL)
+The user query may include a '## Session State' JSON block from the previous conversation turn.
+- 'last_found_file_path': path to a SINGLE file found in the previous turn.
+  When the user says 'mail it to me', 'send it to me', 'email it', 'send me that file':
+  IMMEDIATELY call send_email_with_attachment(to='me', subject='<filename>', message='Please find the attached file.', attachment_path={__session__.last_found_file_path})
+  The token {__session__.last_found_file_path} will be automatically resolved to the actual path string.
+- 'last_found_paths': a list of paths. For a single-agent email call this will only be present
+  when there is exactly 1 file. Use last_found_file_path in that case.
+  For multiple files, the files agent will zip them first and pass the zip path via {files_step.file_path}.
 """.strip()
 
 

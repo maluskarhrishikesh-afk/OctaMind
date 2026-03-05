@@ -2,7 +2,8 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
-Last updated: 2026-03-02 (Session 4 — Calendar year bug fixed; "send here" routing fixed; enriched scheduling context now propagated to agent execution; search_by_name sorts non-.lnk first; search_file_all_drives skips .lnk; skill_dag .id example fixed to .path; server restart still required)  
+Last updated: 2026-03-06 (Session 5 — Calendar local timezone fix; copy destination Rule #1 fix; operation history stack with 30-day undo + list_file_operations tool; context audit history with 30-day auto-prune)  
+Previous: 2026-03-02 (Session 4 — Calendar year bug fixed; "send here" routing fixed; enriched scheduling context now propagated to agent execution; search_by_name sorts non-.lnk first; search_file_all_drives skips .lnk; skill_dag .id example fixed to .path; server restart still required)  
 Previous: 2026-03-02 (Session 3 — New Files tools: search_file_all_drives, deliver_file, write_pdf_report, write_excel_report, organize_folder; fixed list_laptop_structure to always auto-save report as file_path)  
 Previous: 2026-03-02 (Bug fixes: calendar date-context loss, ReAct observation truncation, Telegram Markdown entity crash, DAG JSON fence parsing verified; added human-friendly per-request workflow summary log; DAG algorithm walkthrough document added)  
 Previous: 2026-03-02 (Telegram UX overhaul: typing indicators, real-time progress editing, /reset & /agents commands, long-message splitting, file-artifact delivery; Dashboard download button for file artifacts; HubProcessor scheduling-context enrichment propagated to Telegram channel; `send_document_file` multipart upload added to telegram_service)  
@@ -10,7 +11,60 @@ Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine cau
 
 ---
 
-## �️ 2026-03-02 Session 3 — New Files Agent Tools
+## 🐛 2026-03-06 Session 5 — Bug Fixes: Timezone, Copy Destination, Undo + Audit History
+
+### 1. Calendar Timezone Fix (`src/calendar/calendar_service.py`)
+
+**Problem:** All calendar operations used `timezone.utc` and injected `"timeZone": "UTC"` into Google Calendar API calls — events created/read at the wrong time on machines in non-UTC zones.
+
+**Fix:**
+- Added `_local_tz()` helper that returns `datetime.now().astimezone().tzinfo` (the system local timezone)
+- Replaced every `timezone.utc` reference in: `_rfc3339()`, `_today_start()`, `list_events()`, `get_events_for_date()`, `create_event()`, `update_event()`, `create_recurring_event()`, `find_free_slots()`
+- Removed `"timeZone": "UTC"` from all event body payloads
+
+---
+
+### 2. Copy Destination Prompt Fix (`src/agent/ui/files_agent/orchestrator.py`)
+
+**Problem:** When the user named a destination folder (e.g. "copy them to Downloads/qwerty"), the orchestrator passed `"no arguments"` to `collect_files_from_manifest`, discarding the destination. Rule #1 default path was hard-coded to `~/Downloads/OctaMind`.
+
+**Fix:**
+- Rule #1 default path changed from `home / 'Downloads' / 'OctaMind'` → `data_dir` (`<workspace>/data/`)
+- Prompt instruction updated: if user names a folder, pass it as the `destination` argument instead of `"no arguments"`
+
+---
+
+### 3. Operation History Stack (`src/files/features/file_ops.py`)
+
+**Problem:** `last_operation.json` stored only a single entry — every new operation overwrote the previous one, making multi-step undo impossible and erasing the audit trail.
+
+**New architecture:**
+- `_OP_HISTORY_FILE` → `<workspace>/data/operation_history.json` (JSON array, newest first)
+- `_OP_HISTORY_TTL_DAYS = 30` — entries older than 30 days pruned automatically
+- `_log_operation(op_type, destination, count)` — pushes to front; auto-prunes on every write
+- `undo_last_file_operation() → dict` — finds most-recent non-undone entry, deletes destination folder, marks `undone: true` + `undone_at` timestamp; entry kept for audit
+- `list_file_operations(days=30) → dict` — LLM-callable audit viewer (newest-first)
+
+**Orchestrator:** `list_file_operations` registered in `_TOOL_DOCS`, `_get_tools()`, tool map, and prompt instruction.
+
+---
+
+### 4. Context Audit History (`src/agent/manifest/context_manifest.py`)
+
+**Problem:** `write_context()` only kept the current state — no way to query what context was active 2 hours ago or debug a conversation.
+
+**New architecture:**
+- `_CONTEXT_HISTORY_FILE = _MANIFEST_DIR / "octa_context_history.jsonl"` — append-only JSONL audit
+- `_PRUNE_STAMP_FILE` — prevents pruning more than once/day
+- `_AUDIT_TTL_DAYS = 30` — history retained for 30 days
+- Every `write_context()` appends a lightweight audit line (strips `resolved_entities` to keep size minimal)
+- `_should_run_prune() → bool` — checks stamp file before pruning
+- `prune_context_history(days=30)` — removes lines older than TTL
+- `get_context_history(days=30) → list` — returns parsed entries for LLM/debug queries
+
+---
+
+## 🛠️ 2026-03-02 Session 4 — Calendar Year Bug Fixed
 
 ### Root-cause diagnosis for 3 failing commands
 

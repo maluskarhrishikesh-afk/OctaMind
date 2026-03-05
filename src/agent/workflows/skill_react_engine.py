@@ -176,6 +176,16 @@ def run_skill_react(
                             fp = first_results[0].get("file_path") or first_results[0].get("path")
                             if fp:
                                 artifacts_out["file_path"] = fp
+                    # Accumulate ALL search result paths for manifest / session state
+                    all_result_paths = [
+                        item.get("path") or item.get("file_path")
+                        for item in result.get("results", [])
+                        if isinstance(item, dict)
+                        and (item.get("path") or item.get("file_path"))
+                    ]
+                    if all_result_paths:
+                        existing = artifacts_out.get("found_paths", [])
+                        artifacts_out["found_paths"] = existing + all_result_paths
                 obs = _format_observation(tool_name, result)
                 logger.info("│    [%s] ✔ tool=%s  obs=%.120s", skill_name, tool_name, obs)
             except Exception as exc:
@@ -226,6 +236,12 @@ def _build_system_prompt(skill_context: str, tool_docs: str) -> str:
 You have access to the following tools:
 {tool_docs}
 
+## How to read the task
+The user's task is provided in the first user message.  It may contain an optional
+"## Session State" JSON block with pre-resolved entities (dates in ISO-8601, 24-hour
+times, filenames, e-mail addresses).  ALWAYS prefer values from Session State over
+re-parsing the raw task text — they are already resolved and unambiguous.
+
 Each turn output exactly ONE JSON object — NO markdown fences, NO extra text.
 
 To call a tool:
@@ -274,8 +290,9 @@ Rules:
 - Use final_answer ONLY when the task is fully complete.
 - Write final_answer messages in friendly, markdown-formatted style (bold, bullets, emojis).
 - If a tool returns an error, decide whether to retry, try a different approach, or report the error.
-- IMPORTANT: Always output valid JSON. Use lowercase boolean values: true and false (NOT Python-style True or False).
-"""
+- IMPORTANT: Always output valid JSON. Use lowercase boolean values: true and false (NOT Python-style True or False).- ⛔ NEVER use final_answer to ask the user for clarification, missing parameters, or a destination path.
+  If a parameter is not specified, use a sensible default from the skill context and call the tool immediately.
+  Asking counts as failing the task — always act."""
 
 
 def _strip_fences(raw: str) -> str:

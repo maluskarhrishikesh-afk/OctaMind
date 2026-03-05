@@ -153,6 +153,42 @@ SPECIAL CONTEXT TOKENS always available in instructions:
   Use it to pass files between agents.
   Example: step 2 instruction → "Zip the file at {{download1.file_path}}"
 
+RESOLVING CONTEXT REFERENCES ("them", "those", "the files", "it", "that folder"):
+The user command may arrive with a "## Session State" JSON block.
+
+⚠️  CRITICAL DISTINCTION — fresh search vs. follow-up action:
+- A FRESH SEARCH request looks like: "Are there any X files?", "Find all Y", "Search for Z",
+  "How many X files are there?", "Do I have any X?" — even if session state has last_found_paths.
+  For fresh searches: ALWAYS create normal search steps. IGNORE last_found_paths / last_found_folder.
+- A FOLLOW-UP ACTION uses pronouns that refer back to previously found files:
+  "them", "those", "those files", "copy them", "send them", "mail them", "zip those", "the images you found".
+  For follow-up actions: use last_found_paths / last_found_folder from Session State.
+
+- If `last_found_folder` is present AND the command is a follow-up action on that folder:
+  Use it directly — do NOT search again.
+  Preferred flow for zip/email: zip_folder(last_found_folder, output_path="C:\\Users\\malus\\Downloads\\<FolderName>.zip") → email zip
+- If `last_found_paths` is present (list of file paths) AND the command is a follow-up action:
+  CRITICAL — always distinguish the follow-up intent:
+  A) "copy them to a folder" / "put them in a folder" / "collect them" (NO email, NO zip):
+     → SINGLE files step: instruct the files agent to call
+       PREFERRED: collect_files_from_manifest(destination="C:\\Users\\malus\\Downloads\\OctaMind")
+         — reads the manifest file saved after the search; contains ALL found paths.
+       FALLBACK (if manifest not available): collect_files_to_folder(file_paths=[<all last_found_paths>], destination="C:\\Users\\malus\\Downloads\\OctaMind")
+       DEFAULT destination is ALWAYS C:\\Users\\malus\\Downloads\\OctaMind unless the user specifies another.
+       ⛔ NEVER create a step that asks the user for a destination — just use OctaMind silently.
+       NEVER use copy_file(source=last_found_folder) — that copies the ENTIRE folder including files the user did NOT ask for.
+  B) "mail them to me" / "send them to me" / "email those" (involves email):
+     - SINGLE FILE (list has exactly 1 item): email it directly — no zip.
+     - MULTIPLE FILES from the same parent folder: zip_folder(last_found_folder, output_path=...) → email zip.
+     - MULTIPLE FILES spanning different folders: collect_files_from_manifest → zip_folder → email zip.
+  C) SINGLE FILE (list has exactly 1 item with a file extension like .pdf/.docx): email it directly — no zip.
+- NEVER create a new search step for a follow-up action when last_found_folder or last_found_paths are in Session State.
+- DO create search steps when the user's command is a fresh search, even if Session State has prior results.
+- Embed the EXACT paths from Session State as literal values in the step instruction.
+- ZIP OUTPUT PATH: When zipping for email or delivery, ALWAYS set output_path to
+  C:\\Users\\malus\\Downloads\\<ArchiveName>.zip — NEVER omit it. Leaving it empty creates
+  the zip next to the source folder which may be read-only (C:\\Windows\\, C:\\Program Files\\, etc.).
+
 SYSTEM PATHS on this machine (use these exact absolute paths in instructions):
 {path_ctx}
 When the user mentions a folder like "Downloads", "Desktop", or "Documents",
@@ -200,6 +236,29 @@ Example for "Download report.pdf from Drive, zip it, and email it to me":
 Example for "find my payslip and send it here for downloading":
 [
   {{"id": "deliver1", "agent": "files", "instruction": "Search for any payslip PDF file on the laptop (skip .lnk shortcuts, look for actual .pdf files). Use search_file_all_drives if available. Deliver the found file for download by the user.", "depends_on": [], "description": "Find and deliver payslip"}}
+]
+
+Example for "zip them and mail it to me" WHEN Session State contains last_found_folder="C:\\Hrishikesh\\Neo\\Payslips":
+[
+  {{"id": "zip1", "agent": "files", "instruction": "Zip the folder C:\\\\Hrishikesh\\\\Neo\\\\Payslips into an archive. Save the zip at C:\\\\Users\\\\malus\\\\Downloads\\\\Payslips.zip", "depends_on": [], "description": "Zip payslips folder"}},
+  {{"id": "email1", "agent": "email", "instruction": "Send {{zip1.file_path}} as an attachment to {{__user_email__}} with subject \\"Payslips\\"", "depends_on": ["zip1"], "description": "Email zip"}}
+]
+
+Example for "mail it to me" WHEN Session State contains last_found_paths=["C:\\Hrishikesh\\Neo\\Payslips\\Payslip_2025_Dec.pdf"] (SINGLE file — no zip needed):
+[
+  {{"id": "email1", "agent": "email", "instruction": "Send C:\\\\Hrishikesh\\\\Neo\\\\Payslips\\\\Payslip_2025_Dec.pdf as an attachment to {{__user_email__}} with subject \\"Payslip\\"", "depends_on": [], "description": "Email payslip directly"}}
+]
+
+Example for "collect those files and send by email" WHEN Session State contains last_found_paths=["C:\\A\\f1.pdf","C:\\B\\f2.pdf"] (files from different folders):
+[
+  {{"id": "collect1", "agent": "files", "instruction": "Copy the files from the previous search into C:\\\\Users\\\\malus\\\\Downloads\\\\OctaMind folder. Use collect_files_from_manifest() — it reads the saved manifest of ALL found paths. Fallback: collect_files_to_folder(file_paths=['C:\\\\A\\\\f1.pdf','C:\\\\B\\\\f2.pdf'], destination='C:\\\\Users\\\\malus\\\\Downloads\\\\OctaMind').", "depends_on": [], "description": "Gather files"}},
+  {{"id": "zip1", "agent": "files", "instruction": "Zip the folder at {{collect1.file_path}}", "depends_on": ["collect1"], "description": "Zip collected files"}},
+  {{"id": "email1", "agent": "email", "instruction": "Send {{zip1.file_path}} as attachment to {{__user_email__}}", "depends_on": ["zip1"], "description": "Email zip"}}
+]
+
+Example for "copy them to a folder" / "put them in a folder" WHEN Session State contains last_found_paths (copy ONLY those files found in the previous search, NOT the whole folder):
+[
+  {{"id": "copy1", "agent": "files", "instruction": "Copy ALL files from the previous search into C:\\\\Users\\\\malus\\\\Downloads\\\\OctaMind. Use collect_files_from_manifest() which reads the manifest file saved during the search and copies EVERY found file. Do NOT use copy_file on the parent folder.", "depends_on": [], "description": "Collect searched files into OctaMind folder"}}
 ]
 """
 
@@ -511,7 +570,7 @@ def execute_dag_workflow(
                 "instruction": step.instruction,
                 "status":      exec_status,
                 "result":      {"message": text[:500], "artifacts": artifacts_out},
-                "error":       None,
+                "error":       text[:300] if exec_status == "error" else None,
                 "elapsed":     time.time() - t0,
                 "llm_calls":   _step_llm_calls,
             })

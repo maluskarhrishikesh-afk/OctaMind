@@ -26,6 +26,17 @@ from typing import Any
 
 logger = logging.getLogger("calendar_agent")
 
+
+def _local_tz():
+    """Return the system's local timezone as a fixed-offset timezone object.
+
+    Works on any OS without third-party libraries.  The returned object is a
+    :class:`datetime.timezone` with the correct UTC offset for *right now*,
+    so daylight-saving transitions within a single session are handled
+    automatically on the next call.
+    """
+    return datetime.now().astimezone().tzinfo
+
 # ── Singleton client ──────────────────────────────────────────────────────────
 _client = None
 
@@ -83,13 +94,14 @@ def _dt(s: str | None) -> datetime | None:
 
 def _rfc3339(dt: datetime) -> str:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=_local_tz())
     return dt.isoformat()
 
 
 def _today_start() -> datetime:
+    """Return midnight **local time** today as a timezone-aware datetime."""
     d = date.today()
-    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    return datetime(d.year, d.month, d.day, tzinfo=_local_tz())
 
 
 def _event_summary(ev: dict) -> dict:
@@ -136,11 +148,11 @@ def list_events(
             "orderBy":     "startTime",
         }
         if time_min:
-            params["timeMin"] = time_min if "T" in time_min else time_min + "T00:00:00Z"
+            params["timeMin"] = time_min if "T" in time_min else _rfc3339(datetime.fromisoformat(time_min + "T00:00:00").replace(tzinfo=_local_tz()))
         else:
             params["timeMin"] = _rfc3339(_today_start())
         if time_max:
-            params["timeMax"] = time_max if "T" in time_max else time_max + "T23:59:59Z"
+            params["timeMax"] = time_max if "T" in time_max else _rfc3339(datetime.fromisoformat(time_max + "T23:59:59").replace(tzinfo=_local_tz()))
         if query:
             params["q"] = query
 
@@ -210,10 +222,13 @@ def get_upcoming_events(days: int = 7, max_results: int = 20, calendar_id: str =
 
 
 def get_events_for_date(date_str: str, calendar_id: str = "primary") -> dict:
-    """Fetch events on a specific date (YYYY-MM-DD)."""
+    """Fetch events on a specific date (YYYY-MM-DD), using the local timezone."""
+    tz = _local_tz()
+    day_start = datetime.fromisoformat(f"{date_str}T00:00:00").replace(tzinfo=tz)
+    day_end   = datetime.fromisoformat(f"{date_str}T23:59:59").replace(tzinfo=tz)
     result = list_events(
-        time_min=f"{date_str}T00:00:00Z",
-        time_max=f"{date_str}T23:59:59Z",
+        time_min=_rfc3339(day_start),
+        time_max=_rfc3339(day_end),
         max_results=50,
         calendar_id=calendar_id,
     )
@@ -287,19 +302,26 @@ def create_event(
                 "end":         {"date": end_exclusive},
             }
         else:
-            # Timed event
-            start_dt = start if "T" in start else start + "T09:00:00"
+            # Timed event — attach local timezone to any naive datetime strings
+            tz = _local_tz()
+            def _local_dt(s: str) -> str:
+                s = s if "T" in s else s + "T09:00:00"
+                dt = datetime.fromisoformat(s)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=tz)
+                return dt.isoformat()
+
+            start_dt = _local_dt(start)
             if end:
-                end_dt = end if "T" in end else end + "T10:00:00"
+                end_dt = _local_dt(end)
             else:
-                # Default: 1 hour after start
                 end_dt = _rfc3339(datetime.fromisoformat(start_dt) + timedelta(hours=1))
             body = {
                 "summary":     title,
                 "description": description,
                 "location":    location,
-                "start":       {"dateTime": start_dt, "timeZone": "UTC"},
-                "end":         {"dateTime": end_dt,   "timeZone": "UTC"},
+                "start":       {"dateTime": start_dt},
+                "end":         {"dateTime": end_dt},
             }
 
         if attendees:
@@ -359,11 +381,17 @@ def update_event(
         if location is not None:
             ev["location"] = location
         if start:
-            ev["start"] = {"dateTime": start if "T" in start else start + "T09:00:00",
-                            "timeZone": "UTC"}
+            s_str = start if "T" in start else start + "T09:00:00"
+            s_dt = datetime.fromisoformat(s_str)
+            if s_dt.tzinfo is None:
+                s_dt = s_dt.replace(tzinfo=_local_tz())
+            ev["start"] = {"dateTime": _rfc3339(s_dt)}
         if end:
-            ev["end"] = {"dateTime": end if "T" in end else end + "T10:00:00",
-                          "timeZone": "UTC"}
+            e_str = end if "T" in end else end + "T10:00:00"
+            e_dt = datetime.fromisoformat(e_str)
+            if e_dt.tzinfo is None:
+                e_dt = e_dt.replace(tzinfo=_local_tz())
+            ev["end"] = {"dateTime": _rfc3339(e_dt)}
         if add_attendees:
             existing = [a["email"] for a in ev.get("attendees", [])]
             ev.setdefault("attendees", [])
@@ -424,14 +452,19 @@ def create_recurring_event(
     """
     try:
         svc = _get_client()
-        start_dt = start if "T" in start else start + "T09:00:00"
-        end_dt   = _rfc3339(datetime.fromisoformat(start_dt) + timedelta(hours=end_time_offset_hours))
+        tz = _local_tz()
+        s_str   = start if "T" in start else start + "T09:00:00"
+        s_dt    = datetime.fromisoformat(s_str)
+        if s_dt.tzinfo is None:
+            s_dt = s_dt.replace(tzinfo=tz)
+        start_dt = _rfc3339(s_dt)
+        end_dt   = _rfc3339(s_dt + timedelta(hours=end_time_offset_hours))
         body: dict[str, Any] = {
             "summary":     title,
             "description": description,
             "location":    location,
-            "start":       {"dateTime": start_dt, "timeZone": "UTC"},
-            "end":         {"dateTime": end_dt,   "timeZone": "UTC"},
+            "start":       {"dateTime": start_dt},
+            "end":         {"dateTime": end_dt},
             "recurrence":  [recurrence],
         }
         if attendees:
@@ -500,16 +533,16 @@ def find_free_slots(
             e = _dt(ev["end"])
             if s and e:
                 if s.tzinfo is None:
-                    s = s.replace(tzinfo=timezone.utc)
+                    s = s.replace(tzinfo=_local_tz())
                 if e.tzinfo is None:
-                    e = e.replace(tzinfo=timezone.utc)
+                    e = e.replace(tzinfo=_local_tz())
                 busy.append((s, e))
         busy.sort(key=lambda x: x[0])
 
         # Generate candidate slots across working hours
         day = date.fromisoformat(date_str)
-        cursor = datetime(day.year, day.month, day.day, working_start_hour, 0, tzinfo=timezone.utc)
-        work_end = datetime(day.year, day.month, day.day, working_end_hour, 0, tzinfo=timezone.utc)
+        cursor   = datetime(day.year, day.month, day.day, working_start_hour, 0, tzinfo=_local_tz())
+        work_end = datetime(day.year, day.month, day.day, working_end_hour,   0, tzinfo=_local_tz())
         delta = timedelta(minutes=duration_minutes)
         free_slots: list[dict] = []
 

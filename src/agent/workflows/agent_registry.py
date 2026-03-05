@@ -42,7 +42,8 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
     },
     "email": {
         "description": (
-            "Gmail agent. Handles: read/search/count emails, send/reply/forward, "
+            "Gmail / mail agent. Handles: read/search/count emails, "
+            "send/mail/reply/forward/compose messages, "
             "create/send drafts, download attachments, schedule emails, extract "
             "action items and calendar events, set follow-up reminders, "
             "auto-categorize and label, detect urgent/newsletter emails, "

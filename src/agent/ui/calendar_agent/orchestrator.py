@@ -42,10 +42,30 @@ def _get_skill_context() -> str:
 Today's date: {today_str}. ALWAYS use this exact date as the reference for EVERY relative expression ("today", "tomorrow", "this evening", "next Monday", "in 2 hours", etc.). NEVER use any other date.
 User's local timezone: {tz_display}. Always apply this timezone — never ask the user to specify it.
 
+## Structured Session State
+When the task contains a "## Session State" JSON block, you MUST read it first and
+extract resolved values before acting. Resolved values are always more reliable than
+re-interpreting raw text.  Key fields:
+  • "active_date"        — ISO-8601 date the user is working with (e.g. "2026-03-12")
+  • "active_time_start"  — 24-hour start time  (e.g. "20:00")
+  • "active_time_end"    — 24-hour end time    (e.g. "21:00")
+  • "current_date"       — today (fallback if active_date absent)
+  • "timezone"           — user's tz (e.g. "IST (UTC+05:30)")
+If "active_date" differs from "current_date", the user is ALWAYS talking about
+"active_date", not today.
+
 CRITICAL RULE — choosing the right tool:
   • For ANY natural-language time expression (e.g. "today at 8 PM", "tomorrow 3pm", "next Friday") -> ALWAYS call quick_add_event(text). It resolves relative times correctly.
+  • When you have an active_date from Session State, always include it explicitly in
+    quick_add_event so Google cannot default to today.
+    Wrong:   quick_add_event('Gym Session at 8 PM')
+    Correct: quick_add_event('Gym Session on 12th March 2026 at 8 PM')
   • Only call create_event() when you have an exact, pre-computed ISO8601 datetime (e.g. "{local.year}-{local.month:02d}-{local.day:02d}T20:00:00{iso_offset}").
-  • NEVER invent or guess a date for create_event() — derive it strictly from today ({today_str}).
+  • NEVER invent or guess a date for create_event() — derive it strictly from active_date or today ({today_str}).
+
+CRITICAL RULE — preserving dates from context:
+  • If the command or Session State mentions a specific date (e.g. '12th March', '2026-03-12'), you MUST include that EXACT date in every tool call.
+  • When in doubt whether a date was meant, prefer the date explicitly mentioned in Session State over today's date.
 
 When displaying event times, always show them in the user's local timezone.""".strip()
 

@@ -13,7 +13,7 @@ import shutil
 import string
 import subprocess
 import platform
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -114,6 +114,61 @@ def copy_file(source: str, destination: str) -> Dict[str, Any]:
         return {"status": "success", "message": f"Copied to {out}", "destination": str(out)}
     except Exception as exc:
         logger.error("copy_file failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def collect_files_to_folder(file_paths: List[str], destination: str) -> Dict[str, Any]:
+    """
+    Copy a list of files (from potentially different locations) into a single
+    destination folder, creating it if needed.
+
+    Use this when you have a list of file paths from a search result and want
+    to gather them in one place before zipping or sharing.
+
+    Args:
+        file_paths:  List of absolute paths to files (or folders) to copy.
+        destination: Absolute path of the folder to copy everything into.
+    """
+    try:
+        dst = resolve_path(destination)
+        dst.mkdir(parents=True, exist_ok=True)
+
+        copied: List[str] = []
+        skipped: List[str] = []
+        for src_str in file_paths:
+            src = resolve_path(src_str)
+            if not src.exists():
+                skipped.append(str(src))
+                continue
+            target = dst / src.name
+            # Avoid name collision — append a counter suffix
+            if target.exists():
+                stem, suffix = src.stem, src.suffix
+                for i in range(1, 1000):
+                    target = dst / f"{stem}_{i}{suffix}"
+                    if not target.exists():
+                        break
+            if src.is_dir():
+                shutil.copytree(str(src), str(target), dirs_exist_ok=True)
+            else:
+                shutil.copy2(str(src), str(target))
+            copied.append(str(target))
+
+        _log_operation("copy", str(dst), len(copied))
+        return {
+            "status": "success",
+            "destination": str(dst),
+            "file_path": str(dst),   # convenience alias for zip_folder
+            "copied_count": len(copied),
+            "copied": copied,
+            "skipped": skipped,
+            "message": (
+                f"Collected {len(copied)} item(s) into '{dst}'."
+                + (f" Skipped {len(skipped)} missing path(s)." if skipped else "")
+            ),
+        }
+    except Exception as exc:
+        logger.error("collect_files_to_folder failed: %s", exc)
         return {"status": "error", "message": str(exc)}
 
 
@@ -1691,3 +1746,292 @@ def list_running_apps() -> Dict[str, Any]:
         }
     except Exception as exc:
         return {"status": "error", "message": f"list_running_apps error: {exc}"}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Manifest helpers — reliable cross-turn path bookkeeping
+# Stored in <workspace>/data/ so the path is consistent on Windows/Linux/macOS.
+# __file__ = src/files/features/file_ops.py
+#   parents[0] = src/files/features/
+#   parents[1] = src/files/
+#   parents[2] = src/
+#   parents[3] = <workspace root>
+# ──────────────────────────────────────────────────────────────────────────────
+
+_DEFAULT_OCTAMIND_DIR = Path(__file__).resolve().parents[3] / "data"
+_DEFAULT_MANIFEST     = _DEFAULT_OCTAMIND_DIR / "octa_manifest.txt"
+# Operation history (replaces single-entry last_operation.json).
+# JSON array, most-recent-first.  Entries older than 30 days are pruned
+# automatically on every write so the file stays small.
+_OP_HISTORY_FILE      = _DEFAULT_OCTAMIND_DIR / "operation_history.json"
+_OP_HISTORY_TTL_DAYS  = 30
+
+
+def _prune_op_history(records: list) -> list:
+    """Drop entries whose timestamp is older than _OP_HISTORY_TTL_DAYS."""
+    cutoff = datetime.now() - timedelta(days=_OP_HISTORY_TTL_DAYS)
+    return [
+        r for r in records
+        if datetime.fromisoformat(r.get("timestamp", "1970-01-01")) >= cutoff
+    ]
+
+
+def _load_op_history() -> list:
+    """Read operation_history.json; return [] on any error or if missing."""
+    import json as _json
+    try:
+        if _OP_HISTORY_FILE.exists():
+            return _json.loads(_OP_HISTORY_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return []
+
+
+def _save_op_history(records: list) -> None:
+    """Write records to operation_history.json atomically."""
+    import json as _json
+    try:
+        _OP_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _OP_HISTORY_FILE.write_text(
+            _json.dumps(records, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _log_operation(op_type: str, destination: str, count: int) -> None:
+    """Push a copy/collect operation onto the audit history stack.
+
+    The in-memory representation is most-recent-first.  Entries older than
+    ``_OP_HISTORY_TTL_DAYS`` are pruned on every push so the file never grows
+    unbounded.  Never raises — logging must not crash the calling operation.
+    """
+    try:
+        history = _load_op_history()
+        history.insert(0, {
+            "type":        op_type,
+            "destination": str(destination),
+            "count":       count,
+            "timestamp":   datetime.now().isoformat(timespec="seconds"),
+            "undone":      False,
+        })
+        history = _prune_op_history(history)
+        _save_op_history(history)
+    except Exception:
+        pass  # never let logging crash the main operation
+
+
+def undo_last_file_operation() -> Dict[str, Any]:
+    """Undo the most-recent undoable copy/collect operation.
+
+    Reads the top entry from ``data/operation_history.json``, deletes the
+    destination folder that was created, and marks the entry as ``undone``.
+    The entry is **kept** in the history for auditing purposes; it will only
+    be removed when it ages past 30 days.
+
+    Returns:
+        dict with keys: status, message, deleted_folder, count.
+    """
+    try:
+        history = _load_op_history()
+        if not history:
+            return {
+                "status":  "error",
+                "message": "No previous operation found to undo.  "
+                           "Run a copy/collect operation first.",
+            }
+
+        # Find the most-recent non-undone entry
+        target_idx = next(
+            (i for i, r in enumerate(history) if not r.get("undone", False)),
+            None,
+        )
+        if target_idx is None:
+            return {
+                "status":  "error",
+                "message": "All recent operations have already been undone.",
+            }
+
+        op  = history[target_idx]
+        dst = Path(op["destination"])
+        if not dst.exists():
+            # Mark as undone even if folder is already gone
+            history[target_idx]["undone"]    = True
+            history[target_idx]["undone_at"] = datetime.now().isoformat(timespec="seconds")
+            _save_op_history(history)
+            return {
+                "status":  "error",
+                "message": f"Destination folder '{dst}' no longer exists — nothing to delete.",
+            }
+
+        shutil.rmtree(str(dst), ignore_errors=False)
+
+        # Mark undone (preserve for audit) and persist
+        history[target_idx]["undone"]    = True
+        history[target_idx]["undone_at"] = datetime.now().isoformat(timespec="seconds")
+        _save_op_history(history)
+
+        return {
+            "status":         "success",
+            "deleted_folder": str(dst),
+            "count":          op.get("count", 0),
+            "message": (
+                f"Undo complete — deleted '{dst}' ({op.get('count', 0)} file(s)).  "
+                f"Operation recorded in audit log."
+            ),
+        }
+    except Exception as exc:
+        logger.error("undo_last_file_operation failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def list_file_operations(days: int = _OP_HISTORY_TTL_DAYS) -> Dict[str, Any]:
+    """
+    Return the file-operation audit history for the last *days* days.
+
+    Useful for reviewing what was copied/collected and whether operations
+    have been undone.  Each entry contains: type, destination, count,
+    timestamp, undone, undone_at (if applicable).
+
+    Args:
+        days:  How many days of history to include.  Defaults to 30.
+
+    Returns:
+        dict with keys: status, operations (list, newest-first), count.
+    """
+    try:
+        history  = _load_op_history()
+        cutoff   = datetime.now() - timedelta(days=days)
+        filtered = [
+            r for r in history
+            if datetime.fromisoformat(r.get("timestamp", "1970-01-01")) >= cutoff
+        ]
+        return {
+            "status":     "success",
+            "operations": filtered,
+            "count":      len(filtered),
+            "message":    f"{len(filtered)} operation(s) in last {days} day(s).",
+        }
+    except Exception as exc:
+        logger.error("list_file_operations failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def save_search_manifest(
+    found_paths: List[str],
+    manifest_path: str = "",
+) -> Dict[str, Any]:
+    """
+    Persist a list of found file paths to a plain-text manifest file
+    (one absolute path per line).  Call this immediately after any search
+    so the next user turn can copy/move/zip EVERY result, not just the few
+    that fit inside the assistant reply.
+
+    Args:
+        found_paths:   List of absolute file paths returned by a search step.
+        manifest_path: Where to write the manifest.  Defaults to
+                       <workspace>/data/octa_manifest.txt
+    """
+    try:
+        target = Path(manifest_path).expanduser() if manifest_path else _DEFAULT_MANIFEST
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        # Deduplicate while preserving order
+        seen: set = set()
+        unique: List[str] = []
+        for p in found_paths:
+            ps = str(p).strip()
+            if ps and ps not in seen:
+                seen.add(ps)
+                unique.append(ps)
+
+        target.write_text("\n".join(unique), encoding="utf-8")
+        return {
+            "status": "success",
+            "manifest_path": str(target),
+            "count": len(unique),
+            "message": f"Saved {len(unique)} path(s) to manifest '{target}'.",
+        }
+    except Exception as exc:
+        logger.error("save_search_manifest failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def collect_files_from_manifest(
+    manifest_path: str = "",
+    destination: str = "",
+) -> Dict[str, Any]:
+    """
+    Read file paths from a manifest file (created by save_search_manifest)
+    and copy EVERY listed file into *destination*.
+
+    This is the most reliable way to copy files found in a previous turn —
+    it is NOT limited by how many paths fit in the session state.
+
+    Args:
+        manifest_path: Path to the manifest text file.  Defaults to
+                       <workspace>/data/octa_manifest.txt
+        destination:   Folder to copy files into.  Defaults to
+                       <workspace>/data/
+    """
+    try:
+        mf = Path(manifest_path).expanduser() if manifest_path else _DEFAULT_MANIFEST
+        if not mf.exists():
+            return {
+                "status": "error",
+                "message": f"Manifest file not found: '{mf}'.  Run a search first.",
+            }
+
+        lines = [ln.strip() for ln in mf.read_text(encoding="utf-8").splitlines()]
+        file_paths = [ln for ln in lines if ln]
+
+        if not file_paths:
+            return {
+                "status": "error",
+                "message": f"Manifest file '{mf}' is empty.  Run a search first.",
+            }
+
+        dst_path = (
+            Path(destination).expanduser() if destination else _DEFAULT_OCTAMIND_DIR
+        )
+        dst_path.mkdir(parents=True, exist_ok=True)
+
+        copied: List[str] = []
+        skipped: List[str] = []
+        for src_str in file_paths:
+            src = Path(src_str)
+            if not src.exists():
+                skipped.append(str(src))
+                continue
+            target = dst_path / src.name
+            if target.exists():
+                stem, suffix = src.stem, src.suffix
+                for i in range(1, 10000):
+                    target = dst_path / f"{stem}_{i}{suffix}"
+                    if not target.exists():
+                        break
+            try:
+                shutil.copy2(str(src), str(target))
+                copied.append(str(target))
+            except Exception as exc2:
+                logger.warning("collect_files_from_manifest: skip '%s': %s", src, exc2)
+                skipped.append(str(src))
+
+        _log_operation("copy", str(dst_path), len(copied))
+        return {
+            "status": "success",
+            "destination": str(dst_path),
+            "file_path": str(dst_path),   # convenience alias for zip_folder
+            "manifest_path": str(mf),
+            "copied_count": len(copied),
+            "copied": copied,
+            "skipped": skipped,
+            "message": (
+                f"Copied {len(copied)} file(s) into '{dst_path}'."
+                + (f"  Skipped {len(skipped)} missing/unreadable path(s)." if skipped else "")
+            ),
+        }
+    except Exception as exc:
+        logger.error("collect_files_from_manifest failed: %s", exc)
+        return {"status": "error", "message": str(exc)}

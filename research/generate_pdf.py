@@ -308,9 +308,6 @@ def parse_md_table(lines: list[str], styles: dict) -> Table:
 # ── Page template ─────────────────────────────────────────────────────────────
 def on_first_page(canvas, doc):
     canvas.saveState()
-    canvas.setFont("Helvetica", 9)
-    canvas.setFillColor(colors.HexColor("#888888"))
-    canvas.drawCentredString(PAGE_W / 2, 0.6 * inch, "arXiv preprint — March 2026")
     canvas.restoreState()
 
 
@@ -324,8 +321,6 @@ def on_later_pages(canvas, doc):
     # Page number
     canvas.drawRightString(PAGE_W - RIGHT_MARGIN, PAGE_H - 0.7 * inch,
                            f"Page {doc.page}")
-    # Footer
-    canvas.drawCentredString(PAGE_W / 2, 0.6 * inch, "arXiv preprint — March 2026")
     canvas.restoreState()
 
 

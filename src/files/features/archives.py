@@ -73,14 +73,31 @@ def zip_files(
         return {"status": "error", "message": str(exc)}
 
 
-def zip_folder(folder_path: str, output_path: str = "") -> Dict[str, Any]:
+def zip_folder(
+    folder_path: str = "",
+    output_path: str = "",
+    *,
+    # Alias kwargs the LLM occasionally generates instead of folder_path
+    path: str = "",
+    folder: str = "",
+    source_path: str = "",
+    source: str = "",
+) -> Dict[str, Any]:
     """
     Zip an entire folder into a zip archive.
 
     Args:
         folder_path: Path to the folder to zip.
-        output_path: Destination .zip path. Defaults to same location as folder with .zip extension.
+        output_path: Destination .zip path. Defaults to Downloads/<folder>.zip.
+
+    Accepts ``path``, ``folder``, ``source_path``, and ``source`` as aliases
+    for ``folder_path`` so small LLM kwarg-naming mistakes don't break the plan.
     """
+    # Resolve any alias that was passed instead of folder_path
+    if not folder_path:
+        folder_path = path or folder or source_path or source
+    if not folder_path:
+        return {"status": "error", "message": "zip_folder: no folder path provided"}
     try:
         folder = resolve_path(folder_path)
         if not folder.exists() or not folder.is_dir():
@@ -89,7 +106,12 @@ def zip_folder(folder_path: str, output_path: str = "") -> Dict[str, Any]:
         if output_path:
             out_str = output_path
         else:
-            out_str = str(folder.parent / (folder.name + ".zip"))
+            # Default to Downloads so the zip is always written to a writable
+            # user location — placing it next to the source folder fails when
+            # the source is under C:\Windows\, C:\Program Files\, etc.
+            downloads = Path.home() / "Downloads"
+            downloads.mkdir(parents=True, exist_ok=True)
+            out_str = str(downloads / (folder.name + ".zip"))
 
         return zip_files([folder_path], out_str)
     except Exception as exc:

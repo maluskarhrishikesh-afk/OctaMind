@@ -34,6 +34,16 @@ Kwargs values can reference prior step results with ``{step_id}`` or
 The resolver walks dot-separated paths through the nested dict/list result
 of the referenced step.
 
+Session state tokens
+--------------------
+Kwargs values can also reference the parsed ## Session State block with
+``{__session__.field}`` tokens.  If the resolved value is a Python list
+(e.g. last_found_paths) the **entire kwarg** is replaced with the real list
+object — not a stringified version.  This lets the LLM plan reference up to
+hundreds of file paths without embedding them verbatim in the JSON plan:
+
+    "kwargs": {"file_paths": "{__session__.last_found_paths}", "destination": "C:\\..."}
+
 Usage
 -----
     from src.agent.workflows.skill_dag_engine import run_skill_dag
@@ -58,6 +68,38 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("workflows.skill_dag")
+
+# ---------------------------------------------------------------------------
+# Session state helpers
+# ---------------------------------------------------------------------------
+
+def _extract_session_state(user_query: str) -> Dict[str, Any]:
+    """Parse the optional '## Session State' JSON block appended to the user query.
+
+    Returns a dict (possibly empty) with keys like last_found_paths,
+    last_found_folder, last_found_file_path, etc.
+    """
+    marker = "## Session State"
+    if marker not in user_query:
+        return {}
+    raw = user_query.split(marker, 1)[1].strip()
+    # The block is the JSON object that follows the marker
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, ValueError):
+        # Try to find just the first {...} block
+        m = re.search(r'\{.*\}', raw, re.DOTALL)
+        if m:
+            try:
+                data = json.loads(m.group(0))
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+    return {}
+
 
 # ---------------------------------------------------------------------------
 # Public entry-point
@@ -96,6 +138,12 @@ def run_skill_dag(
     t0 = time.time()
     llm_calls = 0
 
+    # ── Extract session state from enriched query (## Session State block) ──
+    # Used to resolve {__session__.field} tokens in LLM-planned kwargs.
+    session_vars = _extract_session_state(user_query)
+    if session_vars:
+        logger.debug("│  [%s] Session state extracted: %s", skill_name, str(session_vars)[:200])
+
     logger.info("┌─ [%s] Skill DAG START  query=%.100s", skill_name, user_query)
 
     # ── Step 1: Planning call ──────────────────────────────────────────────
@@ -129,8 +177,8 @@ def run_skill_dag(
         tool_name = step["tool"]
         raw_kwargs = step.get("kwargs", {})
 
-        # Resolve {previous_step} tokens in kwargs
-        kwargs = _resolve_kwargs(raw_kwargs, step_results)
+        # Resolve {previous_step} and {__session__.field} tokens in kwargs
+        kwargs = _resolve_kwargs(raw_kwargs, step_results, session_vars)
 
         logger.info(
             "│    [%s] step=%s  tool=%s  kwargs=%s",
@@ -174,6 +222,28 @@ def run_skill_dag(
                             if fp:
                                 artifacts_out["file_path"] = fp
                                 break
+                    # Also collect ALL search result paths so the next turn's
+                    # session state can populate last_found_paths / last_found_folder.
+                    all_result_paths = [
+                        item.get("path") or item.get("file_path")
+                        for item in result_raw.get("results", [])
+                        if isinstance(item, dict)
+                        and (item.get("path") or item.get("file_path"))
+                    ]
+                    if all_result_paths:
+                        existing = artifacts_out.get("found_paths", [])
+                        artifacts_out["found_paths"] = existing + all_result_paths
+                        # ── Auto-save manifest so the next turn can copy ALL found
+                        #    files reliably, regardless of session-state size limits.
+                        try:
+                            from src.files.features.file_ops import save_search_manifest  # noqa: PLC0415
+                            save_search_manifest(artifacts_out["found_paths"])
+                            logger.info(
+                                "│    [%s] manifest saved (%d paths)",
+                                skill_name, len(artifacts_out["found_paths"]),
+                            )
+                        except Exception as _me:
+                            logger.warning("│    [%s] manifest save failed: %s", skill_name, _me)
 
                 logger.info("│    [%s] ✔ step=%s succeeded", skill_name, step_id)
         except Exception as exc:
@@ -196,12 +266,13 @@ def run_skill_dag(
     )
 
     return {
-        "status":    status,
-        "message":   final_message,
-        "action":    "react_response",
-        "llm_calls": llm_calls,
-        "_dag_used": True,
-        "file_path": artifacts_out.get("file_path", ""),
+        "status":      status,
+        "message":     final_message,
+        "action":      "react_response",
+        "llm_calls":   llm_calls,
+        "_dag_used":   True,
+        "file_path":   artifacts_out.get("file_path", ""),
+        "found_paths": artifacts_out.get("found_paths", []),
     }
 
 
@@ -244,10 +315,27 @@ Output a JSON array — no markdown fences, no extra text — where each element
 Rules:
 - Use ONLY tools listed above.  Do NOT invent tool names.
 - kwargs must contain concrete, real values — never placeholders like "<value>" or "value1".
+- ⛔ NEVER produce a plan that asks the user for clarification or a missing value.
+  If a destination folder is not specified, use the default path from the skill context (<workspace>/data/).
+  Always plan a real tool call with a concrete value.
 - If a kwarg value depends on the output of a previous step, write it as {{step_id}} (the
   full result JSON string) or {{step_id.field}} to access a specific field, e.g.
   {{s1.results.0.path}} for the file path of the first search result from step s1.
   IMPORTANT: For file search results use .path (not .id) to get the actual file path.
+- If the user query includes a '## Session State' block, you can reference its fields with
+  {{__session__.<field>}} tokens.  For example, to pass ALL previously found file paths to
+  collect_files_to_folder without enumerating them: "file_paths": "{{__session__.last_found_paths}}"
+  The execution engine will replace this token with the actual Python list automatically.
+  ONLY use {{__session__.last_found_paths}} when the user refers to previously found files
+  using pronouns ("them", "those", "copy them", "send them", etc.).
+  If the user is making a FRESH SEARCH request ("Are there any X?", "Find Y", "Search for Z"),
+  IGNORE last_found_paths and plan normal search steps instead.
+- SEARCH STRATEGY: When the user asks for files by type ("image files", "video files", "pdf files"),
+  ALWAYS search by extension — NEVER by name. Plan one search_by_extension step per extension.
+  The execution engine automatically saves ALL results to the manifest — no explicit manifest step needed.
+  Image extensions: jpg, jpeg, png, gif, bmp, tiff, webp, ico, svg
+  Video extensions: mp4, avi, mov, mkv, wmv, flv
+  Document extensions: pdf, docx, xlsx, pptx, txt
 - Keep the plan minimal: include only the steps actually required.
 - Output ONLY the JSON array."""
 
@@ -261,7 +349,7 @@ Rules:
             model=llm.model,
             messages=messages,
             temperature=0.0,
-            max_tokens=1000,
+            max_tokens=2000,
         )
         raw = _strip_fences(response.choices[0].message.content.strip())
     except Exception as exc:
@@ -418,16 +506,33 @@ def _synthesize(
 def _resolve_kwargs(
     kwargs: Dict[str, Any],
     results: Dict[str, Any],
+    session_vars: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Substitute ``{step_id}`` / ``{step_id.field.subfield}`` tokens in string
     kwargs values using accumulated step results.
+
+    Also resolves ``{__session__.field}`` tokens using the parsed ## Session State
+    block.  When the resolved value is a Python list (e.g. last_found_paths) and
+    the *entire* kwarg value is the token, the kwarg is replaced with the real
+    list — not a string — so list-typed tool parameters receive proper values.
     """
+    _sv = session_vars or {}
     out: Dict[str, Any] = {}
 
     for key, val in kwargs.items():
         if isinstance(val, str) and '{' in val:
-            val = _TOKEN_PATTERN.sub(lambda m: _deep_get(m.group(1), results), val)
+            # Check for {__session__.field} — handle list values specially
+            sess_m = re.fullmatch(r'\{__session__\.([^}]+)\}', val.strip())
+            if sess_m:
+                field = sess_m.group(1)
+                resolved = _sv.get(field)
+                if resolved is not None:
+                    # Keep the native type (list, str, etc.) rather than stringifying
+                    out[key] = resolved
+                    continue
+            # Fall through to general {step_id} / {step_id.field} substitution
+            val = _TOKEN_PATTERN.sub(lambda m: _deep_get(m.group(1), results, _sv), val)
         out[key] = val
 
     return out
@@ -436,18 +541,44 @@ def _resolve_kwargs(
 _TOKEN_PATTERN = re.compile(r'\{([^}]+)\}')
 
 
-def _deep_get(path: str, results: Dict[str, Any]) -> str:
+def _deep_get(path: str, results: Dict[str, Any], session_vars: Optional[Dict[str, Any]] = None) -> str:
     """
     Resolve a dot-separated path like ``s1.results.0.id`` against the accumulated
     step results dict.  Returns the original ``{path}`` string if resolution fails.
+
+    Also handles ``__session__.<field>`` paths, resolving against the parsed
+    ## Session State dict.  List values are stringified (JSON) for safe embedding
+    in a larger string context; use the full-value token path in _resolve_kwargs
+    for proper list passthrough.
     """
     parts = path.split(".")
     step_id = parts[0]
 
+    # ── Session state reference ────────────────────────────────────────────
+    if step_id == "__session__":
+        sv = session_vars or {}
+        if len(parts) < 2:
+            return f"{{{path}}}"
+        field = parts[1]
+        data: Any = sv.get(field)
+        for part in parts[2:]:
+            if isinstance(data, dict):
+                data = data.get(part)
+            elif isinstance(data, list) and part.isdigit():
+                idx = int(part)
+                data = data[idx] if idx < len(data) else None
+            else:
+                data = None
+            if data is None:
+                return f"{{{path}}}"
+        if data is None:
+            return f"{{{path}}}"
+        return json.dumps(data) if isinstance(data, (list, dict)) else str(data)
+
     if step_id not in results:
         return f"{{{path}}}"   # leave token unchanged if step hasn't run yet
 
-    data: Any = results[step_id]
+    data = results[step_id]
 
     for part in parts[1:]:
         if isinstance(data, dict):

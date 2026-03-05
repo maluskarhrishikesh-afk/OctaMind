@@ -125,6 +125,18 @@ Guidelines:
 - For action requests, acknowledge and guide the user
 - Use appropriate emojis moderately (1-2 per response)
 - Keep responses focused and not overly long (2-4 sentences usually)
+
+Follow-up Suggestions:
+After EVERY response (including pure conversation), end with a short section:
+  "**You could also ask me to:**"
+  followed by 2-3 bullet points of actionable follow-up suggestions that are
+  contextually relevant to what you just did or discussed.
+  Examples of suggestion format:
+    - "Find another file on your laptop"
+    - "Mail the found file to you"
+    - "Schedule a reminder for later"
+    - "Check your unread emails"
+  Keep each suggestion to one short line. Never suggest something you already just did.
 """
 
         messages = [{"role": "system", "content": system_prompt}]

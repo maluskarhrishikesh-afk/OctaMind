@@ -110,6 +110,8 @@ Examples:
   "how are you?" → []
   "send an email to bob" → ["email"]
   "zip my Downloads folder" → ["files"]
+  "copy them to a folder" → ["files"]
+  "put those files in OctaMind" → ["files"]
   "zip the report and upload it to Drive" → ["files", "drive"]
   "zip folder, upload to Drive, then mail me" → ["files", "drive", "email"]
 

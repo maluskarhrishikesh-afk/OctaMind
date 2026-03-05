@@ -23,6 +23,24 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("hub_processor")
 
+# Structured logging helpers — correlation IDs thread through every skill/LLM call
+try:
+    from src.agent.logging.log_manager import (
+        bind_correlation, new_correlation_id,
+        bind_request, new_request_id,
+    )
+except Exception:  # graceful fallback so the hub never fails to import
+    def bind_correlation(cid: str) -> str: return cid  # type: ignore[misc]
+    def new_correlation_id() -> str: return "-"        # type: ignore[misc]
+    def bind_request(rid: str) -> str: return rid       # type: ignore[misc]
+    def new_request_id() -> str: return "-"            # type: ignore[misc]
+
+# Structured session-state builder — same module used by PA app
+try:
+    from src.agent.context.conversation_state import build_structured_query as _build_sq
+except Exception:
+    def _build_sq(task: str, history: list) -> str: return task  # type: ignore[misc]
+
 # ---------------------------------------------------------------------------
 # In-memory per-session conversation history
 # Key: session_id  →  list of {"role": "user"|"assistant", "content": str}
@@ -290,7 +308,14 @@ def _render_step_result(step: dict) -> str:
     tool = step.get("tool", "?")
     line = f"{icon} **{agent.title()}** — `{tool}`"
     if step.get("status") != "success":
-        line += f"\n   ⚠️ {step.get('error', 'Unknown error')}"
+        # step["error"] is None for skipped/partial states — fall back to
+        # the nested result message so users always see a meaningful reason.
+        error_msg = (
+            step.get("error")
+            or (step.get("result") or {}).get("message")
+            or "Unknown error"
+        )
+        line += f"\n   ⚠️ {error_msg}"
     return line
 
 
@@ -366,7 +391,12 @@ def _render_workflow_output(run_result: dict, original_command: str = "") -> str
     else:
         parts.append("❌ **Workflow failed.**")
         if not steps:
-            parts.append("\nCould not create a plan for this command. Try rephrasing it.")
+            parts.append(
+                "\n🤔 I wasn't sure what to do with that. "
+                "Could you rephrase or give me more detail? "
+                "For example: *'Find my payslip files and email them to me'* "
+                "or *'Zip the Payslips folder and send it to my email'*."
+            )
 
     for s in steps:
         parts.append(_render_step_result(s))
@@ -481,6 +511,14 @@ class HubProcessor:
             agent_name=agent_name,
         )
 
+        # Bind a fresh correlation ID for this turn — propagates into every
+        # skill / LLM call so all related log lines share the same corr= value.
+        _cid = bind_correlation(new_correlation_id())
+        logger.info(
+            "┌─ [Hub:%s] Turn START  corr=%s  session=%s  command=%.120s",
+            source, _cid, session_id, message,
+        )
+
         # Build conversation history for this session
         history = _SESSION_HISTORY.setdefault(session_id, [])
 
@@ -497,13 +535,21 @@ class HubProcessor:
 
         # Update session history with timestamps
         _ts = datetime.now(timezone.utc).isoformat()
+        _elapsed = round(time.perf_counter() - t0, 2)
         history.append({"role": "user", "content": message, "ts": _ts})
-        history.append({
+        _hist_entry: Dict[str, Any] = {
             "role": "assistant",
             "content": response_text,
             "ts": _ts,
-            "elapsed": round(time.perf_counter() - t0, 2),
-        })
+            "elapsed": _elapsed,
+        }
+        if file_artifacts:
+            _hist_entry["file_artifacts"] = file_artifacts
+        history.append(_hist_entry)
+        logger.info(
+            "└─ [Hub:%s] Turn END  corr=%s  status=%s  elapsed=%.2fs",
+            source, _cid, status, _elapsed,
+        )
         # Trim to keep memory bounded
         if len(history) > _MAX_HISTORY:
             _SESSION_HISTORY[session_id] = history[-_MAX_HISTORY:]
@@ -560,10 +606,87 @@ class HubProcessor:
 
         # Enrich bare time-slot follow-ups so the router recognises them
         routing_message = _enrich_scheduling_followup(req.message, history)
+        if routing_message != req.message:
+            logger.info("│  [ENRICH] Scheduling follow-up enriched: %.120s", routing_message)
+
+        # Build & log structured Session State — inject resolved entities
+        # (ISO dates, 24h times, files, e-mails) into the query before routing
+        # so agents receive exact values rather than raw natural-language text.
+        enriched_query = _build_sq(routing_message, history)
+        try:
+            # Extract and log just the JSON state block (everything after the
+            # '## Session State' line) for clean log readability.
+            _sq_marker = "## Session State"
+            if _sq_marker in enriched_query:
+                _state_json = enriched_query.split(_sq_marker, 1)[1].strip()
+                # Collapse to a single line for the log
+                _state_oneline = " ".join(_state_json.split())
+                logger.info("│  [SESSION STATE] %s", _state_oneline)
+        except Exception:
+            pass
 
         t_dispatch = time.perf_counter()
         _progress("🔍 Analyzing your request…")
         agents_needed = detect_agents_needed(routing_message)
+        logger.info(
+            "│  [ROUTE]  agents=%s  source=%s",
+            agents_needed or "conversational", req.source,
+        )
+
+        # ── Follow-up copy override: route to files when manifest exists ─────
+        # Handles "Can you copy them to a folder?" and similar pronoun-based
+        # copy queries that the LLM router may classify as conversational (None).
+        if agents_needed is None:
+            try:
+                from src.agent.ui.files_agent.orchestrator import _is_follow_up_copy as _fc
+                from src.files.features.file_ops import _DEFAULT_MANIFEST as _dfm
+                if _fc(req.message) and _dfm.exists():
+                    agents_needed = ["files"]
+                    logger.info(
+                        "│  [ROUTE-OVERRIDE]  follow-up copy + manifest exists → forced to ['files']"
+                    )
+            except Exception:
+                pass
+
+        # ── Smart routing upgrade: "mail/send them" with multiple found files ─
+        # When the router picks only ["email"] but session state has multiple
+        # previously-found file paths, upgrade to ["files", "email"] so the
+        # DAG planner handles zip-then-email automatically.
+        # Also: pronoun reference with no file context → return a clarification.
+        if agents_needed == ["email"]:
+            try:
+                import re as _re_routing
+                from src.agent.context.conversation_state import _default_tracker as _cst_tracker
+                _cst_state = _cst_tracker.build(history, req.message)
+                _found_paths = _cst_state.get("last_found_paths", [])
+                _found_folder = _cst_state.get("last_found_folder", "")
+                if len(_found_paths) > 1:
+                    agents_needed = ["files", "email"]
+                    logger.info(
+                        "│  [ROUTE-UPGRADE]  ['email'] → ['files','email']  "
+                        "(%d files in context — will zip before emailing)",
+                        len(_found_paths),
+                    )
+                elif len(_found_paths) == 0 and not _found_folder:
+                    _pronoun_re = _re_routing.compile(
+                        r'\b(them|those|those files|those documents|it|the files|'
+                        r'the documents|the folder|they)\b',
+                        _re_routing.IGNORECASE,
+                    )
+                    if _pronoun_re.search(req.message):
+                        logger.info(
+                            "│  [ROUTE-CLARIFY]  Pronoun reference + no file context → clarification"
+                        )
+                        return (
+                            "🤔 I'm not sure what to email — I don't have any files "
+                            "from a recent search in this conversation.\n\n"
+                            "Could you be more specific? For example:\n"
+                            "- *'Search for my payslip files and email them to me'*\n"
+                            "- *'Find the project report and send it to my email'*",
+                            [], "success", [],
+                        )
+            except Exception:
+                pass
 
         # ── 1. Conversational fallback ─────────────────────────────────────
         if agents_needed is None:
@@ -575,7 +698,9 @@ class HubProcessor:
         # ── 2. Single-agent shortcut ───────────────────────────────────────
         if len(agents_needed) == 1:
             _progress(f"⚙️ Running {agents_needed[0].title()} skill…")
-            reply, acts, artifacts = self._run_single_agent(agents_needed[0], req, query=routing_message)
+            # Pass the structurally-enriched query so the skill agent receives
+            # resolved entities (ISO dates, 24h times …) from Session State.
+            reply, acts, artifacts = self._run_single_agent(agents_needed[0], req, query=enriched_query)
             _llm_calls = acts[0].get("llm_calls", 1) if acts else 1
             _log_workflow_summary(
                 "⚙️ Skill DAG", agents_needed, _llm_calls,
@@ -586,7 +711,10 @@ class HubProcessor:
         # ── 3. Multi-agent workflow ────────────────────────────────────────
         _agents_str = " + ".join(a.title() for a in agents_needed)
         _progress(f"📋 Planning workflow: {_agents_str}…")
-        run_result = run_workflow(routing_message)
+        # Pass the enriched query (with ## Session State block) so the DAG
+        # planner can resolve context references like 'them' / 'those files'
+        # from session state (last_found_folder, last_found_paths, etc.).
+        run_result = run_workflow(enriched_query)
         response_text = _render_workflow_output(run_result, req.message)
         actions = [
             {"agent": s.get("agent"), "tool": s.get("tool"), "status": s.get("status")}
@@ -594,16 +722,24 @@ class HubProcessor:
         ]
         # Gather file artifacts from step results
         file_artifacts: List[str] = []
+        _seen_artifacts: set = set()
         for step in run_result.get("steps", []):
             res = step.get("result") or {}
             if isinstance(res, dict):
-                for key in ("file_path", "local_path", "path", "archive"):
+                # Primary file output (zip, report, etc.)
+                for key in ("file_path", "local_path", "path", "archive", "destination"):
                     fp = res.get(key)
-                    if fp and isinstance(fp, str):
-                        from pathlib import Path as _P
-                        if _P(fp).exists():
-                            file_artifacts.append(fp)
-                            break
+                    if fp and isinstance(fp, str) and fp not in _seen_artifacts and Path(fp).exists():
+                        file_artifacts.append(fp)
+                        _seen_artifacts.add(fp)
+                        break
+                # Collect individual search results (files found by search_file_all_drives etc.)
+                for r in res.get("results", []):
+                    if isinstance(r, dict):
+                        rp = r.get("path", "")
+                        if rp and isinstance(rp, str) and rp not in _seen_artifacts and Path(rp).exists():
+                            file_artifacts.append(rp)
+                            _seen_artifacts.add(rp)
         _total_llm = sum(s.get("llm_calls", 0) for s in run_result.get("steps", []))
         _log_workflow_summary(
             "📋 Multi-Agent DAG", agents_needed, _total_llm,
@@ -670,16 +806,34 @@ class HubProcessor:
                 return f"❌ Agent '{agent}' is registered but could not be loaded.", [], []
 
             effective_query = query if query is not None else req.message
+            # ── Context Manifest injection ────────────────────────────────
+            # Prepend any persisted cross-turn context (email listing, calendar
+            # events, drive files, file search results) so the LLM never
+            # re-asks for information already resolved in the previous turn.
+            try:
+                from src.agent.manifest.context_manifest import inject_context_into_query as _ctxinj  # noqa: PLC0415
+                effective_query = _ctxinj(effective_query)
+            except Exception:
+                pass
+            # ─────────────────────────────────────────────────────────────
             # Pass an artifacts_out dict so sub-agents can surface file paths
             artifacts_out: Dict[str, Any] = {}
             result = executor(effective_query, agent_id=None, artifacts_out=artifacts_out)
             action = result.get("action", "react_response")
 
-            # Collect file artifacts
+            # Collect file artifacts — primary output + all found search paths
             file_artifacts: List[str] = []
+            _seen_fa: set = set()
             fp = artifacts_out.get("file_path") or result.get("file_path")
-            if fp and isinstance(fp, str) and _P(fp).exists():
+            if fp and isinstance(fp, str) and _P(fp).exists() and fp not in _seen_fa:
                 file_artifacts.append(fp)
+                _seen_fa.add(fp)
+            # Also collect ALL paths returned by search/list operations so the
+            # next turn can resolve 'them'/'those files' via last_found_paths.
+            for rp in artifacts_out.get("found_paths", result.get("found_paths", [])):
+                if rp and isinstance(rp, str) and rp not in _seen_fa and _P(rp).exists():
+                    file_artifacts.append(rp)
+                    _seen_fa.add(rp)
 
             # ReAct / NL orchestrators return a ready-made message
             if action == "react_response" or "message" in result:

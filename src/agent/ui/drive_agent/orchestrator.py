@@ -38,6 +38,7 @@ get_sharing_stats(file_id) – Show all permissions for a file: who has access, 
 suggest_archival(folder_id="root", months_old=6, max_results=25) – Find files not modified in N months. Use for 'what can I archive?' or 'show stale files'.
 backup_drive_to_local(folder_id, output_dir, max_files=100) – Download all files from a Drive folder to a local directory. Google Docs/Sheets exported as PDF/XLSX.
 sync_local_folder_to_drive(local_path, drive_folder_id, dry_run=True) – Upload new or modified files from a local folder to Drive. Always dry_run=True first.
+save_context(topic, resolved_entities, awaiting="") – Persist the current Drive file listing for the next turn so the user can say "share the second one" without searching again. topic="drive_listing", resolved_entities={"listed_files":[{"id":"...","name":"...","mimeType":"..."}]}, awaiting="drive_file_action".
 """.strip()
 
 _SKILL_CONTEXT = """
@@ -52,25 +53,42 @@ For storage questions ("how much space do I have?", "what's eating my storage?")
 For duplicate cleanup: call find_drive_duplicates() to show groups, then trash_drive_duplicates() to clean.
 For format conversion: use convert_document(file_id, output_format) — supports pdf, docx, xlsx, pptx, csv, txt.
 For permission management: use manage_file_permissions(file_id, 'list') to see who has access, then 'remove'/'update' to modify.
+
+CONTEXT MANIFEST (cross-turn awareness):
+After EVERY call to list_files or search_files, context is AUTOMATICALLY saved to the manifest — no extra step needed.
+This means the user can say "share the second one" or "download the PDF" on the next turn without searching again.
+If you need to save context for edge cases not covered by the auto-wrap, use the save_context tool via call_tool.
 """.strip()
 
 
 def _get_tools() -> Dict[str, Any]:
     from src.drive import drive_service as ds  # noqa: PLC0415
+    from src.agent.manifest.context_manifest import (  # noqa: PLC0415
+        auto_save_drive_context, make_save_context_tool,
+    )
 
-    return {
-        "list_files": lambda query="", max_results=20, folder_id=None: ds.list_files(
+    def list_files(query: str = "", max_results: int = 20, folder_id=None) -> list:
+        result = ds.list_files(
             max_results=int(max_results) if max_results else 20,
             query=query or "",
             folder_id=folder_id or "root",
-        ),
-        "search_files": lambda name="", file_type="", max_results=10: ds.search_files(
-            query=" and ".join(filter(None, [
-                (f"name contains '{name}'" if name else ""),
-                (f"mimeType='{file_type}'" if file_type else ""),
-            ])) or "",
+        )
+        return auto_save_drive_context(result, query or "")
+
+    def search_files(name: str = "", file_type: str = "", max_results: int = 10) -> list:
+        q = " and ".join(filter(None, [
+            (f"name contains '{name}'" if name else ""),
+            (f"mimeType='{file_type}'" if file_type else ""),
+        ])) or ""
+        result = ds.search_files(
+            query=q,
             max_results=int(max_results) if str(max_results).isdigit() else 10,
-        ),
+        )
+        return auto_save_drive_context(result, name or file_type or "")
+
+    return {
+        "list_files":   list_files,
+        "search_files": search_files,
         "get_file_info": lambda file_id: ds.get_file_info(file_id),
         "upload_file": lambda local_path, name="", folder_id=None, mime_type=None: ds.upload_file(local_path, name, folder_id, mime_type),
         "download_file": lambda file_id, local_path: ds.download_file(file_id, local_path),
@@ -100,6 +118,8 @@ def _get_tools() -> Dict[str, Any]:
         "suggest_archival":   lambda folder_id="root", months_old=6, max_results=25: ds.suggest_archival(folder_id, months_old, max_results),
         "backup_drive_to_local": lambda folder_id, output_dir, max_files=100: ds.backup_drive_to_local(folder_id, output_dir, max_files),
         "sync_local_folder_to_drive": lambda local_path, drive_folder_id, dry_run=True: ds.sync_local_folder_to_drive(local_path, drive_folder_id, dry_run),
+        # ── Context Manifest ──────────────────────────────────────────────
+        "save_context": make_save_context_tool("drive"),
     }
 
 

@@ -13,6 +13,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +22,7 @@ import streamlit as st
 from src.agent.ui.dashboard.styles import inject_agent_css
 from src.agent.ui.personal_assistant.helpers import _logo_b64, _logo_icon, _logo_path, _logo_pinkraven, _start_browser_watchdog, get_running_agents
 from src.agent.hub.pa_manager import load_assistants, create_assistant, delete_assistant
+from src.agent.context.conversation_state import build_structured_query as _build_structured_query
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 # Logging is initialised in main() once the PA name is known so the log file
@@ -123,6 +125,17 @@ _SCHEDULING_CONTEXT_KEYWORDS = frozenset({
     "calendar", "appointment", "block", "time", "best time",
 })
 
+# Detect scheduling verbs & nouns in the user's own command (for Case 3)
+_CMD_SCHEDULING_VERB_RE = _re.compile(
+    r"\b(schedule|book|set\s+up|add|create|plan)\b", _re.IGNORECASE
+)
+_CMD_SCHEDULING_NOUN_RE = _re.compile(
+    r"\b(meeting|session|appointment|call|event|standup|sync|block)\b", _re.IGNORECASE
+)
+_CMD_TIME_RE = _re.compile(
+    r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b", _re.IGNORECASE
+)
+
 # Temporal references to carry forward into the enriched scheduling command.
 # Scans BOTH user and assistant messages so dates spoken by either party
 # are captured and injected into the new command.
@@ -164,9 +177,13 @@ def _enrich_scheduling_followup(command: str, history: list) -> str:
     correctly dispatches them to the calendar agent instead of treating them
     as conversational noise.
 
-    Handles two cases:
+    Handles three cases:
     1. Bare time reply — e.g. '2 PM to 3 PM' after the bot suggested slots.
     2. Event-title reply — e.g. 'Abs Gym' after the bot asked for a title.
+    3. Scheduling command with time but no date — e.g. 'Schedule a meeting at
+       8 PM for Gym Session' after the bot confirmed '12th March is free'.
+       The date from history is injected so quick_add_event receives a fully-
+       qualified expression and doesn't silently fall back to today's date.
 
     Temporal context (dates like '7th March', 'tomorrow') is extracted from
     recent history and injected into the enriched command so the calendar agent
@@ -227,32 +244,94 @@ def _enrich_scheduling_followup(command: str, history: list) -> str:
                     f" in my calendar"
                 )
 
+    # ── Case 3: scheduling command with time but no date ────────────────────
+    # Trigger when: user issues a scheduling command that contains a time
+    # (e.g. "at 8 PM") but no explicit date, while recent history mentions a
+    # specific date (e.g. the assistant just said "12th March is free").
+    # We inject the date directly into the command string so the calendar LLM
+    # and quick_add_event always receive a fully-qualified date+time, eliminating
+    # the risk of the event being booked on today's date by default.
+    if (
+        _CMD_SCHEDULING_VERB_RE.search(stripped)
+        and _CMD_SCHEDULING_NOUN_RE.search(stripped)
+        and _CMD_TIME_RE.search(stripped)
+        and not _TEMPORAL_PATTERN.search(stripped)          # no date in the command itself
+    ):
+        recent_messages = history[-8:] if len(history) >= 8 else history
+        _vague_re = _re.compile(
+            r"^(today|tonight|yesterday|monday|tuesday|wednesday|"
+            r"thursday|friday|saturday|sunday|march|april|may|"
+            r"june|july|august|september|october|november|december|"
+            r"january|february)$", _re.IGNORECASE
+        )
+
+        # Prefer dates from the most recent USER message (user intent is
+        # authoritative). Old ASSISTANT confirmations can contain stale dates
+        # (e.g. a prior booking on "11th March") that would otherwise win via
+        # max(key=len) since they often include the year ("11th March 2026").
+        best_date = None
+        for msg in reversed(recent_messages):
+            if msg.get("role") != "user":
+                continue
+            user_temporal = _TEMPORAL_PATTERN.findall(msg.get("content", "").lower())
+            concrete = [t for t in user_temporal if not _vague_re.match(t.strip())]
+            if concrete:
+                best_date = max(concrete, key=len)  # longest within single message
+                break
+
+        # Fall back to all messages (both user and assistant) if no user date found
+        if not best_date:
+            recent_text_lower = " ".join(m.get("content", "") for m in recent_messages).lower()
+            all_temporal = _TEMPORAL_PATTERN.findall(recent_text_lower)
+            concrete_all = [t for t in all_temporal if not _vague_re.match(t.strip())]
+            if concrete_all:
+                best_date = max(concrete_all, key=len)
+
+        if best_date:
+            return f"{stripped} on {best_date}"
+
     return command
 
 
 def _inject_conversation_context(command: str, history: list) -> str:
     """
-    For short follow-up commands (≤ 80 chars), prepend the last 2 conversation
-    exchanges so the skill agent has context to work with.
+    Enriches a skill-agent command with a structured JSON state block derived
+    from the conversation history.
 
-    Example: 'Make it 3 PM instead' becomes
-    '(Context — User: schedule gym on 7th march at 2 PM  Assistant: ...)
-    Make it 3 PM instead'
+    Replaces the old free-text context prepend with a deterministic
+    ``## Session State`` JSON section that the LLM can read unambiguously.
+    Entities are RESOLVED before injection (e.g. "12th March" → "2026-03-12")
+    so the skill agent receives exact values, not raw text.
+
+    Example output (appended after the task):
+
+        Schedule a meeting at 8 PM for Gym Session
+
+        ## Session State (structured — prefer these resolved values over raw text)
+        {
+          "current_date": "2026-03-04",
+          "timezone": "IST (UTC+05:30)",
+          "active_date": "2026-03-12",
+          "active_time_start": "20:00",
+          "last_assistant_action": "Your calendar is completely free on 12th March …"
+        }
     """
-    if len(command.strip()) > 80 or len(history) < 2:
-        return command  # Standalone command — no injection needed
+    if not history:
+        return command  # No history — nothing to enrich
 
-    # Collect the last 2 assistant+user pairs (up to 4 messages)
-    recent = history[-4:] if len(history) >= 4 else history
-    context_lines = []
-    for m in recent[:-1]:  # Exclude the current user message (already = command)
-        role = "User" if m["role"] == "user" else "Assistant"
-        snippet = str(m.get("content", ""))[:120].replace("\n", " ")
-        context_lines.append(f"{role}: {snippet}")
-    if not context_lines:
-        return command
-    context_str = "  |  ".join(context_lines)
-    return f"(Recent context — {context_str})\n{command}"
+    enriched = _build_structured_query(command, history)
+
+    # ── Log the resolved Session State for observability ─────────────────
+    try:
+        from src.agent.context.conversation_state import _default_tracker as _tracker
+        import json as _json_log
+        _state = _tracker.build(history, command)
+        _state_str = _json_log.dumps(_state, ensure_ascii=False)
+        logger.info("┤ [SESSION STATE] %s", _state_str)
+    except Exception:
+        pass
+
+    return enriched
 
 
 def _chat_response(message: str, agent_name: str, agent_id: str = None,
@@ -399,7 +478,13 @@ def _render_step_result(step_result: dict) -> str:
     label = _format_step_badge(agent)
     line = f"{status_icon} **{label}** — `{tool}`"
     if step_result["status"] == "error":
-        line += f"\n   ⚠️ {step_result.get('error', 'Unknown error')}"
+        # step_result["error"] can be None — fall back to nested message.
+        _err = (
+            step_result.get("error")
+            or (step_result.get("result") or {}).get("message")
+            or "Unknown error"
+        )
+        line += f"\n   ⚠️ {_err}"
     return line
 
 
@@ -495,7 +580,11 @@ def _render_workflow_output(run_result: dict, original_command: str = "") -> str
 
     if status == "error" and not steps:
         parts.append(
-            "\nCould not create a plan for this command. Try rephrasing it.")
+            "\n🤔 I wasn't sure what to do with that. "
+            "Could you rephrase or give me a bit more detail? "
+            "For example: *'Find my payslip files and email them to me'* "
+            "or *'Zip the Payslips folder and send it to my email'*."
+        )
 
     return "\n".join(parts)
 
@@ -1070,7 +1159,14 @@ def _render_pa_chat(pa: dict) -> None:
     command = st.session_state[mk("command")]
     st.session_state[mk("command")] = None   # clear so it doesn't re-run on next rerun
 
-    # Detect emotional signals in the user's message (zero extra LLM calls)
+    # ── Bind a fresh correlation ID to this turn so every log line for this
+    # ── request — across all skills — shares the same corr= identifier.
+    _cid = bind_correlation(new_correlation_id())
+    _t_turn = time.perf_counter()
+    logger.info(
+        "┌─ [PA:%s] Turn START  corr=%s  command=%.120s",
+        pa_name, _cid, command,
+    )
     _emotion_result = _detect_emotion(command)
     _emotion_label  = _emotion_result[0] if _emotion_result else None
     _emotion_hint   = _emotion_result[1] if _emotion_result else ""
@@ -1088,7 +1184,13 @@ def _render_pa_chat(pa: dict) -> None:
     _routing_command = _enrich_scheduling_followup(
         command, st.session_state.get(mk("messages"), [])
     )
+    if _routing_command != command:
+        logger.info("│  [ENRICH] Scheduling follow-up enriched: %.120s", _routing_command)
     agents_needed = detect_agents_needed(_routing_command)
+    logger.info(
+        "│  [ROUTE]  agents=%s  source=dashboard  pa=%s",
+        agents_needed or "conversational", pa_name,
+    )
 
     # Filter to only this PA's attached skills
     if agents_needed is not None and pa_skills:
@@ -1109,6 +1211,55 @@ def _render_pa_chat(pa: dict) -> None:
             st.rerun()
         agents_needed = filtered
 
+    # ── Smart routing upgrade: "mail/send them" with multiple found files ─────
+    # When the router picks only ["email"] but session state contains multiple
+    # previously-found file paths, the user almost certainly wants zip-then-email
+    # (not 3 separate emails).  Upgrade to ["files", "email"] so the DAG planner
+    # handles the zip step automatically.
+    # Also: if the command uses pronouns ("them", "those") but NO files exist in
+    # context, show a clear clarification message instead of silently failing.
+    if agents_needed == ["email"]:
+        try:
+            from src.agent.context.conversation_state import _default_tracker as _cst_tracker
+            import re as _re_routing
+            _cst_state = _cst_tracker.build(
+                st.session_state.get(mk("messages"), []), command
+            )
+            _found_paths = _cst_state.get("last_found_paths", [])
+            _found_folder = _cst_state.get("last_found_folder", "")
+            if len(_found_paths) > 1:
+                agents_needed = ["files", "email"]
+                logger.info(
+                    "│  [ROUTE-UPGRADE]  ['email'] → ['files','email']  "
+                    "(%d files in context — will zip before emailing)",
+                    len(_found_paths),
+                )
+            elif len(_found_paths) == 0 and not _found_folder:
+                # No files in context — check if command uses a pronoun reference
+                _pronoun_re = _re_routing.compile(
+                    r'\b(them|those|those files|those documents|it|the files|'
+                    r'the documents|the folder|they)\b',
+                    _re_routing.IGNORECASE,
+                )
+                if _pronoun_re.search(command):
+                    logger.info(
+                        "│  [ROUTE-CLARIFY]  Pronoun reference + no file context → clarification"
+                    )
+                    _clarify_msg = (
+                        "🤔 I'm not sure what to email — I don't have any files from a "
+                        "recent search in this conversation.\n\n"
+                        "Could you be more specific? For example:\n"
+                        "- *'Search for my payslip files and email them to me'*\n"
+                        "- *'Find the project report and send it to my email'*"
+                    )
+                    _result_ph.markdown(_clarify_msg)
+                    st.session_state[mk("messages")].append({"role": "assistant", "content": _clarify_msg})
+                    _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+                    st.session_state[mk("processing")] = False
+                    st.rerun()
+        except Exception:
+            pass
+
     # ── Conversational (no skill needed) ─────────────────────────────────────
     if agents_needed is None:
         _card_ph.markdown(
@@ -1117,6 +1268,7 @@ def _render_pa_chat(pa: dict) -> None:
             unsafe_allow_html=True)
         _pa_history = st.session_state.get(mk("messages"), [])
         reply = _chat_response(command, pa_name, pa_id, emotion_hint=_emotion_hint, history=_pa_history)
+        logger.info("└─ [PA:%s] Turn END (conversational)  elapsed=%.2fs", pa_name, time.perf_counter() - _t_turn)
         _card_ph.markdown(_status_card("✅ Done", [], "complete"), unsafe_allow_html=True)
         _result_ph.markdown(reply)
         st.session_state[mk("messages")].append({"role": "assistant", "content": reply})
@@ -1171,6 +1323,11 @@ def _render_pa_chat(pa: dict) -> None:
             _card_ph.markdown(
                 _status_card("❌ Error", [str(exc)[:120]], "error"),
                 unsafe_allow_html=True)
+
+        logger.info(
+            "└─ [PA:%s] Turn END (skill=%s)  status=%s  elapsed=%.2fs",
+            pa_name, single_agent, _result_status, time.perf_counter() - _t_turn,
+        )
 
         if _result_status == "auth_error":
             _result_ph.markdown(
@@ -1233,7 +1390,13 @@ def _render_pa_chat(pa: dict) -> None:
         unsafe_allow_html=True)
 
     try:
-        run_result = run_workflow(command)
+        # Enrich the command with structured Session State (last_found_paths,
+        # last_found_folder, dates, etc.) so the DAG planner can resolve context
+        # references like "them", "those files", "the folder" correctly.
+        _enriched_for_workflow = _inject_conversation_context(
+            command, st.session_state.get(mk("messages"), [])
+        )
+        run_result = run_workflow(_enriched_for_workflow)
         _total_steps = len(run_result.get("steps", []))
         _step_lines = []
         for _i, sr in enumerate(run_result.get("steps", []), 1):
@@ -1321,6 +1484,11 @@ def _render_pa_chat(pa: dict) -> None:
 
     st.session_state[mk("messages")].append({"role": "assistant", "content": final_text})
     _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+    logger.info(
+        "└─ [PA:%s] Turn END (workflow agents=%s)  status=%s  elapsed=%.2fs",
+        pa_name, agents_needed, run_result.get("status", "error"),
+        time.perf_counter() - _t_turn,
+    )
     st.session_state[mk("processing")] = False
     st.rerun()
 

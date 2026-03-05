@@ -57,8 +57,26 @@ class GmailServiceClient:
         """Initialize the Gmail service client"""
         self.gmail_service = get_gmail_service()
         self.user_id = 'me'
+        self._actual_email: str = ''   # resolved lazily on first send
         # Initialize summarizer (lazy loading)
         self._summarizer = None
+
+    def _resolve_recipient(self, to: str) -> str:
+        """Resolve pseudo-address 'me' / 'myself' / 'self' to the authenticated
+        Gmail address.  The Gmail API accepts 'me' as a userId parameter but
+        rejects it as a MIME To: header value ("Invalid To header" 400 error).
+        """
+        _pseudo = {'me', 'myself', 'self', 'my email', 'my address', 'my email address'}
+        if to.strip().lower() in _pseudo:
+            if not self._actual_email:
+                try:
+                    profile = self.gmail_service.users().getProfile(userId='me').execute()
+                    self._actual_email = profile.get('emailAddress', '')
+                except Exception:
+                    pass
+            if self._actual_email:
+                return self._actual_email
+        return to
 
     @property
     def summarizer(self):
@@ -83,6 +101,7 @@ class GmailServiceClient:
         Returns:
             Dictionary containing messageId, threadId, and status
         """
+        to = self._resolve_recipient(to)
         try:
             message_obj = create_message(
                 self.user_id, to=to, subject=subject, message_text=message)
@@ -130,6 +149,7 @@ class GmailServiceClient:
         if isinstance(attachment_path, dict):
             attachment_path = attachment_path.get("local_path", "")
 
+        to = self._resolve_recipient(to)
         try:
             msg = MIMEMultipart()
             msg["to"] = to
