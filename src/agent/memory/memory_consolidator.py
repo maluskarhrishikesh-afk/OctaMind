@@ -6,7 +6,7 @@ Implements automatic memory consolidation following memory_architecture.md:
 - Episodic memory → Semantic memory (repeated themes)
 - Habit detection (3+ confirmations required)
 - 90-day decay mechanism
-- Consciousness updates (periodic meta-summaries)
+- Self reflection updates (periodic meta-summaries)
 
 This mimics human sleep consolidation where short-term memories
 are consolidated into long-term storage.
@@ -31,7 +31,7 @@ class MemoryConsolidator:
     1. Extract patterns from working memory → semantic memory
     2. Detect habits from repeated behaviors (3+ confirmations)
     3. Apply 90-day decay to episodic memory
-    4. Update consciousness layer with meta-summaries
+    4. Update self reflection layer with meta-summaries
     5. Archive old low-importance memories
     """
 
@@ -48,7 +48,9 @@ class MemoryConsolidator:
 
         # Load persisted state (survives restarts)
         self.last_consolidation = None
-        self.last_consciousness_update = None
+        self.last_self_reflection_update = None
+        # Backward-compat alias so external code reading this attribute still works
+        self.last_consciousness_update: datetime | None = None
         self._load_state()
 
     # ============ Main Consolidation Entry Point ============
@@ -103,16 +105,18 @@ class MemoryConsolidator:
                     logger.info(
                         f"Loaded last consolidation: {self.last_consolidation}")
 
-                if state.get('last_consciousness_update'):
-                    self.last_consciousness_update = datetime.fromisoformat(
-                        state['last_consciousness_update'])
+                if state.get('last_self_reflection_update') or state.get('last_consciousness_update'):
+                    raw = state.get('last_self_reflection_update') or state.get('last_consciousness_update')
+                    self.last_self_reflection_update = datetime.fromisoformat(raw)
+                    self.last_consciousness_update = self.last_self_reflection_update  # compat alias
                     logger.info(
-                        f"Loaded last consciousness update: {self.last_consciousness_update}")
+                        f"Loaded last self_reflection update: {self.last_self_reflection_update}")
 
             except Exception as e:
                 logger.error(f"Failed to load consolidation state: {e}")
                 # Start fresh if state file is corrupted
                 self.last_consolidation = None
+                self.last_self_reflection_update = None
                 self.last_consciousness_update = None
         else:
             logger.debug("No consolidation state file found, starting fresh")
@@ -126,7 +130,9 @@ class MemoryConsolidator:
         try:
             state = {
                 'last_consolidation': self.last_consolidation.isoformat() if self.last_consolidation else None,
-                'last_consciousness_update': self.last_consciousness_update.isoformat() if self.last_consciousness_update else None
+                'last_self_reflection_update': self.last_self_reflection_update.isoformat() if self.last_self_reflection_update else None,
+                # kept for backward compat with older state files
+                'last_consciousness_update': self.last_self_reflection_update.isoformat() if self.last_self_reflection_update else None,
             }
 
             with open(self.state_file, 'w', encoding='utf-8') as f:
@@ -168,13 +174,13 @@ class MemoryConsolidator:
         # Step 4: Apply 90-day decay
         self._apply_decay_mechanism()
 
-        # Step 5 + 6: Update consciousness & adapt personality (same cadence: ~2 weeks)
-        # Evaluate the gate ONCE — _update_consciousness_layer() advances the
-        # timestamp inside, so a second call to should_update_consciousness()
+        # Step 5 + 6: Update self reflection & adapt personality (same cadence: ~2 weeks)
+        # Evaluate the gate ONCE — _update_self_reflection_layer() advances the
+        # timestamp inside, so a second call to _should_update_self_reflection()
         # would incorrectly return False for the personality step.
-        _run_consciousness_update = self._should_update_consciousness()
-        if _run_consciousness_update:
-            self._update_consciousness_layer()
+        _run_reflection_update = self._should_update_self_reflection()
+        if _run_reflection_update:
+            self._update_self_reflection_layer()
             self._update_user_personality_observations()
 
         # Step 7 (multi-agent only): Synthesise collective consciousness
@@ -660,37 +666,42 @@ class MemoryConsolidator:
                     f"{len(by_month)} monthly archive file(s)"
                 )
 
-    # ============ Consciousness Layer Updates ============
+    # ============ Self Reflection Layer Updates ============
 
-    def _should_update_consciousness(self) -> bool:
+    def _should_update_self_reflection(self) -> bool:
         """
-        Check if consciousness layer should be updated
+        Check if self reflection layer should be updated
 
         Update frequency: Every 2-4 weeks
 
         Returns:
             True if update is needed
         """
-        if not self.last_consciousness_update:
+        if not self.last_self_reflection_update:
             # First time — update if we have at least a handful of interactions.
             # Threshold is intentionally low (5) so that even a freshly set-up
-            # system generates a consciousness file after the very first session.
+            # system generates a self_reflection file after the very first session.
             interactions = self.memory.get_recent_interactions(count=50)
             return len(interactions) >= 5
 
         # Check if 2 weeks have passed
-        days_since = (datetime.now() - self.last_consciousness_update).days
+        days_since = (datetime.now() - self.last_self_reflection_update).days
         return days_since >= 14
 
-    def _update_consciousness_layer(self):
+    # Backward-compat alias
+    def _should_update_consciousness(self) -> bool:
+        """Alias for _should_update_self_reflection() — kept for backward compatibility."""
+        return self._should_update_self_reflection()
+
+    def _update_self_reflection_layer(self):
         """
-        Update consciousness meta-summary layer.
+        Update self reflection meta-summary layer.
 
         Synthesises a manager-level mental model of the user by reading
         ALL memory layers: working, episodic, semantic, and habits.
         This gives the richest possible picture of the user.
         """
-        logger.info("Updating consciousness layer...")
+        logger.info("Updating self reflection layer...")
 
         now_str = datetime.now().strftime("%Y-%m-%d")
 
@@ -781,9 +792,15 @@ class MemoryConsolidator:
         self.memory.update_consciousness(
             "Trust & Safety Profile", safety_section)
 
-        self.last_consciousness_update = datetime.now()
+        self.last_self_reflection_update = datetime.now()
+        self.last_consciousness_update = self.last_self_reflection_update  # compat alias
         self._save_state()
-        logger.info("Consciousness layer updated (all memory layers used)")
+        logger.info("Self reflection layer updated (all memory layers used)")
+
+    # Backward-compat alias
+    def _update_consciousness_layer(self):
+        """Alias for _update_self_reflection_layer() — kept for backward compatibility."""
+        self._update_self_reflection_layer()
 
     # ============ User Personality Observations → Personality.md ============
 

@@ -20,6 +20,7 @@
 10. [LLM Context Management](#llm-context-management)
 11. [On-Demand Episodic Recall](#on-demand-episodic-recall)
 12. [Recall System Improvements (Feb 2026)](#recall-system-improvements)
+13. [FAISS Semantic Memory Search](#faiss-semantic-memory-search)
 
 ---
 
@@ -32,8 +33,8 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 - ✅ Extract and maintain learned knowledge about the **user** (Semantic Memory)
 - ✅ Maintain stable identity (Personality)
 - ✅ Learn confirmed behavioural patterns after 3+ occurrences, including day-of-week and time-of-day habits (Habits)
-- ✅ Develop a big-picture manager-level mental model of the user — synthesised from ALL memory layers (Consciousness)
-- ✅ **Multi-agent only:** Synthesise a cross-domain user model from all sub-agents' consciousness layers (Collective Consciousness)
+- ✅ Develop a big-picture manager-level mental model of the user — synthesised from ALL memory layers (Self Reflection)
+- ✅ **Multi-agent only:** Synthesise a cross-domain user model from all sub-agents' self reflection layers (Collective Consciousness)
 
 ### Key Features
 
@@ -60,16 +61,16 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 | `semantic_memory.md` | Learned facts about the user — preferences, recurring needs, background, values, people | Consolidation engine                            | Slow                            |                   ✅ Last 3 000 chars only                   |                     Never archived (caps protect LLM)                      |
 | `personality.md`     | Who the agent is: tone, communication style, goals. **Two auto-managed sections rewritten each consolidation cycle:** `Observed User Personality` and `Adapted Communication Style` — these capture how the user communicates and shape how the agent responds. **PA Hub: hard-coded protective persona** | Manual (stable sections) / Consolidation engine (adaptive sections). PA Hub: always restored on init | Barely — auto sections are rewritten not appended |                   ✅ Full file (no cap)                      |                Auto-managed sections rewritten; stable sections never change                |
 | `habits.md`          | Confirmed user behavioural patterns (3+ occurrences). Captures day-of-week, time-of-day, and action-type patterns | Consolidation engine | Slow |                     ✅ Last 3 000 chars                      |                     Never archived (caps protect LLM)                      |
-| `consciousness.md`   | Big-picture manager-level mental model of the user. Synthesised from ALL memory layers | Consolidation engine (every 2–4 weeks) | Very slow |                   ✅ Full file (no cap)                      |                               Never archived                               |
-| `collective_consciousness.md` | **PA Hub only.** Cross-domain synthesis of every skill agent’s `consciousness.md` | Consolidation engine (each cycle for `_collective_memory_`) | Very slow | ✅ Full file (no cap) | Never archived |
+| `self_reflection.md` | Big-picture manager-level mental model of the user. Synthesised from ALL memory layers. Captures lessons learned from past strategies and errors | Consolidation engine (every 2–4 weeks) | Very slow |                   ✅ Full file (no cap)                      |                               Never archived                               |
+| `collective_consciousness.md` | **PA Hub only.** Cross-domain synthesis of every skill agent’s `self_reflection.md` | Consolidation engine (each cycle for `_collective_memory_`) | Very slow | ✅ Full file (no cap) | Never archived |
 
 ### Rule of thumb
 
 - **User sends a message** → `working_memory.md` gains one entry (oldest dropped if > 10). Emotion detection (`_detect_emotion`) runs immediately — if detected, an empathy note is injected into the LLM prompt at zero extra cost.
 - **App boots** → `start.py` / `start.exe` launches a **dedicated consolidation process** (`src/agent/memory/run_consolidation.py --loop`) that runs immediately and then every **8 hours**. The Streamlit dashboard also starts a `ConsolidationRunner` daemon thread as a secondary fallback.
-- **Each consolidation cycle:** (1) working memory patterns → `semantic_memory.md`; (2) episodic themes → `semantic_memory.md`; (3) day-of-week/time-of-day patterns → `habits.md`; (4) 90-day decay; (5) consciousness update if 2+ weeks since last; (6) **personality evolution** — rewrites `Observed User Personality` and `Adapted Communication Style` sections in `personality.md` based on recent interaction analysis; (7) PA hub → `collective_consciousness.md`.
+- **Each consolidation cycle:** (1) working memory patterns → `semantic_memory.md`; (2) episodic themes → `semantic_memory.md`; (3) day-of-week/time-of-day patterns → `habits.md`; (4) 90-day decay; (5) self reflection update if 2+ weeks since last; (6) **personality evolution** — rewrites `Observed User Personality` and `Adapted Communication Style` sections in `personality.md` based on recent interaction analysis; (7) PA hub → `collective_consciousness.md`.
 - **Event is 90 days old** → Low importance deleted, Medium moved to `archive/episodic_YYYY_MM.md`, High kept forever.
-- **Every LLM call** → last 10 working memory interactions sent. `personality.md` and `consciousness.md` sent in full. `habits.md` and `semantic_memory.md` capped at 3 000 chars. `episodic_memory.md` excluded by default (on-demand recall only). Multi-agent additionally sends `collective_consciousness.md` in full.
+- **Every LLM call** → last 10 working memory interactions sent. `personality.md` and `self_reflection.md` sent in full. `habits.md` and `semantic_memory.md` capped at 3 000 chars. `episodic_memory.md` excluded by default (on-demand recall only). Multi-agent additionally sends `collective_consciousness.md` in full.
 - **User asks “do you remember X?”** → `recall_for_llm()` runs before the LLM call, searches episodic/working/semantic on demand, and injects only matching entries into the prompt for that single turn.
 
 ### What gets summarised vs archived
@@ -79,7 +80,7 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 | **Summarised**     | `working_memory.md` entries are distilled into `semantic_memory.md` and `episodic_memory.md` by the consolidation engine                          |
 | **Archived**       | `episodic_memory.md` entries older than 90 days — Low → deleted, Medium → `archive/episodic_YYYY_MM.md`. ✅ File rewrite implemented. |
 | **Trimmed**        | `working_memory.md` is trimmed in-place to the last 10 interactions                                                                               |
-| **Capped for LLM** | `semantic_memory.md`, `habits.md`, `personality.md`, `consciousness.md` are tail-capped before being added to the LLM prompt                      |
+| **Capped for LLM** | `semantic_memory.md`, `habits.md`, `personality.md`, `self_reflection.md` are tail-capped before being added to the LLM prompt                      |
 
 ---
 
@@ -279,16 +280,16 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 
 ---
 
-### Layer 6: Consciousness (Manager’s Mental Model)
+### Layer 6: Self Reflection (Lessons Learned & User Model)
 
-**Purpose**: Big-picture understanding of the user — synthesised from ALL memory layers
+**Purpose**: Big-picture understanding of the user — synthesised from ALL memory layers, with emphasis on lessons learned from past strategies and mistakes
 
 **Characteristics**:  
 - Synthesised from working, episodic, semantic, and habits — not just semantic
 - Infrequently updated: Every 2–4 weeks
-- Covers 7 structured sections (who they are, what they care about, how they communicate, where they need help, trust baseline, trajectory, key insights)
+- Covers 7 structured sections (who they are, what they care about, how they communicate, where they need help, trust baseline, trajectory, key insights) plus Lessons Learned
 
-**Storage**: `memory/{agent_id}/consciousness.md`
+**Storage**: `memory/{agent_id}/self_reflection.md`
 
 **Sections**:
 
@@ -302,19 +303,19 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 | Trust & Safety Profile | Normal patterns — baseline for anomaly detection |
 | Strategic Trajectory | Where they seem to be heading |
 
-**Implementation**: `agent_memory.py::update_consciousness()`  
-**Auto-updated by**: `memory_consolidator.py::_update_consciousness_layer()`
+**Implementation**: `agent_memory.py::update_self_reflection()`  
+**Auto-updated by**: `memory_consolidator.py::_update_self_reflection_layer()`
 
 ---
 
 ### Layer 7: Collective Consciousness *(Personal Assistant Hub only)*
 
-**Purpose**: Cross-domain synthesis of all sub-agents’ individual consciousness layers into a single unified picture of the user
+**Purpose**: Cross-domain synthesis of all sub-agents’ individual self reflection layers into a single unified picture of the user
 
 **Characteristics**:  
 - Only exists for `_collective_memory_` (`memory/_collective_memory_/collective_consciousness.md`)
 - Updated every consolidation cycle (not just every 2–4 weeks)
-- Aggregates non-placeholder bullets from each agent’s `consciousness.md`
+- Aggregates non-placeholder bullets from each agent’s `self_reflection.md`
 - Builds a composite trust baseline from all agents’ safety sections
 
 **Storage**: `memory/_collective_memory_/collective_consciousness.md`
@@ -344,7 +345,7 @@ memory/
 │   ├── semantic_memory.md         # Learned facts about the user
 │   ├── personality.md             # Agent identity
 │   ├── habits.md                  # Confirmed user behavioural patterns (3+)
-│   ├── consciousness.md           # Big-picture mental model of the user
+│   ├── self_reflection.md         # Big-picture mental model + lessons learned
 │   ├── consolidation_state.json   # Persistence state
 │   └── archive/                   # Old episodic memories
 │       └── episodic_2025_*.md
@@ -354,7 +355,7 @@ memory/
     ├── semantic_memory.md
     ├── personality.md             # Hard-coded protective personal-assistant persona
     ├── habits.md
-    ├── consciousness.md
+    ├── self_reflection.md
     ├── collective_consciousness.md # Cross-agent synthesis (unique to PA hub)
     └── archive/
 ```
@@ -390,9 +391,9 @@ class AgentMemory:
     def get_habits() -> str
     def add_habit(habit_type, description)
     
-    # Consciousness
-    def get_consciousness() -> str
-    def update_consciousness(section, content)
+    # Self Reflection
+    def get_self_reflection() -> str
+    def update_self_reflection(section, content)
     
     # Consolidation
     def get_consolidator() -> MemoryConsolidator
@@ -433,9 +434,9 @@ class MemoryConsolidator:
     # Decay Mechanism
     def _apply_decay_mechanism()
     
-    # Consciousness Updates
-    def _should_update_consciousness() -> bool
-    def _update_consciousness_layer()
+    # Self Reflection Updates
+    def _should_update_self_reflection() -> bool
+    def _update_self_reflection_layer()
     
     # State Persistence
     def _load_state()
@@ -515,7 +516,7 @@ class MemoryConsolidator:
 │     ├─ Medium importance → Archive                         │
 │     └─ High importance → Keep                              │
 │                                                             │
-│  5. Update Consciousness (every 2-4 weeks)                 │
+│  5. Update Self Reflection (every 2-4 weeks)             │
 │     ├─ Synthesize user profile                             │
 │     ├─ Extract core patterns                               │
 │     └─ Strategic direction insights                        │
@@ -528,7 +529,7 @@ class MemoryConsolidator:
     ├────────────────────┤
     │ semantic_memory.md │ ← Patterns & themes
     │ habits.md          │ ← Confirmed habits (3+)
-    │ consciousness.md   │ ← Meta-summary (periodic)
+    │ self_reflection.md │ ← Meta-summary (periodic)
     └────────────────────┘
              │
              ↓
@@ -561,12 +562,12 @@ class MemoryConsolidator:
          ↓                                               ↓
     Load ALL Layers                          Format as String
     ├─ Personality   (full file, no cap)         ┌──────────────┐
-    ├─ Consciousness (full file, no cap)         │ # Agent      │
+    ├─ Self Reflection (full file, no cap)       │ # Agent      │
     ├─ Working Memory (last 10 items)            │ Memory       │
     ├─ Semantic Memory (last 3000 chars)         │ Context      │
     ├─ Habits        (last 3000 chars)           │              │
     └─ Episodic: NOT included by default      │ ## Person... │
-       (use recall_for_llm() instead)         │ ## Consci... │
+       (use recall_for_llm() instead)         │ ## Self R... │
                                              │ ## Working..│
                                              │ ## Semant...│
                                              │ ## Habits...│
@@ -693,14 +694,14 @@ For each episodic event older than 90 days:
 
 > The decay logic in `_apply_decay_mechanism()` correctly classifies events but the `episodic_memory.md` file is not actually rewritten — there is a `TODO` comment at the end of the method. The counts are logged only. This must be implemented before the file grows too large.
 
-**Step 5: Consciousness Update (Every 2-4 Weeks)**
+**Step 5: Self Reflection Update (Every 2-4 Weeks)**
 
 If 14+ days since last update:
 - Synthesize user profile from semantic + habits
 - Extract core patterns
 - Update strategic direction insights
 
-**Output**: Updates `consciousness.md`
+**Output**: Updates `self_reflection.md`
 
 ### Code Flow
 
@@ -741,8 +742,8 @@ def consolidate(self):
     self._apply_decay_mechanism()
     
     # Step 5
-    if self._should_update_consciousness():
-        self._update_consciousness_layer()
+    if self._should_update_self_reflection():
+        self._update_self_reflection_layer()
     
     self.last_consolidation = datetime.now()
     self._save_state()  # Persist state
@@ -785,7 +786,7 @@ Day 2: Agent RESTARTS (36 hours later at 08:00 PM)
 ```json
 {
   "last_consolidation": "2026-02-20T08:00:00.123456",
-  "last_consciousness_update": "2026-02-15T14:30:00.987654"
+  "last_self_reflection_update": "2026-02-15T14:30:00.987654"
 }
 ```
 
@@ -807,7 +808,7 @@ def _load_state(self):
 def _save_state(self):
     state = {
         'last_consolidation': self.last_consolidation.isoformat(),
-        'last_consciousness_update': self.last_consciousness_update.isoformat()
+        'last_self_reflection_update': self.last_self_reflection_update.isoformat()
     }
     with open(self.state_file, 'w', encoding='utf-8') as f:
         json.dump(state, f, indent=2)
@@ -898,28 +899,28 @@ Week 3 onwards:
            Would you like me to proactively report this each morning?"
 ```
 
-### Scenario 4: Consciousness Evolution
+### Scenario 4: Self Reflection Updates
 
 ```
 Week 1-2:
     - User interactions accumulate
     - Semantic memory grows
     - Habits detected
-    - Consciousness: Not updated yet
+    - Self Reflection: Not updated yet
 
 Week 3-4 (14+ days pass):
-    - Consolidation checks: _should_update_consciousness()
+    - Consolidation checks: _should_update_self_reflection()
     - Returns True (14+ days since last update)
-    - Runs: _update_consciousness_layer()
+    - Runs: _update_self_reflection_layer()
       → Analyzes semantic memory
       → Analyzes habits
       → Synthesizes user profile
-      → Updates consciousness.md:
+      → Updates self_reflection.md:
         "User demonstrates systematic email management
          with growing automation preferences..."
 
 Next day:
-    - LLM loads consciousness context
+    - LLM loads self reflection context
     - LLM response includes meta-understanding:
       "Given your focus on efficiency and automation,
        I recommend setting up email filters..."
@@ -956,7 +957,7 @@ Medium Importance events (90+ days):
 | File                                      | Purpose                                 | Notes |
 | ----------------------------------------- | --------------------------------------- | ----- |
 | `src/agent/memory/agent_memory.py`        | Core memory management class + `MULTI_AGENT_ID` constant | ~ 1140 lines |
-| `src/agent/memory/memory_consolidator.py` | Consolidation engine: patterns, habits, consciousness, collective consciousness | ~830 lines |
+| `src/agent/memory/memory_consolidator.py` | Consolidation engine: patterns, habits, self reflection, collective consciousness | ~830 lines |
 | `src/agent/memory/consolidation_runner.py` | Global 24 h background thread — covers all agents | ~140 lines |
 | `src/agent/memory/collective_memory.py`   | Episodic snapshot aggregator for Personal Assistant LLM context | ~140 lines |
 | `src/agent/ui/dashboard/app.py`           | Dashboard entry — boots ConsolidationRunner + `_collective_memory_` memory on startup | |
@@ -978,7 +979,7 @@ Medium Importance events (90+ days):
 - `_extract_themes_from_episodic()` — episodic → semantic themes
 - `_detect_habits()` — habit detection including day-of-week + time-of-day patterns (3+ threshold)
 - `_apply_decay_mechanism()` — 90-day decay with file rewrite ✅
-- `_update_consciousness_layer()` — reads ALL memory layers to write 7-section consciousness
+- `_update_self_reflection_layer()` — reads ALL memory layers to write 7-section self reflection
 - `_update_collective_consciousness()` — **PA hub only**; synthesises `collective_consciousness.md` from all skill agents
 
 **Global Consolidation Runner** (`src/agent/memory/consolidation_runner.py`):
@@ -1073,7 +1074,7 @@ Called from `handle_conversation()` in `email_agent_ui.py` and `_handle_conversa
 ```
 get_full_context_for_llm()
     ├─ personality.md          → full file (no cap)               ← uncapped ✅
-    ├─ consciousness.md        → full file (no cap)               ← uncapped ✅
+    ├─ self_reflection.md      → full file (no cap)               ← uncapped ✅
     ├─ working_memory.md       → last 10 interactions (~1 000 tokens)
     ├─ semantic_memory.md      → last 3 000 chars  (~750 tokens)  ← capped ✅
     ├─ habits.md               → last 3 000 chars  (~750 tokens)  ← capped ✅
@@ -1092,7 +1093,7 @@ get_full_context_for_llm()       ← same block as Path A
       "Memory Context:\n{memory_context}\n\nUser Query: {user_query}"
 ```
 
-The full memory blob is sent here too, even though the LLM only needs to decide *which tool to call* — personality, consciousness, and habits are irrelevant for that decision.
+The full memory blob is sent here too, even though the LLM only needs to decide *which tool to call* — personality, self_reflection, and habits are irrelevant for that decision.
 
 ---
 
@@ -1103,7 +1104,7 @@ Measured on the existing `8aef0053` agent (Feb 2026):
 | File                 | Size on disk | Sent to LLM? | How much?                     | Cap      |
 | -------------------- | ------------ | ------------ | ----------------------------- | -------- |
 | `personality.md`     | ~0.5 KB      | ✅            | Full file (no cap)            | —        |
-| `consciousness.md`   | ~0.5 KB      | ✅            | Full file (no cap)            | —        |
+| `self_reflection.md` | ~0.5 KB      | ✅            | Full file (no cap)            | —        |
 | `working_memory.md`  | ~3.5 KB      | ✅            | Last 10 interactions (~1 KB)  | 10 items |
 | `semantic_memory.md` | ~0.4 KB      | ✅            | Last 3 000 chars              | 3 000 ch |
 | `habits.md`          | ~0.4 KB      | ✅            | Last 3 000 chars              | 3 000 ch |
@@ -1149,7 +1150,7 @@ The real risks are:
 
 ```python
 # personality.md   → no cap (sent in full)
-# consciousness.md → no cap (sent in full)
+# self_reflection.md → no cap (sent in full)
 _LLM_SEMANTIC_CAP     = 3_000   # chars (~750 tokens)
 _LLM_HABITS_CAP       = 3_000   # chars (~750 tokens)
 _LLM_WORKING_MEM_CAP  = 10      # interactions
@@ -1166,7 +1167,7 @@ The `_tail()` helper keeps the **most recent** content (bottom of file, since ne
 
 For tool routing the LLM needs at most:
 - User's preferred result count (from semantic memory)
-- Nothing else from personality, consciousness, or habits
+- Nothing else from personality, self_reflection, or habits
 
 **Fix needed**: A separate, slimmed `get_routing_context_for_llm()` function.
 
@@ -1178,7 +1179,7 @@ The entire memory is concatenated unconditionally regardless of the current quer
 A user asking *"how many emails do I have today?"* receives the same memory payload as  
 *"do you remember what I told you about my preferred work hours?"*
 
-In the first case, personality, consciousness, and habits add noise.  
+In the first case, personality, self_reflection, and habits add noise.  
 In the second case, episodic memory (which is not included by default) would be the most useful layer.
 
 **Fix needed**: Query-aware context selection.
@@ -1298,7 +1299,7 @@ The LLM receives these instructions in its system prompt:
 3. **Semantic Memory** - Distilled user knowledge and preferences
 4. **Personality** - Your stable behavioral traits
 5. **Habits** - Learned patterns (3+ confirmations required)
-6. **Consciousness** - Meta-level understanding and goals
+6. **Self Reflection** - Meta-level understanding, lessons learned, and goals
 
 ### Memory Usage Principles
 
@@ -1317,7 +1318,7 @@ The LLM receives these instructions in its system prompt:
 - ✅ Patterns are automatically extracted after 20 interactions or 24 hours
 - ✅ Habits are automatically detected after 3+ confirmations
 - ✅ Old memories decay automatically after 90 days
-- ✅ Your consciousness layer updates every 2-4 weeks
+- ✅ Your self reflection layer updates every 2-4 weeks
 
 ### What This Means for LLMs
 
@@ -1338,7 +1339,7 @@ Based on cognitive science research:
 - **Semantic Memory**: Conceptual knowledge storage in human cognition
 - **Personality**: Stable traits that guide behavior
 - **Habits**: Learned behaviors that become automatic
-- **Consciousness**: Meta-cognitive awareness and self-reflection
+- **Self Reflection**: Lessons learned, meta-cognitive awareness and self-understanding
 
 ### Why Automatic Consolidation?
 
@@ -1472,7 +1473,7 @@ Adjustable via `agent_memory.py::decay_days` property.
 - **Semantic Memory**: ~20 KB (accumulated knowledge)
 - **Habits**: ~10 KB (learned patterns)
 - **Personality**: ~5 KB (stable traits)
-- **Consciousness**: ~10 KB (meta-summary)
+- **Self Reflection**: ~10 KB (meta-summary)
 
 **Total per agent**: ~155 KB
 
@@ -1488,7 +1489,7 @@ Adjustable via `agent_memory.py::decay_days` property.
 
 **Memory context size (maximum, all sections capped)**:
 - Personality: variable (full file, typically ~100–500 tokens)
-- Consciousness: variable (full file, typically ~100–400 tokens)
+- Self Reflection: variable (full file, typically ~100–400 tokens)
 - Working Memory: ~1 000 tokens (last 10 interactions)
 - Semantic Memory: ~750 tokens (3 000 char cap)
 - Habits: ~750 tokens (3 000 char cap)
@@ -1635,7 +1636,7 @@ The memory system design was correct on paper but the implementation had several
 |---|---|---|---|
 | 1 | Working memory sent 5 interactions | Changed to 10 | `agent_memory.py` |
 | 2 | Personality capped at 1 500 chars | Removed cap — sent full | `agent_memory.py` |
-| 3 | Consciousness capped at 1 000 chars | Removed cap — sent full | `agent_memory.py` |
+| 3 | Self Reflection capped at 1 000 chars | Removed cap — sent full | `agent_memory.py` |
 | 4 | Habits capped at 1 500 chars | Raised to 3 000 chars | `agent_memory.py` |
 | 5 | Only 16 recall signal phrases | Expanded to 38+ phrases | `agent_memory.py` |
 | 6 | No temporal stop words | Added ~20 stop words | `agent_memory.py` |
@@ -1655,7 +1656,7 @@ _RECALL_STOP_WORDS = frozenset({...}) # temporal/filler noise words
 class AgentMemory:
     def get_full_context_for_llm(self) -> str:
         # personality.md → full (no cap)
-        # consciousness.md → full (no cap)
+        # self_reflection.md → full (no cap)
         # working_memory.md → last 10 interactions
         # habits.md → last 3 000 chars
         # semantic_memory.md → last 3 000 chars
@@ -1673,6 +1674,76 @@ class AgentMemory:
 
 ---
 
+## FAISS Semantic Memory Search
+
+### Overview
+
+Starting with the self reflection rename, both `search_episodic_memory()` and the semantic-memory recall section inside `recall_for_llm()` use **vector-similarity search** instead of keyword-only matching.
+
+**Module**: `src/agent/memory/memory_vector_index.py`
+
+### How It Works
+
+```
+query string
+    ↓
+SemanticSearchIndex.semantic_search(query, texts, top_k)
+    ├─ Encode all texts with all-MiniLM-L6-v2 (384-dim embeddings)
+    ├─ Encode query vector
+    ├─ L2-normalise all vectors
+    ├─ Build FAISS IndexFlatIP (exact inner-product = cosine similarity)
+    └─ Return top-K (index, cosine_score) pairs sorted by descending score
+```
+
+### Key Decisions
+
+| Decision | Value | Reason |
+|----------|-------|--------|
+| Embedding model | `all-MiniLM-L6-v2` | 80 MB, 384-dim, excellent recall/speed trade-off |
+| FAISS index type | `IndexFlatIP` | Exact search; corpus < 10 K entries so no approximation needed |
+| Similarity metric | Cosine (via L2-normalised inner product) | Robust to embedding magnitude variation |
+| Episodic threshold | 0.25 | Captures paraphrase + related queries |
+| Semantic threshold | 0.30 | Slightly stricter — semantic lines are denser facts |
+| Fallback | Keyword search | Activates automatically if `faiss`/`sentence_transformers` not installed |
+
+### Model Loading
+
+The `SentenceTransformer` model is **lazy-loaded and module-level cached** — it is loaded once on the first call to `semantic_search()` and reused for all subsequent calls, even across different `AgentMemory` instances in the same process.
+
+```python
+# memory_vector_index.py
+_model = None  # module-level cache
+
+def semantic_search(query, texts, top_k=5) -> list[tuple[int, float]]:
+    global _model
+    if _model is None:
+        _model = SentenceTransformer("all-MiniLM-L6-v2")
+    # ... FAISS search
+```
+
+### Graceful Degradation
+
+```python
+def is_available() -> bool:
+    try:
+        import faiss
+        import sentence_transformers
+        return True
+    except ImportError:
+        return False
+```
+
+If `faiss-cpu` or `sentence-transformers` are not installed, `semantic_search()` returns `[]` and the callers automatically fall back to keyword-only search — the system continues working with lower recall quality.
+
+### Integration Points
+
+| Method | Threshold | Fallback |
+|--------|-----------|---------|
+| `AgentMemory.search_episodic_memory(query)` | 0.25 | keyword containment scan |
+| `AgentMemory.recall_for_llm()` — semantic section | 0.30 | keyword section matching |
+
+---
+
 ## Conclusion
 
 The Cognitive Memory Architecture provides agents with:
@@ -1685,6 +1756,7 @@ The Cognitive Memory Architecture provides agents with:
 ✅ **On-demand recall** - Episodic memory searched when the user references the past  
 ✅ **Natural language recall** - 38+ signal phrases + temporal resolution ("past week", "2 days ago")  
 ✅ **Meaningful episodic insights** - Searchable descriptions instead of generic placeholders  
+✅ **FAISS semantic search** - Cosine similarity retrieval for episodic and semantic memory  
 ❌ **Decay file rewrite** - Not yet implemented (entries classified but file not updated)
 
 ---

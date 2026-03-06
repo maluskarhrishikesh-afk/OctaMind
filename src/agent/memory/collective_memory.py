@@ -2,7 +2,7 @@
 Collective Memory — aggregates episodic memory from all registered agents.
 
 The Multi-Agent Hub uses this to give the LLM awareness of everything every
-agent has done, creating a shared "consciousness" across the platform.
+agent has done, creating a shared cross-agent context across the platform.
 
 Usage:
     from src.agent.memory.collective_memory import get_collective_context

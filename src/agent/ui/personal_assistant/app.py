@@ -349,7 +349,7 @@ def _chat_response(message: str, agent_name: str, agent_id: str = None,
         from src.agent.memory.agent_memory import get_agent_memory
         from src.agent.memory.collective_memory import get_collective_context
 
-        # Collective consciousness — pull memory from ALL registered agents
+        # Collective context — pull memory from ALL registered agents
         memory_context = ""
         try:
             memory_context = get_collective_context()

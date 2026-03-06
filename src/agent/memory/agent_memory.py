@@ -117,7 +117,11 @@ class AgentMemory:
         self.semantic_memory_path = self.memory_dir / "semantic_memory.md"
         self.personality_path = self.memory_dir / "personality.md"
         self.habits_path = self.memory_dir / "habits.md"
-        self.consciousness_path = self.memory_dir / "consciousness.md"
+        self.self_reflection_path = self.memory_dir / "self_reflection.md"
+
+        # Backward-compat alias — code predating the rename can still use
+        # consciousness_path without breaking (points to same file).
+        self.consciousness_path = self.self_reflection_path
 
         # Multi-agent only: combined consciousness across all sub-agents
         self.collective_consciousness_path: Path | None = (
@@ -253,11 +257,12 @@ class AgentMemory:
 - (Peak activity hours, preferred days for certain tasks...)
 """, encoding='utf-8')
 
-        # Consciousness (Big-picture mental model of the user — highest abstraction)
-        if not self.consciousness_path.exists():
-            self.consciousness_path.write_text("""# Consciousness
+        # Self Reflection (agent reflects on what worked, what didn't, lessons learned)
+        if not self.self_reflection_path.exists():
+            self.self_reflection_path.write_text("""# Self Reflection
 
-> Big-picture understanding of the user — like a manager's mental model.
+> The agent's accumulated lessons from past interactions — what strategies
+> worked, which were rejected, and how the agent should adapt going forward.
 > Synthesised from ALL memory layers. Updated every 2–4 weeks.
 > This is NOT a raw log. It is the agent's current best understanding
 > of who this person is, what they're trying to achieve, and how to
@@ -284,8 +289,8 @@ class AgentMemory:
 ## Strategic Trajectory
 - (Where they seem to be heading — projects, goals, growth areas)
 
-## Key Insights Log
-- (Timestamped "aha moments" about this user — significant realisations)
+## Lessons Learned
+- (Timestamped strategy improvements — what was tried, what worked, what to do instead)
 """, encoding='utf-8')
 
         # Collective Consciousness (multi-agent only)
@@ -578,11 +583,44 @@ class AgentMemory:
             or query_lower in interaction.get('action', '').lower()
         ]
 
-    def search_episodic_memory(self, query: str) -> List[Dict[str, Any]]:
-        """Search episodic memory for events matching query"""
-        events = self._parse_episodic_memory_markdown()
-        query_lower = query.lower()
+    def search_episodic_memory(self, query: str) -> list[dict]:
+        """Search episodic memory using semantic (FAISS) similarity.
 
+        Falls back to keyword search if faiss / sentence_transformers are not
+        installed.  Returns events sorted by descending similarity score.
+        """
+        events = self._parse_episodic_memory_markdown()
+        if not events:
+            return []
+
+        # Build one text string per event for embedding
+        texts = [
+            " ".join(filter(None, [
+                e.get('event', ''),
+                e.get('insight', ''),
+                e.get('context', ''),
+            ]))
+            for e in events
+        ]
+
+        # Try semantic (FAISS) search first
+        try:
+            from .memory_vector_index import semantic_search
+            hits = semantic_search(query, texts, top_k=min(10, len(texts)))
+            if hits:
+                # Only return events whose cosine similarity exceeds threshold
+                # (0.25 is intentionally low — memory search should prefer recall
+                # over precision; the LLM can still filter irrelevant context).
+                return [
+                    events[idx]
+                    for idx, score in hits
+                    if score >= 0.25
+                ]
+        except Exception:
+            pass
+
+        # Keyword fallback
+        query_lower = query.lower()
         return [
             event for event in events
             if query_lower in event.get('event', '').lower()
@@ -691,21 +729,26 @@ class AgentMemory:
 
         self.habits_path.write_text(current + update, encoding='utf-8')
 
-    # ============ Consciousness (Meta Summary Layer) ============
+    # ============ Self Reflection (Meta Summary Layer) ============
 
-    def get_consciousness(self) -> str:
-        """Get consciousness meta summary"""
-        return self.consciousness_path.read_text(encoding='utf-8')
+    def get_self_reflection(self) -> str:
+        """Get self reflection meta summary (lessons learned + big-picture user model)."""
+        return self.self_reflection_path.read_text(encoding='utf-8')
 
-    def update_consciousness(self, section: str, content: str):
+    # Backward-compat alias
+    def get_consciousness(self) -> str:  # noqa: D401
+        """Alias for get_self_reflection() — kept for backward compatibility."""
+        return self.get_self_reflection()
+
+    def update_self_reflection(self, section: str, content: str):
         """
-        Update consciousness layer (should be done periodically, not frequently)
+        Update self reflection layer (should be done periodically, not frequently).
 
         Args:
-            section: Section to update (User Profile Evolution, Core Pattern Recognition, etc.)
-            content: New distilled insight
+            section: Section to update (e.g. "Who Is This Person?", "Lessons Learned").
+            content: New distilled insight.
         """
-        current = self.consciousness_path.read_text(encoding='utf-8')
+        current = self.self_reflection_path.read_text(encoding='utf-8')
 
         # Find and replace section or append
         lines = current.split('\n')
@@ -732,13 +775,18 @@ class AgentMemory:
             new_lines.append(f"\n## {section}")
             new_lines.append(content)
 
-        self.consciousness_path.write_text(
+        self.self_reflection_path.write_text(
             '\n'.join(new_lines), encoding='utf-8')
+
+    # Backward-compat alias
+    def update_consciousness(self, section: str, content: str):  # noqa: D401
+        """Alias for update_self_reflection() — kept for backward compatibility."""
+        self.update_self_reflection(section, content)
 
     # ============ Full Memory Context (for LLM) ============
 
     # Character caps for LLM context — keeps token usage predictable
-    # Personality and consciousness are sent in full (small, infrequently updated files)
+    # Personality and self_reflection are sent in full (small, infrequently updated files)
     _LLM_SEMANTIC_CAP = 3000      # ~750 tokens  — most-recent sections only
     _LLM_HABITS_CAP = 3000        # ~750 tokens  — user habits keep changing
 
@@ -757,9 +805,9 @@ class AgentMemory:
         Get memory context formatted for LLM.
 
         What is included and why:
-          - personality      : Who the agent is (capped, stable)
-          - consciousness    : Big-picture understanding (capped, infrequent)
-          - working_memory   : Last 5 interactions (always small)
+          - personality      : Who the agent is (stable)
+          - self_reflection  : Lessons learned + big-picture user model (infrequent)
+          - working_memory   : Last 10 interactions (always small)
           - semantic_memory  : Learned user knowledge — TAIL only (capped, grows over time)
           - habits           : Repeated patterns — TAIL only (capped, grows over time)
           - episodic_memory  : NOT included by default (too large; use include_episodic=True)
@@ -770,10 +818,10 @@ class AgentMemory:
         # Working memory: last 10 interactions (per design spec)
         recent_interactions = self.get_recent_interactions(10)
 
-        # Personality and consciousness sent in full — they are small,
+        # Personality and self_reflection sent in full — small,
         # infrequently updated files that define the agent's identity.
         personality = self.get_personality()
-        consciousness = self.get_consciousness()
+        self_reflection = self.get_self_reflection()
         semantic = self._tail(self.get_semantic_memory(),
                               self._LLM_SEMANTIC_CAP)
         habits = self._tail(self.get_habits(), self._LLM_HABITS_CAP)
@@ -784,8 +832,8 @@ class AgentMemory:
 ## Personality
 {personality}
 
-## Consciousness (Meta Understanding)
-{consciousness}
+## Self Reflection (Lessons Learned & User Understanding)
+{self_reflection}
 
 ## Working Memory (Last 10 interactions)
 """
@@ -964,7 +1012,9 @@ class AgentMemory:
 
         No indexing is used: keyword search over the structured episodic file is
         fast enough at current scale (<1 ms for thousands of entries).  Vector
-        indexing should only be considered once individual files exceed ~20 KB.
+        indexing (FAISS) is used when available for semantic recall — so
+        "organize images" surfaces episodes titled "bulk file rename for photos"
+        even when no shared keyword exists.
 
         Returns
         -------
@@ -1085,17 +1135,42 @@ class AgentMemory:
                 )
             sections.append('\n'.join(lines))
 
-        # --- 3. Semantic memory (section-level keyword match) ---
+        # --- 3. Semantic memory (section-level search: FAISS preferred, keyword fallback) ---
         if terms:
-            sem_lines = self.get_semantic_memory().split('\n')
+            sem_text = self.get_semantic_memory()
+            sem_lines = sem_text.split('\n')
             matched_blocks: list[str] = []
-            for i, line in enumerate(sem_lines):
-                if any(t in line.lower() for t in terms):
-                    start = max(0, i - 2)
-                    end = min(len(sem_lines), i + 5)
-                    block = '\n'.join(sem_lines[start:end]).strip()
-                    if block and block not in matched_blocks:
-                        matched_blocks.append(block)
+
+            # Try semantic vector search over individual lines first
+            try:
+                from .memory_vector_index import semantic_search
+                # Only lines with meaningful content (> 20 chars)
+                candidate_lines = [(i, l) for i, l in enumerate(sem_lines) if len(l.strip()) > 20]
+                if candidate_lines:
+                    line_texts = [l for _, l in candidate_lines]
+                    combined_query = ' '.join(terms)
+                    hits = semantic_search(combined_query, line_texts, top_k=3)
+                    for idx, score in hits:
+                        if score >= 0.30:
+                            orig_i = candidate_lines[idx][0]
+                            start = max(0, orig_i - 2)
+                            end = min(len(sem_lines), orig_i + 5)
+                            block = '\n'.join(sem_lines[start:end]).strip()
+                            if block and block not in matched_blocks:
+                                matched_blocks.append(block)
+            except Exception:
+                pass
+
+            # Keyword fallback (or supplement if semantic found nothing)
+            if not matched_blocks:
+                for i, line in enumerate(sem_lines):
+                    if any(t in line.lower() for t in terms):
+                        start = max(0, i - 2)
+                        end = min(len(sem_lines), i + 5)
+                        block = '\n'.join(sem_lines[start:end]).strip()
+                        if block and block not in matched_blocks:
+                            matched_blocks.append(block)
+
             if matched_blocks:
                 sections.append(
                     "### Recalled from Semantic Memory (learned knowledge):\n"
@@ -1128,7 +1203,7 @@ class AgentMemory:
         - Extract patterns from working memory → semantic memory
         - Detect habits (3+ confirmations)
         - Apply 90-day decay to episodic memory
-        - Update consciousness layer
+        - Update self reflection layer
         """
         consolidator = self.get_consolidator()
         consolidator.consolidate()

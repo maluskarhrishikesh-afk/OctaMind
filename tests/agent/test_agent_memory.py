@@ -40,7 +40,7 @@ class TestInitialisation:
         "semantic_memory.md",
         "personality.md",
         "habits.md",
-        "consciousness.md",
+        "self_reflection.md",
     }
 
     def test_memory_dir_created(self, mem, tmp_path):
@@ -172,13 +172,22 @@ class TestHabits:
         assert mem.habits_path.exists()
 
 
-# ─────────────────────────── consciousness ───────────────────────────────────
+# ──────────────────────────── self_reflection ───────────────────────────────
 
 class TestConsciousness:
     def test_get_consciousness_returns_string(self, mem):
+        """get_consciousness() is a backward-compat alias for get_self_reflection()."""
         c = mem.get_consciousness()
         assert isinstance(c, str)
         assert len(c) > 0
+
+    def test_get_self_reflection_returns_string(self, mem):
+        sr = mem.get_self_reflection()
+        assert isinstance(sr, str)
+        assert len(sr) > 0
+
+    def test_self_reflection_file_exists(self, mem, tmp_path):
+        assert (tmp_path / "memory" / "test_agent" / "self_reflection.md").exists()
 
 
 # ─────────────────────────── recall_for_llm ──────────────────────────────────

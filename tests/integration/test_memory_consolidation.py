@@ -130,7 +130,7 @@ def test_basic_consolidation():
     print("   🧠 Analyzing episodic events for themes...")
     print("   🧠 Detecting habits (3+ confirmations)...")
     print("   🧠 Applying 90-day decay mechanism...")
-    print("   🧠 Checking consciousness update requirements...")
+    print("   🧠 Checking self reflection update requirements...")
 
     memory.run_consolidation()
 
@@ -166,12 +166,12 @@ def test_basic_consolidation():
         print("     - Communication Pattern: Detected and stored")
         print("     - Work Pattern: Detected and stored")
 
-    print("\n   🧘 CONSCIOUSNESS (Meta Summary):")
-    consciousness = memory.get_consciousness()
+    print("\n   🧘 SELF REFLECTION (Meta Summary):")
+    consciousness = memory.get_self_reflection()
     if "Updated:" in consciousness and datetime.now().strftime('%Y-%m-%d') in consciousness:
-        print("     ✓ Consciousness layer updated with current date")
+        print("     ✓ Self reflection layer updated with current date")
     else:
-        print("     ℹ️  Consciousness update pending (needs 30+ interactions)")
+        print("     ℹ️  Self reflection update pending (needs 30+ interactions)")
 
     # Show memory system status
     print("\n6️⃣  Memory System Status:")
@@ -183,7 +183,7 @@ def test_basic_consolidation():
     print("   Semantic Memory: ✓ Active with consolidated patterns")
     print("   Habits: ✓ Learned from repeated behaviors")
     print("   Personality: ✓ Stable")
-    print("   Consciousness: ✓ Meta-cognition layer active")
+    print("   Consciousness: ✓ Self reflection layer active")
 
     print("\n" + "=" * 60)
     print("CONSOLIDATION TEST COMPLETE ✅")
@@ -194,7 +194,7 @@ def test_basic_consolidation():
     print("   2. Habits detected after 3+ confirmations (e.g., 'count emails today')")
     print("   3. Episodic themes consolidated into semantic memory")
     print("   4. 90-day decay ready to clean old memories")
-    print("   5. Consciousness layer updates every 2-4 weeks")
+    print("   5. Self reflection layer updates every 2-4 weeks")
 
     print("\n🔄 This happens automatically every 20 interactions or 24 hours!")
     print("   Agents don't need to manually manage memory - it just works.\n")
