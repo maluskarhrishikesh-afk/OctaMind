@@ -345,12 +345,12 @@ class ConversationStateTracker:
         last_found_paths: List[str] = []
         for msg in reversed(recent):
             if msg.get("role") == "assistant":
-                # Prefer structured file_artifacts stored directly on the entry
-                # (populated by the hub after every dispatch turn).
-                artifacts = msg.get("file_artifacts", [])
+                # Prefer search_paths (search results, context-only — not delivered files).
+                # Fall back to file_artifacts (legacy or explicitly delivered files).
+                artifacts = msg.get("search_paths") or msg.get("file_artifacts", [])
                 if artifacts:
                     last_found_paths = list(dict.fromkeys(str(p) for p in artifacts))
-                    logger.debug("[CST] last_found_paths from file_artifacts: %s", last_found_paths)
+                    logger.debug("[CST] last_found_paths from search_paths/file_artifacts: %s", last_found_paths)
                     break
                 # Fall back: regex-parse the assistant's text response
                 content = msg.get("content", "")
@@ -389,15 +389,17 @@ class ConversationStateTracker:
             state["mentioned_emails"] = all_emails
 
         # ── last assistant action ──────────────────────────────────────
+        # Use the most recent assistant message as the "last action" summary.
+        # Searching only for specific action verbs (scheduled/found/etc.) left
+        # stale context when the latest reply didn't contain those words — e.g.
+        # "Yes, there is a folder named Text…" has no action verb yet IS the
+        # last action the user will refer back to.
         last_action: Optional[str] = None
         for msg in reversed(recent):
             if msg.get("role") == "assistant":
-                vm = _ACTION_VERB_RE.search(msg.get("content", ""))
-                if vm:
-                    # Grab up to 120 chars around the verb as a summary
-                    snippet = msg["content"].replace("\n", " ")[:120]
-                    last_action = snippet
-                    break
+                snippet = msg["content"].replace("\n", " ")[:120]
+                last_action = snippet
+                break
         if last_action:
             state["last_assistant_action"] = last_action
 

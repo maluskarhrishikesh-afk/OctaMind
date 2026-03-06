@@ -523,7 +523,7 @@ class HubProcessor:
         history = _SESSION_HISTORY.setdefault(session_id, [])
 
         try:
-            response_text, actions, status, file_artifacts = self._dispatch(
+            response_text, actions, status, file_artifacts, search_paths = self._dispatch(
                 req, history, on_progress=on_progress
             )
         except Exception as exc:
@@ -532,6 +532,7 @@ class HubProcessor:
             actions = []
             status = "error"
             file_artifacts = []
+            search_paths = []
 
         # Update session history with timestamps
         _ts = datetime.now(timezone.utc).isoformat()
@@ -545,6 +546,8 @@ class HubProcessor:
         }
         if file_artifacts:
             _hist_entry["file_artifacts"] = file_artifacts
+        if search_paths:
+            _hist_entry["search_paths"] = search_paths
         history.append(_hist_entry)
         logger.info(
             "└─ [Hub:%s] Turn END  corr=%s  status=%s  elapsed=%.2fs",
@@ -595,7 +598,7 @@ class HubProcessor:
 
         Returns (response_text, actions, status, file_artifacts).
         """
-        from src.agent.workflows import detect_agents_needed, run_workflow
+        from src.agent.workflows import classify_and_route, run_workflow
 
         def _progress(msg: str) -> None:
             if on_progress:
@@ -609,104 +612,85 @@ class HubProcessor:
         if routing_message != req.message:
             logger.info("│  [ENRICH] Scheduling follow-up enriched: %.120s", routing_message)
 
-        # Build & log structured Session State — inject resolved entities
-        # (ISO dates, 24h times, files, e-mails) into the query before routing
-        # so agents receive exact values rather than raw natural-language text.
+        # Build structured Session State — inject resolved entities
+        # (ISO dates, 24h times, files, e-mails) so agents receive exact values.
         enriched_query = _build_sq(routing_message, history)
         try:
-            # Extract and log just the JSON state block (everything after the
-            # '## Session State' line) for clean log readability.
             _sq_marker = "## Session State"
             if _sq_marker in enriched_query:
                 _state_json = enriched_query.split(_sq_marker, 1)[1].strip()
-                # Collapse to a single line for the log
-                _state_oneline = " ".join(_state_json.split())
-                logger.info("│  [SESSION STATE] %s", _state_oneline)
+                logger.info("│  [SESSION STATE] %s", " ".join(_state_json.split()))
         except Exception:
             pass
 
+        # ── Unified intent classification ─────────────────────────────────────
+        # classify_and_route() handles all three message patterns in one LLM call:
+        #   CHAT              → "Do you know about cricket?"
+        #   CONTEXT_FOLLOWUP  → "Can you zip that and mail it to me?"  (after search)
+        #   FRESH_TASK        → "Are there any payslip files on my computer?"
+        try:
+            from src.agent.manifest.context_manifest import read_context as _read_ctx
+            _active_ctx = _read_ctx()
+        except Exception:
+            _active_ctx = None
+        try:
+            from src.agent.context.conversation_state import _default_tracker as _cst
+            _session_state = _cst.build(history, routing_message)
+        except Exception:
+            _session_state = None
+
         t_dispatch = time.perf_counter()
         _progress("🔍 Analyzing your request…")
-        agents_needed = detect_agents_needed(routing_message)
+        intent = classify_and_route(routing_message, _active_ctx, _session_state)
+        agents_needed = intent.agents if not intent.is_chat else None
         logger.info(
-            "│  [ROUTE]  agents=%s  source=%s",
-            agents_needed or "conversational", req.source,
+            "│  [INTENT]  category=%s  agents=%s  reason=%s  source=%s",
+            intent.category, agents_needed or "conversational", intent.reason, req.source,
         )
 
-        # ── Follow-up copy override: route to files when manifest exists ─────
-        # Handles "Can you copy them to a folder?" and similar pronoun-based
-        # copy queries that the LLM router may classify as conversational (None).
-        if agents_needed is None:
-            try:
-                from src.agent.ui.files_agent.orchestrator import _is_follow_up_copy as _fc
-                from src.files.features.file_ops import _DEFAULT_MANIFEST as _dfm
-                if _fc(req.message) and _dfm.exists():
-                    agents_needed = ["files"]
-                    logger.info(
-                        "│  [ROUTE-OVERRIDE]  follow-up copy + manifest exists → forced to ['files']"
-                    )
-            except Exception:
-                pass
-
-        # ── Smart routing upgrade: "mail/send them" with multiple found files ─
-        # When the router picks only ["email"] but session state has multiple
-        # previously-found file paths, upgrade to ["files", "email"] so the
-        # DAG planner handles zip-then-email automatically.
-        # Also: pronoun reference with no file context → return a clarification.
-        if agents_needed == ["email"]:
-            try:
-                import re as _re_routing
-                from src.agent.context.conversation_state import _default_tracker as _cst_tracker
-                _cst_state = _cst_tracker.build(history, req.message)
-                _found_paths = _cst_state.get("last_found_paths", [])
-                _found_folder = _cst_state.get("last_found_folder", "")
-                if len(_found_paths) > 1:
-                    agents_needed = ["files", "email"]
-                    logger.info(
-                        "│  [ROUTE-UPGRADE]  ['email'] → ['files','email']  "
-                        "(%d files in context — will zip before emailing)",
-                        len(_found_paths),
-                    )
-                elif len(_found_paths) == 0 and not _found_folder:
-                    _pronoun_re = _re_routing.compile(
-                        r'\b(them|those|those files|those documents|it|the files|'
-                        r'the documents|the folder|they)\b',
-                        _re_routing.IGNORECASE,
-                    )
-                    if _pronoun_re.search(req.message):
-                        logger.info(
-                            "│  [ROUTE-CLARIFY]  Pronoun reference + no file context → clarification"
-                        )
-                        return (
-                            "🤔 I'm not sure what to email — I don't have any files "
-                            "from a recent search in this conversation.\n\n"
-                            "Could you be more specific? For example:\n"
-                            "- *'Search for my payslip files and email them to me'*\n"
-                            "- *'Find the project report and send it to my email'*",
-                            [], "success", [],
-                        )
-            except Exception:
-                pass
+        # ── Pronoun clarification guard ────────────────────────────────────
+        # When classify_and_route returns a non-chat intent but can resolve no
+        # agents (e.g. "Can you zip that?" with no context manifest live), and
+        # the message contains a bare pronoun that clearly refers to a previous
+        # result, return a helpful clarification instead of routing to nothing.
+        if not intent.is_chat and not agents_needed:
+            _pronoun_re = re.compile(
+                r'\b(them|those|those files|those documents|it|that|the files|'
+                r'the documents|the folder|they)\b',
+                re.IGNORECASE,
+            )
+            if _pronoun_re.search(req.message):
+                logger.info("│  [INTENT-CLARIFY] pronoun + no resolvable agents → clarification")
+                return (
+                    "🤔 I'm not sure what you're referring to — I don't have any files "
+                    "from a recent search in this conversation.\n\n"
+                    "Could you be more specific? For example:\n"
+                    "- *'Search for my payslip files and email them to me'*\n"
+                    "- *'Find the project report and send it to my email'*",
+                    [], "success", [], [],
+                )
+            # No pronoun, no agents — treat as a general chat question
+            agents_needed = None
 
         # ── 1. Conversational fallback ─────────────────────────────────────
         if agents_needed is None:
             _progress("💬 Thinking…")
             reply = self._chat_response(req, history)
             _log_workflow_summary("💬 Chat", [], 1, time.perf_counter() - t_dispatch, "success")
-            return reply, [], "success", []
+            return reply, [], "success", [], []
 
         # ── 2. Single-agent shortcut ───────────────────────────────────────
         if len(agents_needed) == 1:
             _progress(f"⚙️ Running {agents_needed[0].title()} skill…")
             # Pass the structurally-enriched query so the skill agent receives
             # resolved entities (ISO dates, 24h times …) from Session State.
-            reply, acts, artifacts = self._run_single_agent(agents_needed[0], req, query=enriched_query)
+            reply, acts, artifacts, s_paths = self._run_single_agent(agents_needed[0], req, query=enriched_query)
             _llm_calls = acts[0].get("llm_calls", 1) if acts else 1
             _log_workflow_summary(
                 "⚙️ Skill DAG", agents_needed, _llm_calls,
                 time.perf_counter() - t_dispatch, "success",
             )
-            return reply, acts, "success", artifacts
+            return reply, acts, "success", artifacts, s_paths
 
         # ── 3. Multi-agent workflow ────────────────────────────────────────
         _agents_str = " + ".join(a.title() for a in agents_needed)
@@ -721,31 +705,51 @@ class HubProcessor:
             for s in run_result.get("steps", [])
         ]
         # Gather file artifacts from step results
+        # file_artifacts: explicitly delivered files (zip, report, deliver_file output) — sent to Telegram
+        # search_paths:   individual search hits (for context/follow-up) — NOT auto-sent
         file_artifacts: List[str] = []
+        search_paths: List[str] = []
         _seen_artifacts: set = set()
         for step in run_result.get("steps", []):
             res = step.get("result") or {}
             if isinstance(res, dict):
-                # Primary file output (zip, report, etc.)
-                for key in ("file_path", "local_path", "path", "archive", "destination"):
+                # Primary file output (zip, report, etc.) — deliver to user
+                for key in ("file_path", "local_path", "archive", "destination"):
                     fp = res.get(key)
                     if fp and isinstance(fp, str) and fp not in _seen_artifacts and Path(fp).exists():
                         file_artifacts.append(fp)
                         _seen_artifacts.add(fp)
                         break
-                # Collect individual search results (files found by search_file_all_drives etc.)
+                # Individual search results — context only, NOT for auto-delivery
                 for r in res.get("results", []):
                     if isinstance(r, dict):
                         rp = r.get("path", "")
-                        if rp and isinstance(rp, str) and rp not in _seen_artifacts and Path(rp).exists():
-                            file_artifacts.append(rp)
+                        if rp and isinstance(rp, str) and rp not in _seen_artifacts:
+                            search_paths.append(rp)
                             _seen_artifacts.add(rp)
         _total_llm = sum(s.get("llm_calls", 0) for s in run_result.get("steps", []))
         _log_workflow_summary(
             "📋 Multi-Agent DAG", agents_needed, _total_llm,
             time.perf_counter() - t_dispatch, run_result.get("status", "error"),
         )
-        return response_text, actions, run_result.get("status", "error"), file_artifacts
+
+        # ── Gap-5: clear context after a successful delivery ───────────────
+        # When a multi-agent workflow delivers a file (zip → email, zip → Drive,
+        # etc.) the search context is no longer needed.  Leaving it alive causes
+        # the NEXT unrelated message to still see "awaiting: file_action" which
+        # can confuse the router into thinking it's a follow-up.
+        if file_artifacts:
+            try:
+                from src.agent.manifest.context_manifest import clear_context as _cc
+                _cc()
+                logger.info(
+                    "[context-manifest] context cleared after multi-agent delivery  artifacts=%d",
+                    len(file_artifacts),
+                )
+            except Exception:
+                pass
+
+        return response_text, actions, run_result.get("status", "error"), file_artifacts, search_paths
 
     # ------------------------------------------------------------------
 
@@ -810,30 +814,71 @@ class HubProcessor:
             # Prepend any persisted cross-turn context (email listing, calendar
             # events, drive files, file search results) so the LLM never
             # re-asks for information already resolved in the previous turn.
+            # Pass the current agent name so tool-specific instructions are
+            # only injected when this IS the agent that wrote the context —
+            # prevents cross-agent tool hallucination (e.g. Drive agent being
+            # told to call collect_files_from_manifest).
             try:
                 from src.agent.manifest.context_manifest import inject_context_into_query as _ctxinj  # noqa: PLC0415
-                effective_query = _ctxinj(effective_query)
+                effective_query = _ctxinj(effective_query, current_agent=agent)
+                _ctx_marker = "## Context from Previous Turn"
+                if _ctx_marker in effective_query:
+                    _ctx_block = effective_query.split(_ctx_marker, 1)[1].split("## Session State", 1)[0].strip()
+                    logger.info("│  [CTX INJECT] agent=%s context_block=%.400s", agent, _ctx_block)
             except Exception:
                 pass
             # ─────────────────────────────────────────────────────────────
-            # Pass an artifacts_out dict so sub-agents can surface file paths
-            artifacts_out: Dict[str, Any] = {}
+            # Pass an artifacts_out dict so sub-agents can surface file paths.
+            # Seed with session context so agents can route background job
+            # notifications back to the correct user/channel.
+            artifacts_out: Dict[str, Any] = {
+                "_session_id": req.session_id,
+                "_pa_id": req.agent_id,
+                "_source": req.source,
+            }
             result = executor(effective_query, agent_id=None, artifacts_out=artifacts_out)
             action = result.get("action", "react_response")
 
-            # Collect file artifacts — primary output + all found search paths
+            # Explicit deliveries only: file_path is set by deliver_file() — sent to Telegram/Dashboard
             file_artifacts: List[str] = []
             _seen_fa: set = set()
             fp = artifacts_out.get("file_path") or result.get("file_path")
             if fp and isinstance(fp, str) and _P(fp).exists() and fp not in _seen_fa:
                 file_artifacts.append(fp)
                 _seen_fa.add(fp)
-            # Also collect ALL paths returned by search/list operations so the
-            # next turn can resolve 'them'/'those files' via last_found_paths.
-            for rp in artifacts_out.get("found_paths", result.get("found_paths", [])):
-                if rp and isinstance(rp, str) and rp not in _seen_fa and _P(rp).exists():
-                    file_artifacts.append(rp)
-                    _seen_fa.add(rp)
+            # Search results (found_paths) — for context / follow-up only, NOT auto-delivered
+            search_paths: List[str] = [
+                rp for rp in (artifacts_out.get("found_paths") or result.get("found_paths") or [])
+                if rp and isinstance(rp, str)
+            ]
+
+            # ── Gap-2 safety net ───────────────────────────────────────────
+            # If the agent returned search paths but forgot to call write_context(),
+            # auto-write a minimal context entry so the NEXT turn can still do
+            # "zip them" / "email those" without triggering a fresh search.
+            if search_paths:
+                try:
+                    from src.agent.manifest.context_manifest import (
+                        read_context as _rc,
+                        write_context as _wc,
+                    )
+                    if _rc(agent=agent) is None:
+                        _wc(
+                            agent=agent,
+                            topic="auto_search_result",
+                            resolved_entities={
+                                "last_found_paths": search_paths,
+                                "last_found_folder": str(_P(search_paths[0]).parent),
+                                "count": len(search_paths),
+                            },
+                            awaiting="file_action",
+                        )
+                        logger.info(
+                            "[context-manifest] auto-wrote context for agent=%s with %d search paths",
+                            agent, len(search_paths),
+                        )
+                except Exception as _awc_err:
+                    logger.debug("[context-manifest] auto-write safety net skipped: %s", _awc_err)
 
             # ReAct / NL orchestrators return a ready-made message
             if action == "react_response" or "message" in result:
@@ -842,6 +887,7 @@ class HubProcessor:
                     result.get("message", str(result)),
                     [{"agent": agent, "action": action, "llm_calls": _llm}],
                     file_artifacts,
+                    search_paths,
                 )
 
             # Try to find a dedicated response composer for richer formatting
@@ -853,7 +899,7 @@ class HubProcessor:
                 if compose_fn:
                     reply = compose_fn(result, action, req.message)
                     _llm = result.get("llm_calls", 1)
-                    return reply, [{"agent": agent, "action": action, "llm_calls": _llm}], file_artifacts
+                    return reply, [{"agent": agent, "action": action, "llm_calls": _llm}], file_artifacts, search_paths
             except Exception:
                 pass
 
@@ -863,8 +909,9 @@ class HubProcessor:
                 str(result.get("message", result)),
                 [{"agent": agent, "action": action, "llm_calls": _llm}],
                 file_artifacts,
+                search_paths,
             )
 
         except Exception as exc:
             logger.exception("Single-agent error (%s): %s", agent, exc)
-            return f"❌ {agent.title()} agent error: {exc}", [{"agent": agent, "status": "error"}], []
+            return f"❌ {agent.title()} agent error: {exc}", [{"agent": agent, "status": "error"}], [], []

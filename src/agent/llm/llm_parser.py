@@ -142,9 +142,12 @@ After EVERY response (including pure conversation), end with a short section:
         messages = [{"role": "system", "content": system_prompt}]
 
         # Add conversation history if provided (last 5 exchanges)
+        # Strip to only role+content — extra fields (file_artifacts, search_paths,
+        # ts, elapsed …) can push the request past the token limit.
         if conversation_history:
-            # Last 5 exchanges (10 messages)
-            messages.extend(conversation_history[-10:])
+            for _h in conversation_history[-10:]:
+                if isinstance(_h, dict) and "role" in _h and "content" in _h:
+                    messages.append({"role": _h["role"], "content": _h["content"]})
 
         # Add current user message
         messages.append({"role": "user", "content": user_message})

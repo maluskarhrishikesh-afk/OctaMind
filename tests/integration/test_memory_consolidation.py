@@ -20,8 +20,8 @@ def test_basic_consolidation():
     print("MEMORY CONSOLIDATION SYSTEM TEST")
     print("=" * 60)
 
-    # Get test agent memory
-    memory = get_agent_memory("test_consolidation_agent")
+    # Get test agent memory  ("pa_" prefix required for on-disk memory)
+    memory = get_agent_memory("pa_test_consolidation_agent")
 
     # Clear working memory for fresh start
     memory.clear_working_memory()
@@ -206,7 +206,7 @@ def test_habit_detection():
     print("HABIT DETECTION TEST")
     print("=" * 60)
 
-    memory = get_agent_memory("test_habit_agent")
+    memory = get_agent_memory("pa_test_habit_agent")  # pa_ prefix required for on-disk memory
     memory.clear_working_memory()
 
     print("\nSimulating repeated behavior pattern...")

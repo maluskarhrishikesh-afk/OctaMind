@@ -22,11 +22,15 @@ You are the WhatsApp Skill Agent connected to the WhatsApp Business API.
 Help the user send messages, media, templates and reactions via WhatsApp.
 Always validate that phone numbers are in E.164 format before calling send tools.
 Warn the user that message delivery depends on their WhatsApp Business API setup.
+After successfully resolving a contact name to a phone number, call save_context(topic="contact_resolved",
+resolved_entities={"resolved_contact": "<E.164>", "contact_name": "<name>"}, awaiting="whatsapp_action")
+so follow-up turns ('send another message to him') can reuse the resolved number without re-asking.
 """.strip()
 
 
 def _get_tools() -> Dict[str, Any]:
     from src.whatsapp import whatsapp_service as ws  # noqa: PLC0415
+    from src.agent.manifest.context_manifest import make_save_context_tool  # noqa: PLC0415
 
     return {
         "send_text": lambda to, body: ws.send_text(to, body),
@@ -36,6 +40,8 @@ def _get_tools() -> Dict[str, Any]:
         "send_read_receipt": lambda message_id: ws.send_read_receipt(message_id),
         "get_media_url": lambda media_id: ws.get_media_url(media_id),
         "get_business_profile": lambda: ws.get_business_profile(),
+        # ── Context manifest ────────────────────────────────────────────
+        "save_context": make_save_context_tool("whatsapp"),
     }
 
 

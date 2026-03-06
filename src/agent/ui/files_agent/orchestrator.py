@@ -39,7 +39,7 @@ list_archive_contents(archive_path) – List contents of a zip archive without e
 write_text_file(path, content) – Write text content to a local file (creates or overwrites it). Use when the user says "write this in a notepad", "save this as text", or similar.
 write_pdf_report(path, title, content) – Generate a formatted PDF report. Falls back to .txt if fpdf2 is not installed. Use for polished multi-page reports.
 write_excel_report(path, sheet_data, title="") – Generate an Excel .xlsx workbook. sheet_data is a dict mapping sheet_name → list-of-dicts. Use when the user asks for data in a spreadsheet or Excel format.
-deliver_file(path) – Explicitly mark a local file for download delivery to the user (Telegram document / Dashboard download button). Call this after you have found or created the file the user wants.
+deliver_file(path) – Send a single file to the user as a download (Telegram document / Dashboard button). ⛔ ONLY call when the user EXPLICITLY requests to receive a file ('send it', 'download this', 'give me the file', 'deliver it', 'show me the file'). NEVER call for count/search/analysis queries. For MULTIPLE files: collect → zip_files() → deliver_file() the zip ONCE.
 search_file_all_drives(query, extensions=None, limit=20, include_folders=True) – Search ALL drives (C:, D:, …) and the full home directory tree for a file OR folder by name/pattern. Use when the user asks to "find", "search", or "zip" something and gives only a name with no path. Returns file_path set to the first match. ALWAYS use this before zip_folder when the folder path is unknown.
 list_laptop_structure(include_hidden=False, output_file="", depth=2) – DETERMINISTIC full-laptop scan: discovers all available drives (C:, D:, …) and lists every drive root plus the major user directories (Home, Downloads, Desktop, Documents, Pictures, Music, Videos). The *depth* parameter controls how many levels deep to recurse inside user-created folders (default 2 — shows folder contents). Always writes a report .txt file automatically; the file_path in the result can be attached to emails. Use this whenever the user asks about ALL folders/files on their laptop, entire machine, or all drives.
 organize_folder(directory, by="extension", dry_run=True, include_hidden=False) – Organise files in a folder into sub-folders. by options: "extension" (PDF/, Images/, etc.), "date" (year-month), "name" (A-Z), "size" (Small/Medium/Large). ALWAYS call with dry_run=True first to show the user the plan, then call again with dry_run=False to apply.
@@ -128,8 +128,18 @@ def _build_skill_context() -> str:
         "- Use write_pdf_report for polished PDF reports; use write_excel_report when the user mentions spreadsheet, table, or Excel.\n"
         "- Use list_laptop_structure(output_file=\"...\", depth=2) when the user asks about ALL folders/files on the entire laptop or machine — this scans every drive and user directory deterministically without guessing. Use depth=3 if the user explicitly wants to see inside sub-folders. A .txt report is always auto-saved; include its path in email attachments.\n"
         "- Use search_file_all_drives(query) when the user asks to FIND or SEARCH for any specific file on the laptop — it searches all drives, not just Downloads.\n"
-        "- When searching for a file to DELIVER to the user: use search_file_all_drives first; SKIP Windows shortcut files (.lnk extension) — only return actual files (.pdf, .docx, .xlsx, .txt, .jpg, etc.).\n"
-        "- Use deliver_file(path) AFTER finding a file to explicitly send it to the user as a download.\n"
+        "⛔ CRITICAL — deliver_file() RULES (read before ANY file operation):\n"
+        "  • deliver_file() sends a file as a download. ONLY call it when the user EXPLICITLY requests delivery.\n"
+        "  • Trigger phrases that mean 'send me the file': 'send it to me', 'send here', 'download this',\n"
+        "    'give me the file', 'share it here', 'attach it', 'deliver it', 'show me the file'.\n"
+        "  • ⛔ NEVER call deliver_file() for: count queries ('how many'), search queries ('find all',\n"
+        "    'list', 'search', 'are there any', 'do I have'), or analysis queries. For these:\n"
+        "    reply with the count and summary ONLY. Do NOT send the actual files.\n"
+        "  • MULTI-FILE DELIVERY RULE: If the user requests delivery of MORE THAN 1 file:\n"
+        "    1. collect_files_to_folder() or collect_files_from_manifest() → gathers all files\n"
+        "    2. zip_folder() or zip_files() → creates a single .zip\n"
+        "    3. deliver_file() on the .zip ONCE — never loop deliver_file() over individual files.\n"
+        "- When searching for a file to DELIVER: use search_file_all_drives first; SKIP .lnk shortcut files.\n"
         "⚠️ SEARCH STRATEGY FOR FILE TYPE QUERIES:\n"
         "  When the user asks 'are there any image files / video files / pdf files' etc., ALWAYS search by\n"
         "  extension (NOT by name). Run one search_by_extension call per relevant extension, then after ALL\n"
@@ -347,6 +357,125 @@ def _is_follow_up_copy(query: str) -> bool:
     return bool(_FOLLOW_UP_COPY_RE.search(query))
 
 
+def _resolve_destination_from_query(user_query: str) -> str:
+    """
+    Extract and resolve a destination folder name from a natural-language query.
+
+    Handles (in priority order):
+      1. Absolute Windows/Unix path: "copy to C:\\Users\\..."
+      2. Named folder: "a folder named/called X" or "folder named/called X"
+      3. Sub-path under a known keyword: "to Downloads/X", "to Desktop\\X"
+      4. Known keyword standalone: "to downloads", "to desktop", "to documents"
+      5. Sub-path under Downloads "<keyword>/X" within a 'to' clause
+      6. Simple single-word name at end of query: "copy to qwerty", "put in test"
+
+    Returns the resolved absolute path string, or "" if nothing parseable is found.
+    """
+    home = Path.home()
+    downloads = home / "Downloads"
+    _KW: Dict[str, Path] = {
+        "downloads": home / "Downloads",
+        "download":  home / "Downloads",
+        "desktop":   home / "Desktop",
+        "documents": home / "Documents",
+        "document":  home / "Documents",
+        "home":      home,
+    }
+    # Stopwords that are never folder names
+    _STOP = frozenset({
+        "them", "those", "it", "the", "a", "an", "my", "our", "your",
+        "all", "folder", "folders", "directory", "file", "files",
+        "here", "there", "this", "that",
+    })
+
+    # 1. Absolute path after "to" (Windows drive letter or Unix root)
+    abs_m = re.search(
+        r'\bto\s+([A-Za-z]:[/\\][^\s,]+|/[^\s,]+)',
+        user_query, re.IGNORECASE,
+    )
+    if abs_m:
+        return abs_m.group(1).strip().rstrip("/\\")
+
+    # 2. "a folder named/called X" / "folder named/called X" / "named/called X folder"
+    named_m = re.search(
+        r'\b(?:a\s+)?(?:new\s+)?folder\s+(?:named|called)\s+["\']?(\w[\w\-\.]*)["\']?'
+        r'|(?:named|called)\s+["\']?(\w[\w\-\.]*)["\']?\s*(?:folder|directory)?',
+        user_query, re.IGNORECASE,
+    )
+    if named_m:
+        name = (named_m.group(1) or named_m.group(2) or "").strip()
+        if name and name.lower() not in _STOP:
+            return str(downloads / name)
+
+    # 3. Known keyword + sub-folder: "to Downloads/qwerty", "to Desktop\test"
+    sub_m = re.search(
+        r'\bto\s+(downloads?|desktop|documents?|home)[/\\](\w[\w\-\.]*)',
+        user_query, re.IGNORECASE,
+    )
+    if sub_m:
+        base = _KW.get(sub_m.group(1).lower().rstrip("s"), _KW.get(sub_m.group(1).lower(), downloads))
+        return str(base / sub_m.group(2))
+
+    # 4. Standalone known keyword: "to downloads", "to desktop"
+    kw_m = re.search(
+        r'\bto\s+(downloads?|desktop|documents?|home)\b',
+        user_query, re.IGNORECASE,
+    )
+    if kw_m:
+        kw = kw_m.group(1).lower().rstrip("s")
+        return str(_KW.get(kw, _KW.get(kw_m.group(1).lower(), downloads)))
+
+    # 5. "in Downloads/X" or "in Desktop/X"
+    in_sub_m = re.search(
+        r'\bin\s+(downloads?|desktop|documents?|home)[/\\](\w[\w\-\.]*)',
+        user_query, re.IGNORECASE,
+    )
+    if in_sub_m:
+        base = _KW.get(in_sub_m.group(1).lower().rstrip("s"), _KW.get(in_sub_m.group(1).lower(), downloads))
+        return str(base / in_sub_m.group(2))
+
+    # 6. "to X" or "into X" where X is a simple identifier at/near end of query
+    simple_m = re.search(
+        r'\b(?:to|into)\s+(?:a\s+)?(?:new\s+)?(?:folder\s+)?(?:named\s+|called\s+)?([A-Za-z]\w*)\s*[?!.]?\s*$',
+        user_query.strip(), re.IGNORECASE,
+    )
+    if simple_m:
+        name = simple_m.group(1).strip()
+        if name.lower() not in _STOP:
+            return str(downloads / name)
+
+    # 7. "put/place them in X" where X is a simple name at end
+    in_m = re.search(
+        r'\b(?:put|place|store|save)\b.{0,40}\bin\s+(?:a\s+)?(?:new\s+)?(?:folder\s+)?(?:named\s+|called\s+)?([A-Za-z]\w*)\s*[?!.]?\s*$',
+        user_query.strip(), re.IGNORECASE,
+    )
+    if in_m:
+        name = in_m.group(1).strip()
+        if name.lower() not in _STOP:
+            return str(downloads / name)
+
+    # 8. "to this folder - X" / "folder - X" — dash used as a name separator
+    #    e.g. "copy them to this folder - payslips_01"
+    folder_dash_m = re.search(
+        r'\bfolder\s*[-–]\s*([A-Za-z]\w*)',
+        user_query, re.IGNORECASE,
+    )
+    if folder_dash_m:
+        name = folder_dash_m.group(1).strip()
+        if name and name.lower() not in _STOP:
+            return str(downloads / name)
+
+    return ""
+
+# Fresh-search patterns — these ALWAYS bypass the direct-copy shortcut,
+# regardless of injected context or session state.
+_FRESH_SEARCH_RE = re.compile(
+    r'\b(how many|are there|do i have|find all|search for|count|list all|'
+    r'how much|any \w+ files?|search.*computer|look for|show me all)\b',
+    re.IGNORECASE,
+)
+
+
 def _try_direct_copy_from_manifest(
     user_query: str,
     artifacts_out: Optional[Dict[str, Any]],
@@ -359,7 +488,17 @@ def _try_direct_copy_from_manifest(
     Returns a result dict on success/failure, or None if conditions are not met
     (so the caller falls through to the normal LLM path).
     """
-    if not _is_follow_up_copy(user_query):
+    # Extract the raw user intent — strip injected ## Context and ## Session State
+    # blocks so we never accidentally trigger a copy on fresh search queries whose
+    # injected 'file_action' instruction contains "collect" / "copy" + "files".
+    _raw = user_query.split("## Context from Previous Turn")[0]
+    _raw = _raw.split("## Session State")[0].strip()
+
+    # Explicit guard: fresh search queries must NEVER be treated as copy follow-ups.
+    if _FRESH_SEARCH_RE.search(_raw):
+        return None
+
+    if not _is_follow_up_copy(_raw):
         return None
 
     from src.files.features.file_ops import (
@@ -375,31 +514,24 @@ def _try_direct_copy_from_manifest(
         )
         return None
 
-    # Check if the user asked for a specific destination
     import logging as _lg
     _lg.getLogger("files.orchestrator").info(
         "[direct-copy] follow-up copy detected + manifest exists — executing directly"
     )
 
-    # Look for an explicit destination in the query (e.g. "copy them to C:\Foo" or "in Downloads")
-    destination = ""
-    dest_match = re.search(
-        r'\bto\b\s+([A-Za-z]:\\[^\s,\.]+|[\w\s]+(?:folder|directory)?)',
-        user_query, re.IGNORECASE,
+    # Resolve destination using the cleaned raw intent (no injected ## blocks)
+    destination = _resolve_destination_from_query(_raw)
+    _lg.getLogger("files.orchestrator").info(
+        "[direct-copy] resolved destination=%r from query=%r", destination, _raw
     )
-    if dest_match:
-        raw_dest = dest_match.group(1).strip()
-        # Only use if it looks like an absolute path or a known folder keyword
-        if raw_dest.startswith(("C:\\", "D:\\", "E:\\", "~/", "/")):
-            destination = raw_dest
-        elif raw_dest.lower() in ("downloads", "desktop", "documents", "home"):
-            mapping = {
-                "downloads": str(Path.home() / "Downloads"),
-                "desktop":   str(Path.home() / "Desktop"),
-                "documents": str(Path.home() / "Documents"),
-                "home":      str(Path.home()),
-            }
-            destination = mapping.get(raw_dest.lower(), "")
+
+    # If we can't determine where the user wants the files, fall through to the LLM
+    # rather than silently dumping everything into the default data directory.
+    if not destination:
+        _lg.getLogger("files.orchestrator").info(
+            "[direct-copy] destination unresolvable — falling through to LLM"
+        )
+        return None
 
     result = collect_files_from_manifest(destination=destination)
 
@@ -416,6 +548,13 @@ def _try_direct_copy_from_manifest(
             f"✅ Copied **{count}** file(s) from the previous search into:\n"
             f"`{dest}`{skipped_note}"
         )
+        # Clear the file_action context — the action is complete; the next
+        # turn should not re-trigger the same copy.
+        try:
+            from src.agent.manifest.context_manifest import clear_context as _cc  # noqa: PLC0415
+            _cc()
+        except Exception:
+            pass
     else:
         message = f"❌ Copy failed: {result.get('message', 'unknown error')}"
 
@@ -424,6 +563,266 @@ def _try_direct_copy_from_manifest(
         "message": message,
         "action":  "react_response",
     }
+
+
+# ---------------------------------------------------------------------------
+# Background job dispatch — heavy full-disk scans
+# ---------------------------------------------------------------------------
+
+# Queries that imply scanning the entire computer / all drives
+_HEAVY_SCAN_RE = re.compile(
+    r'\b('
+    r'on\s+my\s+(computer|laptop|machine|pc)\b'          # "on my computer"
+    r'|across\s+(all|my|the)\s+drives?\b'                # "across all drives"
+    r'|search\s+all\s+drives?\b'                         # "search all drives"
+    r'|on\s+all\s+drives?\b'                             # "on all drives"
+    r'|entire\s+(computer|laptop|machine|disk|system)\b' # "entire computer"
+    r'|full\s+(disk|system|computer|laptop)\s+scan\b'    # "full disk scan"
+    r'|all\s+drives?\s+and\b'                            # "all drives and..."
+    r')',
+    re.IGNORECASE,
+)
+
+# Queries that narrow the scope to a specific folder (exempt from background)
+_SCOPED_DIR_RE = re.compile(
+    r'\b(in\s+(downloads?|desktop|documents?|pictures?|videos?|music)\b'
+    r'|in\s+["\'][\w\s]+["\']'        # in "folder name"
+    r'|under\s+[A-Za-z]:\\'           # under C:\
+    r'|inside\s+\w+'                  # inside SomeFolder
+    r')',
+    re.IGNORECASE,
+)
+
+
+def _is_heavy_scan(query: str) -> bool:
+    """
+    Return True when the query requires an unscoped full-disk scan that
+    would block the chat for potentially minutes.
+    """
+    if not _HEAVY_SCAN_RE.search(query):
+        return False
+    # Scoped queries ("on my computer in Downloads") are still fast enough
+    if _SCOPED_DIR_RE.search(query):
+        return False
+    return True
+
+
+def _try_background_job(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """
+    If the query is a heavy full-disk scan, dispatch it to a background job
+    and return an immediate acknowledgement message.
+
+    Returns a result dict (immediate response) on dispatch, or None to fall
+    through to normal synchronous LLM execution.
+    """
+    if not _is_heavy_scan(user_query):
+        return None
+
+    session_id = (artifacts_out or {}).get("_session_id", "")
+    pa_id      = (artifacts_out or {}).get("_pa_id", "")
+
+    # Fallback: read PA_ID from the process environment (set by Telegram poller)
+    if not pa_id:
+        import os as _os
+        pa_id = _os.environ.get("PA_ID", "")
+
+    try:
+        from src.agent.manifest.job_manifest import create_job, update_job  # noqa: PLC0415
+        from src.agent.manifest.job_runner import submit_job                 # noqa: PLC0415
+    except Exception as exc:
+        import logging as _lg
+        _lg.getLogger("files.orchestrator").warning(
+            "[bg-scan] job manifest/runner unavailable (%s) — running synchronously", exc
+        )
+        return None  # fall through to synchronous execution
+
+    job_id = create_job(
+        agent="files",
+        description=user_query[:120],
+        session_id=session_id,
+        pa_id=pa_id,
+        params={"query": user_query},
+    )
+
+    # Strip any injected '## Session State' block from the query so the plain
+    # natural-language question is stored cleanly in the closure.
+    _clean_marker = "## Session State"
+    _raw_query = user_query.split(_clean_marker)[0].strip()
+
+    # Capture references for the closure
+    _job_id = job_id
+
+    # ------------------------------------------------------------------
+    # Classify query type so _do_scan can search directly without LLM.
+    # ------------------------------------------------------------------
+    _lower = _raw_query.lower()
+    _EXT_MAP = {
+        "image":    ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "svg", "ico"],
+        "video":    ["mp4", "avi", "mov", "mkv", "wmv", "flv", "webm"],
+        "audio":    ["mp3", "wav", "flac", "aac", "m4a", "ogg", "wma"],
+        "document": ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt"],
+        "pdf":      ["pdf"],
+    }
+    _type_label: Optional[str] = None
+    _scan_exts: Optional[list] = None
+    if any(w in _lower for w in ("image", "photo", "picture", "screenshot", "jpg", "png")):
+        _type_label, _scan_exts = "image", _EXT_MAP["image"]
+    elif any(w in _lower for w in ("video", "film", "movie", "recording", "mp4", "mkv")):
+        _type_label, _scan_exts = "video", _EXT_MAP["video"]
+    elif any(w in _lower for w in ("audio", "music", "song", "mp3", "wav")):
+        _type_label, _scan_exts = "audio", _EXT_MAP["audio"]
+    elif "pdf" in _lower and not any(w in _lower for w in ("document", "word", "excel")):
+        _type_label, _scan_exts = "PDF", _EXT_MAP["pdf"]
+    elif any(w in _lower for w in ("document", "doc", "word", "excel", "spreadsheet", "office")):
+        _type_label, _scan_exts = "document", _EXT_MAP["document"]
+
+    def _do_scan() -> str:
+        """
+        Direct Python search — no LLM, no iteration limits.
+
+        For extension-based queries (images, videos, PDFs…) we call
+        search_by_extension() directly for each relevant extension.
+        For unrecognised queries we fall back to the DAG/ReAct engine
+        with the clean (Session-State-free) query.
+        """
+        import sys as _sys
+        import string as _string
+        from src.files.features.search import search_by_extension as _sbe  # noqa: PLC0415
+        from src.files.features.file_ops import save_search_manifest as _ssm  # noqa: PLC0415
+
+        if _scan_exts:
+            # ── Direct extension search (no LLM) ─────────────────────────────
+            all_paths: list = []
+            home = Path.home()
+            total = len(_scan_exts)
+
+            # Build list of directories to search:
+            # 1. Home directory (C:\Users\malus — covers most user files)
+            # 2. C:\ root but ONLY non-system top-level folders
+            #    (catches C:\Hrishikesh\, C:\Projects\, etc.)
+            # 3. Any additional drive roots (D:\, E:\, …)
+            search_roots: list = [str(home)]
+
+            # Add non-home, non-system top-level C:\ folders
+            try:
+                c_root = Path("C:\\")
+                if c_root.exists():
+                    _skip = {"windows", "program files", "program files (x86)",
+                              "programdata", "users", "recovery", "system volume information",
+                              "$recycle.bin", "perflogs", "msocache"}
+                    for child in c_root.iterdir():
+                        if child.is_dir() and child.name.lower() not in _skip:
+                            search_roots.append(str(child))
+            except Exception:
+                pass
+
+            # Add other drive roots (D:\, E:\, …)
+            if _sys.platform == "win32":
+                try:
+                    for d in _string.ascii_uppercase:
+                        if d == "C":
+                            continue
+                        drive = Path(f"{d}:\\")
+                        if drive.exists():
+                            search_roots.append(str(drive))
+                except Exception:
+                    pass
+
+            for i, ext in enumerate(_scan_exts):
+                update_job(
+                    _job_id, status="running",
+                    progress_pct=int(5 + 85 * i / total),
+                    progress_detail=f"Searching *.{ext} files ({i + 1}/{total})…",
+                )
+                for root_dir in search_roots:
+                    try:
+                        result = _sbe(ext, root_dir, True, 500)
+                        for entry in result.get("results", []):
+                            p = entry.get("path", "")
+                            if p:
+                                all_paths.append(p)
+                    except Exception:
+                        pass
+
+            # Deduplicate preserving order
+            seen: set = set()
+            unique: list = []
+            for p in all_paths:
+                if p not in seen:
+                    seen.add(p)
+                    unique.append(p)
+
+            update_job(_job_id, status="running", progress_pct=95,
+                       progress_detail="Saving results…")
+            if unique:
+                _ssm(unique)
+
+            count = len(unique)
+            # Build extension breakdown (top 5)
+            ext_counts: dict = {}
+            for p in unique:
+                e = Path(p).suffix.lower().lstrip(".") or "other"
+                ext_counts[e] = ext_counts.get(e, 0) + 1
+            top = sorted(ext_counts.items(), key=lambda x: -x[1])[:5]
+            breakdown = "  |  ".join(f".{e}: **{c}**" for e, c in top)
+
+            if count == 0:
+                return (f"✅ Scan complete — No {_type_label} files found on your computer.\n\n"
+                        f"_(Searched: {', '.join('.' + x for x in _scan_exts)})_")
+            s = "s" if count != 1 else ""
+            lines = [
+                f"✅ Scan complete — Found **{count} {_type_label} file{s}** on your computer.",
+                "",
+                f"📊 Breakdown: {breakdown}",
+                "",
+                "💡 Say *'copy them to Downloads'* to collect all found files.",
+            ]
+            return "\n".join(lines)
+
+        else:
+            # ── Fallback: LLM orchestration for non-extension queries ─────────
+            # Use the clean query (no injected Session State) to avoid DAG
+            # planning failures caused by non-JSON LLM responses.
+            update_job(_job_id, status="running", progress_pct=5,
+                       progress_detail="Starting analysis…")
+            _skill_context = _build_skill_context()
+            _tool_map      = _get_tools()
+            try:
+                res = run_skill_dag(
+                    skill_name="files",
+                    skill_context=_skill_context,
+                    tool_map=_tool_map,
+                    tool_docs=_TOOL_DOCS,
+                    user_query=_raw_query,
+                    artifacts_out={},
+                )
+            except Exception:
+                res = run_skill_react(
+                    skill_name="files",
+                    skill_context=_skill_context,
+                    tool_map=_tool_map,
+                    tool_docs=_TOOL_DOCS,
+                    user_query=_raw_query,
+                    artifacts_out={},
+                )
+            return res.get("message", "Scan complete.")
+
+    submit_job(job_id, _do_scan, session_id=session_id, pa_id=pa_id)
+
+    return {
+        "status":  "success",
+        "message": (
+            f"⏳ I've started the search in the background *(Job `{job_id}`)*.\n\n"
+            "This may take a few minutes for a full scan across all drives. "
+            "I'll send you a message here as soon as the results are ready! 🔔"
+        ),
+        "action":  "react_response",
+        "job_id":  job_id,
+    }
+
 
 
 def execute_with_llm_orchestration(
@@ -440,6 +839,17 @@ def execute_with_llm_orchestration(
     direct = _try_direct_copy_from_manifest(user_query, artifacts_out)
     if direct is not None:
         return direct
+
+    # ── Background dispatch: heavy full-disk scans run async ──────────────
+    try:
+        bg = _try_background_job(user_query, artifacts_out)
+        if bg is not None:
+            return bg
+    except Exception as _bg_exc:
+        import logging as _bg_log
+        _bg_log.getLogger("files.orchestrator").warning(
+            "[bg-scan] background dispatch raised %s — running synchronously", _bg_exc
+        )
 
     skill_context = _build_skill_context()  # dynamic — includes real OS paths
     tool_map = _get_tools()

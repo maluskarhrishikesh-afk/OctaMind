@@ -44,8 +44,8 @@ import re as _re
 
 
 def _import_workflows():
-    from src.agent.workflows import detect_agents_needed, run_workflow
-    return detect_agents_needed, run_workflow
+    from src.agent.workflows import classify_and_route, run_workflow
+    return classify_and_route, run_workflow
 
 
 # ── Emotion detection ────────────────────────────────────────────────────────
@@ -1028,7 +1028,7 @@ def _render_pa_chat(pa: dict) -> None:
 
     mk = lambda key: _pa_k(pa_id, key)
 
-    detect_agents_needed, run_workflow = _import_workflows()
+    classify_and_route, run_workflow = _import_workflows()
 
     # ── Stopped-channel nudge (compact — status pills live above the tab bar) ─
     try:
@@ -1081,6 +1081,44 @@ def _render_pa_chat(pa: dict) -> None:
         st.session_state[mk("processing")]
         and bool(st.session_state.get(mk("command")))
     )
+
+    # ── Background job completion notifications (auto-refresh every 8 s) ────
+    @st.fragment(run_every=8)
+    def _job_notifications_fragment() -> None:
+        """Poll octa_job_notifications.json and inject completions as chat messages."""
+        import json as _json
+        from pathlib import Path as _Path
+        _nf = _Path(__file__).resolve().parents[4] / "data" / "octa_job_notifications.json"
+        _sid = f"dashboard_{pa_id}"
+        if not _nf.exists():
+            return
+        try:
+            _entries = _json.loads(_nf.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        _unread = [e for e in _entries if not e.get("read") and e.get("session_id") == _sid]
+        if not _unread:
+            return
+        # Mark all as read and persist
+        for e in _entries:
+            if not e.get("read") and e.get("session_id") == _sid:
+                e["read"] = True
+        try:
+            _nf.write_text(_json.dumps(_entries, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
+        # Inject each completion as an assistant chat message
+        _msgs_key = mk("messages")
+        _changed = False
+        for entry in _unread:
+            _msg_text = entry.get("message", "✅ Background task complete.")
+            st.session_state[_msgs_key].append({"role": "assistant", "content": _msg_text})
+            _changed = True
+        # Trigger a full-app rerun so the new messages appear in the chat
+        if _changed:
+            st.rerun()
+
+    _job_notifications_fragment()
 
     # ── Scrollable chat history area ──────────────────────────────────────────
     # Fixed-height container keeps the chat input permanently visible below.
@@ -1186,11 +1224,55 @@ def _render_pa_chat(pa: dict) -> None:
     )
     if _routing_command != command:
         logger.info("│  [ENRICH] Scheduling follow-up enriched: %.120s", _routing_command)
-    agents_needed = detect_agents_needed(_routing_command)
+    # ── Unified intent classification ──────────────────────────────────────
+    # classify_and_route() handles all three message patterns in one LLM call:
+    #   CHAT              → "Do you know about cricket?"
+    #   CONTEXT_FOLLOWUP  → "Can you zip that and mail it to me?" (after search)
+    #   FRESH_TASK        → "Are there any payslip files on my computer?"
+    try:
+        from src.agent.manifest.context_manifest import read_context as _read_ctx
+        _active_ctx = _read_ctx()
+    except Exception:
+        _active_ctx = None
+    try:
+        from src.agent.context.conversation_state import _default_tracker as _cst_tracker
+        _session_state = _cst_tracker.build(
+            st.session_state.get(mk("messages"), []), _routing_command
+        )
+    except Exception:
+        _session_state = None
+
+    intent = classify_and_route(_routing_command, _active_ctx, _session_state)
+    agents_needed = intent.agents if not intent.is_chat else None
     logger.info(
-        "│  [ROUTE]  agents=%s  source=dashboard  pa=%s",
-        agents_needed or "conversational", pa_name,
+        "│  [INTENT]  category=%s  agents=%s  reason=%s  source=dashboard  pa=%s",
+        intent.category, agents_needed or "conversational", intent.reason, pa_name,
     )
+
+    # ── Pronoun clarification guard ──────────────────────────────────────────
+    if not intent.is_chat and not agents_needed:
+        import re as _re_routing
+        _pronoun_re = _re_routing.compile(
+            r'\b(them|those|those files|those documents|it|that|the files|'
+            r'the documents|the folder|they)\b',
+            _re_routing.IGNORECASE,
+        )
+        if _pronoun_re.search(command):
+            logger.info("│  [INTENT-CLARIFY] pronoun + no resolvable agents → clarification")
+            _clarify_msg = (
+                "🤔 I'm not sure what you're referring to — I don't have any files "
+                "from a recent search in this conversation.\n\n"
+                "Could you be more specific? For example:\n"
+                "- *'Search for my payslip files and email them to me'*\n"
+                "- *'Find the project report and send it to my email'*"
+            )
+            _result_ph.markdown(_clarify_msg)
+            st.session_state[mk("messages")].append({"role": "assistant", "content": _clarify_msg})
+            _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+            st.session_state[mk("processing")] = False
+            st.rerun()
+        # No pronoun reference either — treat as conversational
+        agents_needed = None
 
     # Filter to only this PA's attached skills
     if agents_needed is not None and pa_skills:
@@ -1210,55 +1292,6 @@ def _render_pa_chat(pa: dict) -> None:
             st.session_state[mk("processing")] = False
             st.rerun()
         agents_needed = filtered
-
-    # ── Smart routing upgrade: "mail/send them" with multiple found files ─────
-    # When the router picks only ["email"] but session state contains multiple
-    # previously-found file paths, the user almost certainly wants zip-then-email
-    # (not 3 separate emails).  Upgrade to ["files", "email"] so the DAG planner
-    # handles the zip step automatically.
-    # Also: if the command uses pronouns ("them", "those") but NO files exist in
-    # context, show a clear clarification message instead of silently failing.
-    if agents_needed == ["email"]:
-        try:
-            from src.agent.context.conversation_state import _default_tracker as _cst_tracker
-            import re as _re_routing
-            _cst_state = _cst_tracker.build(
-                st.session_state.get(mk("messages"), []), command
-            )
-            _found_paths = _cst_state.get("last_found_paths", [])
-            _found_folder = _cst_state.get("last_found_folder", "")
-            if len(_found_paths) > 1:
-                agents_needed = ["files", "email"]
-                logger.info(
-                    "│  [ROUTE-UPGRADE]  ['email'] → ['files','email']  "
-                    "(%d files in context — will zip before emailing)",
-                    len(_found_paths),
-                )
-            elif len(_found_paths) == 0 and not _found_folder:
-                # No files in context — check if command uses a pronoun reference
-                _pronoun_re = _re_routing.compile(
-                    r'\b(them|those|those files|those documents|it|the files|'
-                    r'the documents|the folder|they)\b',
-                    _re_routing.IGNORECASE,
-                )
-                if _pronoun_re.search(command):
-                    logger.info(
-                        "│  [ROUTE-CLARIFY]  Pronoun reference + no file context → clarification"
-                    )
-                    _clarify_msg = (
-                        "🤔 I'm not sure what to email — I don't have any files from a "
-                        "recent search in this conversation.\n\n"
-                        "Could you be more specific? For example:\n"
-                        "- *'Search for my payslip files and email them to me'*\n"
-                        "- *'Find the project report and send it to my email'*"
-                    )
-                    _result_ph.markdown(_clarify_msg)
-                    st.session_state[mk("messages")].append({"role": "assistant", "content": _clarify_msg})
-                    _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
-                    st.session_state[mk("processing")] = False
-                    st.rerun()
-        except Exception:
-            pass
 
     # ── Conversational (no skill needed) ─────────────────────────────────────
     if agents_needed is None:
@@ -1300,7 +1333,13 @@ def _render_pa_chat(pa: dict) -> None:
                 _routing_command,
                 st.session_state.get(mk("messages"), []),
             )
-            result = executor(_ctx_command, agent_id=None) if executor else {"action": "error", "message": f"Skill '{single_agent}' not loaded."}
+            # Seed session routing info so background jobs can notify the user
+            _pa_artifacts: dict = {
+                "_session_id": f"dashboard_{pa_id}",
+                "_pa_id": pa_id,
+                "_source": "dashboard",
+            }
+            result = executor(_ctx_command, agent_id=pa_id, artifacts_out=_pa_artifacts) if executor else {"action": "error", "message": f"Skill '{single_agent}' not loaded."}
             _result_status = result.get("status", "success")
             action = result.get("action", "react_response")
             if action == "react_response" or "message" in result:
@@ -1366,7 +1405,15 @@ def _render_pa_chat(pa: dict) -> None:
                 except Exception as _dl_err:
                     logger.debug("Download button render error: %s", _dl_err)
 
-        st.session_state[mk("messages")].append({"role": "assistant", "content": _save_msg})
+        # ── Gap-6: store search_paths so ConversationStateTracker can read ──
+        # The hub path already stores search_paths per message; mirror that here
+        # so the Dashboard's context injection (_inject_conversation_context)
+        # can resolve follow-up references like "zip them" correctly.
+        _found_paths = _pa_artifacts.get("found_paths", [])
+        _msg_entry: dict = {"role": "assistant", "content": _save_msg}
+        if _found_paths:
+            _msg_entry["search_paths"] = _found_paths
+        st.session_state[mk("messages")].append(_msg_entry)
         _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
         st.session_state[mk("processing")] = False
         st.rerun()

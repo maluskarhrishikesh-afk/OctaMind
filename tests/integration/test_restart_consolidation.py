@@ -23,7 +23,7 @@ def test_state_persistence():
     print("\n📅 DAY 1 - Initial Session")
     print("-" * 60)
 
-    memory = get_agent_memory("test_restart_agent")
+    memory = get_agent_memory("pa_test_restart_agent")  # pa_ prefix required for on-disk memory
     memory.clear_working_memory()
 
     # Add 15 interactions (not enough to trigger)
@@ -70,7 +70,7 @@ def test_state_persistence():
     print("-" * 60)
 
     # Create new memory instance (simulates restart)
-    memory_restarted = get_agent_memory("test_restart_agent")
+    memory_restarted = get_agent_memory("pa_test_restart_agent")
     consolidator_restarted = memory_restarted.get_consolidator()
 
     print(f"✅ Agent restarted, loading state from disk...")

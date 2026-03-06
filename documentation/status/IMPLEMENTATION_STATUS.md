@@ -2,12 +2,80 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
-Last updated: 2026-03-06 (Session 5 — Calendar local timezone fix; copy destination Rule #1 fix; operation history stack with 30-day undo + list_file_operations tool; context audit history with 30-day auto-prune)  
+Last updated: 2026-03-07 (Session 6 — 6 pipeline architecture gaps fixed: trigger_keywords routing, keyed context store, scope field, auto-write context safety net, clear-after-delivery, search_paths in Dashboard messages)  
+Previous: 2026-03-06 (Session 5 — Calendar local timezone fix; copy destination Rule #1 fix; operation history stack with 30-day undo + list_file_operations tool; context audit history with 30-day auto-prune)  
 Previous: 2026-03-02 (Session 4 — Calendar year bug fixed; "send here" routing fixed; enriched scheduling context now propagated to agent execution; search_by_name sorts non-.lnk first; search_file_all_drives skips .lnk; skill_dag .id example fixed to .path; server restart still required)  
 Previous: 2026-03-02 (Session 3 — New Files tools: search_file_all_drives, deliver_file, write_pdf_report, write_excel_report, organize_folder; fixed list_laptop_structure to always auto-save report as file_path)  
 Previous: 2026-03-02 (Bug fixes: calendar date-context loss, ReAct observation truncation, Telegram Markdown entity crash, DAG JSON fence parsing verified; added human-friendly per-request workflow summary log; DAG algorithm walkthrough document added)  
 Previous: 2026-03-02 (Telegram UX overhaul: typing indicators, real-time progress editing, /reset & /agents commands, long-message splitting, file-artifact delivery; Dashboard download button for file artifacts; HubProcessor scheduling-context enrichment propagated to Telegram channel; `send_document_file` multipart upload added to telegram_service)  
 Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine causing cascading `unknown action ''` failures; fixed tilde path expansion in dag_planner instruction resolver; added total LLM call count to workflow completion log; fixed website unicode emoji rendering; updated quickstart to remove internal Python snippet)
+
+---
+
+## ✅ 2026-03-07 Session 6 — 6 Pipeline Architecture Gaps Fixed
+
+### Gap 1 — trigger_keywords for reliable keyword-fallback routing
+
+**Problem:** The keyword fallback in `router.py` was built purely from description text. High-value domain words like `"payslip"`, `"rsi"`, `"whatsapp"` were absent from description sentences and therefore invisible to the fallback router.
+
+**Fix:**
+- Added `"trigger_keywords": [...]` list to every agent in `src/agent/workflows/agent_registry.py` (11 agents — drive, email, whatsapp, files, calendar, scheduler, file_organizer, habit_tracker, browser, stock_market, linkedin)
+- `_build_keyword_map()` in `router.py` now unions description-derived words with `trigger_keywords`
+- `_build_distinctive_keyword_map()` treats `trigger_keywords` as always-distinctive — they bypass the IDF frequency filter entirely
+
+---
+
+### Gap 2 — Auto-write context safety net in processor.py
+
+**Problem:** If a files-agent executor returned `search_paths` but the agent forgot to call `write_context()`, the next user turn had no context to act on ("copy them" → agent asks "which files?").
+
+**Fix:**
+- In `src/agent/hub/processor.py` → `_run_single_agent()`: after the executor returns, if `search_paths` is non-empty AND `read_context(agent=agent) is None`, auto-writes a minimal context entry with `topic="auto_search_result"`, `awaiting="file_action"`, `last_found_paths`, `last_found_folder`, `count`
+
+---
+
+### Gap 3 — scope field in write_context()
+
+**Problem:** `write_context()` had no way to record whether a file search returned a single file, a single folder, or multiple folders — the DAG planner had to guess the correct zip strategy.
+
+**Fix:**
+- Added `scope: Optional[str]` parameter to `write_context()` in `src/agent/manifest/context_manifest.py`
+- Valid values: `"single_file"` | `"single_folder"` | `"multi_folder"`
+- The DAG planner reads `scope` from the context manifest to choose `zip_folder` vs `zip_files`
+
+---
+
+### Gap 4 — Keyed context store (schema_version=2)
+
+**Problem:** `write_context()` overwrote the entire `octa_context.json` file. If a calendar agent set time-selection context and the files agent then wrote its own context in the same turn, the calendar context was destroyed.
+
+**Fix:**
+- `octa_context.json` is now a **keyed store**: top-level keys are agent names, each agent owns its own slot
+- `write_context()` loads existing store → writes into `store[agent]` → saves back (other agents' slots untouched)
+- `read_context(agent=None)` accepts optional `agent` arg; returns that agent's slot or most-recently-written entry
+- `clear_context(agent=None)` accepts optional `agent` arg; removes just that slot (or entire file)
+- Legacy flat (schema_version=1) payloads are auto-migrated on next `write_context()` call
+- File format bumped to `schema_version: 2`
+
+---
+
+### Gap 5 — clear_context after multi-agent delivery
+
+**Problem:** After a multi-agent workflow (e.g. find files → email them) delivered its result, the file-action context remained on disk. A later unrelated query could accidentally pick it up and try to act on stale paths.
+
+**Fix:**
+- In `src/agent/hub/processor.py` → `_dispatch()` multi-agent path: after `run_workflow()` returns with `file_artifacts` non-empty, calls `clear_context()` immediately
+
+---
+
+### Gap 6 — search_paths stored in Dashboard message dict
+
+**Problem:** The Dashboard (`src/agent/ui/personal_assistant/app.py`) ran agent executors directly but discarded `found_paths` from the result. The download button had no file to offer.
+
+**Fix:**
+- Single-skill path: after executor returns, extracts `_pa_artifacts.get("found_paths", [])`
+- Stores as `{"role": "assistant", "content": _save_msg, "search_paths": _found_paths}` (key only added when non-empty)
+- Dashboard UI can read `search_paths` to render the download button
 
 ---
 

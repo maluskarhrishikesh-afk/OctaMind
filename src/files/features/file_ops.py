@@ -2012,8 +2012,15 @@ def collect_files_from_manifest(
                     if not target.exists():
                         break
             try:
-                shutil.copy2(str(src), str(target))
-                copied.append(str(target))
+                if src.is_dir():
+                    # Merge the directory tree into destination using copytree.
+                    # dirs_exist_ok=True (Python ≥3.8) is safe for incremental copies.
+                    target_dir = dst_path / src.name
+                    shutil.copytree(str(src), str(target_dir), dirs_exist_ok=True)
+                    copied.append(str(target_dir))
+                else:
+                    shutil.copy2(str(src), str(target))
+                    copied.append(str(target))
             except Exception as exc2:
                 logger.warning("collect_files_from_manifest: skip '%s': %s", src, exc2)
                 skipped.append(str(src))

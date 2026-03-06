@@ -107,7 +107,23 @@ _AWAITING_INSTRUCTIONS: Dict[str, str] = {
         "The user is acting on files from the previous search. "
         "File paths are stored in the file manifest (octa_manifest.txt). "
         "Call collect_files_from_manifest() to copy, or use files from `listed_files` "
-        "in this context. Do NOT run a new search — the files are already resolved."
+        "in this context. Do NOT run a new search — the files are already resolved.\n"
+        "FOLDER SHORTCUT: If `listed_files` contains a single entry with type=folder "
+        "(e.g. {\"path\": \"C:\\\\Users\\\\...\\\\Text\", \"type\": \"folder\"}), "
+        "call zip_folder(folder_path=<that path>) DIRECTLY — do NOT call "
+        "collect_files_from_manifest for a folder path.\n"
+        "DESTINATION RULES — resolve in this order and NEVER ask the user:\n"
+        "  1. Absolute path given (e.g. 'C:\\\\Users\\\\...') → use as-is.\n"
+        "  2. 'a folder named X' / 'a folder called X' / 'called X' → "
+        "     destination=str(Downloads / 'X').\n"
+        "  3. 'to downloads/X', 'to Desktop\\\\X' → expand Downloads/Desktop path.\n"
+        "  4. Keyword only ('to downloads', 'to desktop', 'to documents') → "
+        "     destination=str(<Keyword_path>).\n"
+        "  5. Single word after 'to' (e.g. 'to qwerty') → "
+        "     destination=str(Downloads / 'qwerty').\n"
+        "  6. No destination at all → use default workspace data folder.\n"
+        "Pass destination= to collect_files_from_manifest(). NEVER leave it empty when "
+        "the user named a folder."
     ),
     "drive_file_action": (
         "The user is acting on one of the Drive files listed in `listed_files` in the context. "
@@ -119,6 +135,26 @@ _AWAITING_INSTRUCTIONS: Dict[str, str] = {
         "The user is confirming or cancelling the previously proposed action. "
         "Affirmative (yes / ok / sure / go ahead / do it / yep / correct) → execute immediately. "
         "Negative (no / cancel / stop / don't / never mind / abort) → abort and confirm cancellation."
+    ),
+    "whatsapp_action": (
+        "The user is acting on a WhatsApp contact or conversation from the context above. "
+        "Resolve their contact reference ('Bob', 'him', 'her', 'them', 'the contact') "
+        "to the `resolved_contact` phone number stored in the context. "
+        "Use that number directly in the send tool — do NOT ask for the phone number."
+    ),
+    "habit_action": (
+        "The user is acting on a habit from `listed_habits` in the context. "
+        "Resolve their reference ('first one', 'the gym habit', 'reading', 'second') "
+        "by zero-based index or by name/description match against the habit list. "
+        "Use the matched habit's `name` directly in the tool call — "
+        "do NOT call get_habits or daily_checkin again."
+    ),
+    "stock_action": (
+        "The user is acting on a previously analysed stock ticker from the context. "
+        "Use `resolved_ticker` directly (e.g. 'TSLA', 'AAPL') in tool calls — "
+        "do NOT call resolve_ticker again. "
+        "Reference `current_price` from context for price-relative actions "
+        "(alerts, percentage calculations, target comparisons)."
     ),
 }
 
@@ -133,12 +169,20 @@ def write_context(
     awaiting: Optional[str] = None,
     pending_selection: Optional[Dict[str, Any]] = None,
     ttl_minutes: int = _DEFAULT_TTL,
+    scope: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Persist resolved context to <workspace>/data/octa_context.json.
 
     Call this immediately after any agent action that produces data the user
     will need to reference in their next turn ("2 PM", "the first one", etc.).
+
+    The file is a **keyed store** — each agent owns its own slot so multiple
+    agents' contexts can coexist without overwriting each other:
+        {
+          "files": {"agent": "files", "topic": "file_search", ...},
+          "email": {"agent": "email", "topic": "email_list", ...}
+        }
 
     Args:
         agent:              Agent that produced this context. One of:
@@ -152,28 +196,56 @@ def write_context(
                             "confirmation". Omit if no follow-up is expected.
         pending_selection:  Optional structured selection surface (options list, etc.)
         ttl_minutes:        Context validity window. Default 60 minutes.
+        scope:              Optional spatial scope hint for file searches.
+                            One of: "single_file", "single_folder", "multi_folder".
+                            The DAG planner uses this to pick the right zip strategy.
 
     Returns:
         {"status": "success"|"error", "context_file": str, "message": str}
     """
     try:
         _MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+
+        # ── Load existing keyed store (or start fresh) ─────────────────────
+        store: Dict[str, Any] = {}
+        if _CONTEXT_FILE.exists():
+            try:
+                raw = json.loads(_CONTEXT_FILE.read_text(encoding="utf-8"))
+                # Migrate legacy flat format (schema_version=1, "agent" at top level)
+                if isinstance(raw, dict) and "written_at" in raw and "agent" in raw:
+                    old_agent_key = raw.get("agent", "unknown")
+                    store = {old_agent_key: raw}
+                    logger.info(
+                        "[context-manifest] migrated legacy flat context → keyed store (agent=%s)",
+                        old_agent_key,
+                    )
+                elif isinstance(raw, dict):
+                    store = raw
+            except Exception as _re:
+                logger.warning("[context-manifest] could not read existing store, starting fresh: %s", _re)
+                store = {}
+
         now = datetime.now()
         payload: Dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "written_at":     now.isoformat(timespec="seconds"),
             "expires_at":     (now + timedelta(minutes=ttl_minutes)).isoformat(timespec="seconds"),
             "agent":          agent,
             "topic":          topic,
             "resolved_entities": resolved_entities,
         }
+        if scope:
+            payload["scope"] = scope
         if awaiting:
             payload["awaiting"] = awaiting
         if pending_selection:
             payload["pending_selection"] = pending_selection
 
+        # Write into the agent's dedicated slot in the store
+        store[agent] = payload
+
         _CONTEXT_FILE.write_text(
-            json.dumps(payload, indent=2, ensure_ascii=False),
+            json.dumps(store, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
         logger.info(
@@ -211,9 +283,20 @@ def write_context(
         return {"status": "error", "message": str(exc)}
 
 
-def read_context(max_age_minutes: int = _DEFAULT_TTL) -> Optional[Dict[str, Any]]:
+def read_context(
+    max_age_minutes: int = _DEFAULT_TTL,
+    agent: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """
-    Return the context manifest if it exists and has not expired.
+    Return the context manifest entry if it exists and has not expired.
+
+    The file is a keyed store ``{agent_name: {context_dict}}``.
+
+    Args:
+        max_age_minutes: Maximum age (minutes) before context is discarded.
+        agent:           If given, return only that agent's context entry.
+                         If None, return the most recently written entry
+                         across all agents.
 
     Returns None if the file is missing, unreadable, malformed, or stale.
     """
@@ -221,7 +304,26 @@ def read_context(max_age_minutes: int = _DEFAULT_TTL) -> Optional[Dict[str, Any]
         if not _CONTEXT_FILE.exists():
             return None
 
-        ctx = json.loads(_CONTEXT_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(_CONTEXT_FILE.read_text(encoding="utf-8"))
+
+        # ── Determine candidate entries ────────────────────────────────────
+        # Handle legacy flat format (schema_version=1, "written_at" at root level)
+        if isinstance(raw, dict) and "written_at" in raw and "agent" in raw:
+            entries = [raw]
+        else:
+            # Keyed store format — values are context dicts
+            entries = [v for v in raw.values() if isinstance(v, dict) and "written_at" in v]
+
+        # Filter by requested agent
+        if agent:
+            entries = [e for e in entries if e.get("agent") == agent]
+
+        if not entries:
+            return None
+
+        # Pick the most recently written entry (if multiple)
+        entries.sort(key=lambda e: e.get("written_at", ""), reverse=True)
+        ctx = entries[0]
 
         # Check explicit expires_at field first
         expires_str = ctx.get("expires_at", "")
@@ -250,16 +352,50 @@ def read_context(max_age_minutes: int = _DEFAULT_TTL) -> Optional[Dict[str, Any]
         return None
 
 
-def clear_context() -> None:
-    """Delete the live context manifest (e.g. after a completed action).
+def clear_context(agent: Optional[str] = None) -> None:
+    """Delete the live context manifest or one agent's slot within it.
+
+    Args:
+        agent: If given, remove only that agent's entry from the keyed store.
+               If the store becomes empty after removal, the file is deleted.
+               If None (default), delete the entire context file.
 
     The audit history file is NOT touched here — it is pruned separately
     by :func:`prune_context_history` on a daily schedule.
     """
     try:
-        if _CONTEXT_FILE.exists():
+        if not _CONTEXT_FILE.exists():
+            return
+
+        if agent is None:
+            # Clear everything
             _CONTEXT_FILE.unlink()
-            logger.info("[context-manifest] cleared")
+            logger.info("[context-manifest] cleared (all agents)")
+            return
+
+        # Remove only the specified agent's slot
+        try:
+            raw = json.loads(_CONTEXT_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            _CONTEXT_FILE.unlink()
+            return
+
+        # Handle legacy flat format
+        if isinstance(raw, dict) and "written_at" in raw and "agent" in raw:
+            if raw.get("agent") == agent:
+                _CONTEXT_FILE.unlink()
+                logger.info("[context-manifest] cleared agent=%s (legacy flat format)", agent)
+            return
+
+        if agent in raw:
+            del raw[agent]
+            if raw:
+                _CONTEXT_FILE.write_text(json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8")
+                logger.info("[context-manifest] cleared agent=%s (%d agents remain)", agent, len(raw))
+            else:
+                _CONTEXT_FILE.unlink()
+                logger.info("[context-manifest] cleared agent=%s (store empty, file deleted)", agent)
+
     except Exception as exc:
         logger.warning("[context-manifest] clear failed: %s", exc)
 
@@ -359,7 +495,7 @@ def get_context_history(days: int = _AUDIT_TTL_DAYS) -> list:
 # Query injection
 # ---------------------------------------------------------------------------
 
-def inject_context_into_query(user_query: str) -> str:
+def inject_context_into_query(user_query: str, current_agent: str = "") -> str:
     """
     Read the active context manifest and inject it as a structured block
     into *user_query*, placed immediately before the '## Session State' section.
@@ -382,16 +518,36 @@ def inject_context_into_query(user_query: str) -> str:
 
         ## Session State (structured — prefer these resolved values over raw text)
         { "current_date": "2026-03-05", ... }
+
+    Args:
+        user_query:     The raw query to enrich.
+        current_agent:  The agent that will handle *this* request (e.g. "drive",
+                        "files", "email").  When supplied and it differs from the
+                        agent that *wrote* the context, the tool-specific CONTEXT
+                        INSTRUCTION block is suppressed — the agent receives only
+                        the data JSON so it stays aware of prior context without
+                        being instructed to call tools that don't belong to it.
     """
-    ctx = read_context()
+    # When current_agent is specified, prefer that agent's own context entry so
+    # the injected instructions match the active agent's tool set.  Fall back to
+    # the most-recently-written entry if no agent-specific context exists.
+    if current_agent:
+        ctx = read_context(agent=current_agent)
+        if ctx is None:
+            ctx = read_context()  # cross-agent awareness fallback
+    else:
+        ctx = read_context()
+
     if ctx is None:
         return user_query
 
-    agent    = ctx.get("agent", "unknown")
+    ctx_agent = ctx.get("agent", "unknown")
     topic    = ctx.get("topic", "")
     entities = ctx.get("resolved_entities", {})
     awaiting = ctx.get("awaiting", "")
     w_str    = ctx.get("written_at", "")
+    # For legacy callers that read the local `agent` variable below:
+    agent = ctx_agent
 
     # Human-friendly age stamp
     age_label = ""
@@ -418,7 +574,12 @@ def inject_context_into_query(user_query: str) -> str:
         json.dumps(entities, indent=2, ensure_ascii=False),
     ]
 
-    if awaiting:
+    # Only inject tool-specific CONTEXT INSTRUCTION when the current agent
+    # matches the agent that wrote the context (or the caller didn't specify).
+    # Cross-agent injection of file/email/drive instructions causes the wrong
+    # agent to hallucinate tools it doesn't own (BUG A fix).
+    same_agent = (not current_agent) or (current_agent == ctx_agent)
+    if awaiting and same_agent:
         instruction = _AWAITING_INSTRUCTIONS.get(
             awaiting,
             f"The user is following up on the above context (awaiting={awaiting}).",
@@ -429,8 +590,22 @@ def inject_context_into_query(user_query: str) -> str:
             "Do NOT ask the user to re-specify any information already present "
             "in the context block above."
         )
+    elif awaiting and not same_agent:
+        # Different agent: give awareness note only — no tool instructions
+        lines.append(
+            f"\n[NOTE: The previous turn was handled by the '{ctx_agent}' agent "
+            f"(awaiting={awaiting}). This context is for your awareness only — "
+            f"do NOT attempt to call tools that belong to the '{ctx_agent}' agent.]"
+        )
 
     context_block = "\n".join(lines)
+
+    logger.info(
+        "[CTX-INJECT] current_agent=%s ctx_agent=%s topic=%s awaiting=%s same_agent=%s "
+        "entities_keys=%s",
+        current_agent or "(unset)", ctx_agent, topic, awaiting or "(none)", same_agent,
+        list(entities.keys()),
+    )
 
     # Insert BEFORE '## Session State' if present; otherwise append.
     marker = "## Session State"
@@ -604,20 +779,35 @@ def auto_save_drive_context(result: Any, query: str = "") -> Any:
 def auto_save_files_context(result: Any, query: str = "") -> Any:
     """
     After a local file search, save the search metadata as context.
-    The actual file paths are already in octa_manifest.txt (file manifest).
+    The actual file paths are in octa_manifest.txt (file manifest);
+    for small result sets (≤ 50 files) we also embed the path list directly
+    so the LLM can resolve specific-file references ('the second one', 'report.pdf').
     Returns `result` unchanged.
     """
     try:
         if not isinstance(result, dict):
             return result
-        count = result.get("count", len(result.get("results", [])))
+        results_list = result.get("results", [])
+        count = result.get("count", len(results_list))
         if count <= 0:
             return result
         entities: Dict[str, Any] = {
-            "query":          query,
-            "found_count":    count,
-            "file_manifest":  str(_MANIFEST_DIR / "octa_manifest.txt"),
+            "query":         query,
+            "found_count":   count,
+            "file_manifest": str(_MANIFEST_DIR / "octa_manifest.txt"),
         }
+        # Embed compact file list for manageable result sets so the LLM can
+        # resolve references like 'the second PDF' or 'report.pdf' in follow-up turns.
+        if results_list and count <= 50:
+            entities["listed_files"] = [
+                {
+                    "index": idx,
+                    "path":  r.get("path", str(r)) if isinstance(r, dict) else str(r),
+                    "name":  r.get("name", "") if isinstance(r, dict) else "",
+                    "size":  r.get("size_human", r.get("size", "")) if isinstance(r, dict) else "",
+                }
+                for idx, r in enumerate(results_list[:50])
+            ]
         write_context(
             agent="files",
             topic="file_search",
@@ -626,4 +816,113 @@ def auto_save_files_context(result: Any, query: str = "") -> Any:
         )
     except Exception as exc:
         logger.debug("[context-manifest] auto_save_files_context skipped: %s", exc)
+    return result
+
+
+def auto_save_whatsapp_context(resolved_contact: str, contact_name: str = "", query: str = "") -> None:
+    """
+    After resolving a WhatsApp contact, persist the resolved phone number so
+    follow-up turns ('send another message to him') don't need re-resolution.
+
+    Args:
+        resolved_contact:  E.164 phone number resolved for this turn.
+        contact_name:      Display name of the contact (for readability).
+        query:             Original user query (stored for audit purposes).
+    """
+    try:
+        if not resolved_contact:
+            return
+        entities: Dict[str, Any] = {
+            "resolved_contact": resolved_contact,
+        }
+        if contact_name:
+            entities["contact_name"] = contact_name
+        if query:
+            entities["query"] = query
+        write_context(
+            agent="whatsapp",
+            topic="contact_resolved",
+            resolved_entities=entities,
+            awaiting="whatsapp_action",
+        )
+    except Exception as exc:
+        logger.debug("[context-manifest] auto_save_whatsapp_context skipped: %s", exc)
+
+
+def auto_save_habit_context(result: Any) -> Any:
+    """
+    After listing habits or completing a daily_checkin, save the compact habit
+    list so the next turn can reference habits by index or name without
+    calling get_habits again.
+    Returns `result` unchanged.
+    """
+    try:
+        habits: List[Any] = []
+        if isinstance(result, list):
+            habits = result
+        elif isinstance(result, dict):
+            habits = result.get("habits", result.get("items", []))
+        if not habits:
+            return result
+        listed = [
+            {
+                "index":       idx,
+                "name":        h.get("name", "") if isinstance(h, dict) else str(h),
+                "frequency":   h.get("frequency", "") if isinstance(h, dict) else "",
+                "completed_today": h.get("completed_today", h.get("done", False)) if isinstance(h, dict) else False,
+                "streak":      h.get("current_streak", h.get("streak", 0)) if isinstance(h, dict) else 0,
+            }
+            for idx, h in enumerate(habits[:30])
+        ]
+        write_context(
+            agent="habit",
+            topic="habit_list",
+            resolved_entities={"listed_habits": listed},
+            awaiting="habit_action",
+        )
+    except Exception as exc:
+        logger.debug("[context-manifest] auto_save_habit_context skipped: %s", exc)
+    return result
+
+
+def auto_save_stock_context(result: Any, symbol: str = "") -> Any:
+    """
+    After fetching a stock quote or analysis, save the resolved ticker and
+    key price data so follow-up turns ('set an alert at 250', 'show technical
+    analysis') don't need to re-resolve the ticker.
+    Returns `result` unchanged.
+    """
+    try:
+        if not isinstance(result, dict):
+            return result
+        if result.get("status") == "error":
+            return result
+        resolved_ticker = (
+            result.get("symbol") or result.get("ticker") or symbol or ""
+        ).upper()
+        if not resolved_ticker:
+            return result
+        entities: Dict[str, Any] = {
+            "resolved_ticker": resolved_ticker,
+        }
+        # Embed compact price data for immediate follow-up use
+        for key in ("price", "current_price", "close", "last"):
+            if result.get(key):
+                entities["current_price"] = result[key]
+                break
+        for key in ("change_pct", "change_percent", "percent_change"):
+            if result.get(key) is not None:
+                entities["change_pct"] = result[key]
+                break
+        company = result.get("company") or result.get("name") or result.get("longName", "")
+        if company:
+            entities["company"] = company
+        write_context(
+            agent="stock",
+            topic="stock_query",
+            resolved_entities=entities,
+            awaiting="stock_action",
+        )
+    except Exception as exc:
+        logger.debug("[context-manifest] auto_save_stock_context skipped: %s", exc)
     return result

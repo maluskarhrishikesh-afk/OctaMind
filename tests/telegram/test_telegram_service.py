@@ -54,23 +54,16 @@ class TestTelegramAuth:
         from src.telegram.telegram_auth import get_bot_token
         assert get_bot_token() == "env_tok_123"
 
-    def test_settings_json_fallback(self, monkeypatch):
+    def test_no_settings_fallback_returns_empty(self, monkeypatch):
+        """settings.json fallback was removed; without the env var the token is empty."""
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-        with patch(
-            "src.telegram.telegram_auth._load_settings",
-            return_value={"telegram": {"bot_token": "settings_tok"}},
-        ):
-            from src.telegram.telegram_auth import get_bot_token
-            assert get_bot_token() == "settings_tok"
+        from src.telegram.telegram_auth import get_bot_token
+        assert get_bot_token() == ""
 
     def test_empty_when_nothing_configured(self, monkeypatch):
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-        with patch(
-            "src.telegram.telegram_auth._load_settings",
-            return_value={},
-        ):
-            from src.telegram.telegram_auth import get_bot_token
-            assert get_bot_token() == ""
+        from src.telegram.telegram_auth import get_bot_token
+        assert get_bot_token() == ""
 
     def test_credentials_configured_true(self, monkeypatch):
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok")
@@ -79,12 +72,8 @@ class TestTelegramAuth:
 
     def test_credentials_configured_false(self, monkeypatch):
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-        with patch(
-            "src.telegram.telegram_auth._load_settings",
-            return_value={},
-        ):
-            from src.telegram.telegram_auth import credentials_configured
-            assert credentials_configured() is False
+        from src.telegram.telegram_auth import credentials_configured
+        assert credentials_configured() is False
 
 
 # ══════════════════════════════════════════════════════════════════════════════

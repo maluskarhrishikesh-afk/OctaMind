@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from src.agent.core.agent_manager import AgentManager
-from src.agent.memory.agent_memory import get_agent_memory
+from src.agent.memory.agent_memory import AgentMemory
 
 # Add project root to path (kept for __main__ usage)
 project_root = Path(__file__).parent.parent.parent
@@ -33,7 +33,7 @@ def test_agent_deletion(tmp_path, monkeypatch):
     print("\n1️⃣ Creating test agent...")
     agent = manager.create_agent(
         name="Test Delete Agent",
-        agent_type="gmail",
+        agent_type="email",
         role="Test agent for deletion testing",
     )
     agent_id = agent["id"]
@@ -41,7 +41,10 @@ def test_agent_deletion(tmp_path, monkeypatch):
 
     # Step 2: Create additional memory for the agent
     print("\n2️⃣ Creating memory for agent...")
-    memory = get_agent_memory(agent_id)
+    # Directly instantiate AgentMemory (bypasses the pa_-prefix guard used
+    # by get_agent_memory; skills are stateless by design, but we still want
+    # to verify that any stray memory folder is cleaned up on deletion).
+    memory = AgentMemory(agent_id, memory_base_dir=str(tmp_path / "memory"))
 
     memory.add_interaction(
         command="Test command 1",

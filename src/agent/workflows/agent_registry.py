@@ -37,6 +37,12 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "permissions, summarize content, find duplicates, auto-organize, "
             "bulk rename, version history, and storage analytics."
         ),
+        # Curated keywords that should ALWAYS route to this agent (bypass IDF filter).
+        # Add any domain-specific terms users are likely to say.
+        "trigger_keywords": [
+            "drive", "gdrive", "google drive", "upload", "download",
+            "share", "cloud", "cloud storage", "google docs", "google sheets",
+        ],
         "module": "src.agent.ui.drive_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -49,6 +55,11 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "auto-categorize and label, detect urgent/newsletter emails, "
             "manage contacts, and generate email reports."
         ),
+        "trigger_keywords": [
+            "email", "mail", "gmail", "inbox", "outbox", "attachment",
+            "reply", "forward", "draft", "compose", "unread", "newsletter",
+            "sender", "recipient", "cc", "bcc", "subject",
+        ],
         "module": "src.agent.ui.email_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -63,6 +74,10 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "'show me the file', or 'deliver the file' — those mean deliver in the CURRENT "
             "chat channel (Telegram/Dashboard), which is handled by the files agent."
         ),
+        "trigger_keywords": [
+            "whatsapp", "wa", "whats app", "chat", "message", "text",
+            "contact", "group", "broadcast", "status", "sticker",
+        ],
         "module": "src.agent.ui.whatsapp_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -79,6 +94,13 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "'send it here', 'send here for downloading', 'show me the file', 'download this'), "
             "and cross-agent workflows (zip+email, zip+Drive upload, attach file to email)."
         ),
+        "trigger_keywords": [
+            "file", "files", "folder", "folders", "disk", "drive",
+            "payslip", "invoice", "receipt", "document", "pdf", "docx",
+            "xlsx", "csv", "txt", "zip", "unzip", "archive", "extract",
+            "copy", "move", "rename", "delete", "search", "find",
+            "duplicate", "scan", "laptop", "size", "storage",
+        ],
         "module": "src.agent.ui.files_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -88,6 +110,11 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "quick natural-language event creation, recurring events, find free slots, detect conflicts, "
             "daily/weekly agenda, set reminders, accept/decline invites, and list calendars."
         ),
+        "trigger_keywords": [
+            "calendar", "event", "events", "meeting", "appointment",
+            "reminder", "agenda", "schedule", "invite", "recurring",
+            "today", "tomorrow", "this week", "next week",
+        ],
         "module": "src.agent.ui.calendar_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -102,6 +129,11 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "Use instead of the Calendar agent when the request involves INTELLIGENT scheduling, "
             "optimisation, or scheduling for multiple people."
         ),
+        "trigger_keywords": [
+            "schedule", "scheduling", "slot", "slots", "availability",
+            "focus block", "deep work", "block time", "free time",
+            "when can", "best time", "meeting time", "timeslot",
+        ],
         "module": "src.agent.ui.scheduler_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -114,6 +146,11 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "Use instead of the Files agent when the request is about ORGANIZING a whole folder or "
             "setting up ARCHIVAL RULES — it never modifies files without user approval."
         ),
+        "trigger_keywords": [
+            "organize", "organise", "organisation", "organization",
+            "archive", "archival", "tidy", "cleanup", "clean up",
+            "sort files", "sort folder", "policy", "archival policy",
+        ],
         "module": "src.agent.ui.file_organizer_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -125,6 +162,11 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "and optional Google Calendar integration to schedule habit sessions. "
             "Completely new — no overlap with Calendar or Files agents."
         ),
+        "trigger_keywords": [
+            "habit", "habits", "health", "streak", "check-in", "checkin",
+            "daily goal", "goal", "log", "track", "workout", "exercise",
+            "meditation", "reading", "water", "sleep", "steps",
+        ],
         "module": "src.agent.ui.habit_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -136,6 +178,11 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "download files from URLs, and summarise page content. "
             "Completely new — no overlap with existing agents."
         ),
+        "trigger_keywords": [
+            "browse", "browser", "website", "web", "url", "internet",
+            "search online", "google", "duckduckgo", "link", "page",
+            "open site", "visit", "scrape", "crawl",
+        ],
         "module": "src.agent.ui.browser_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -152,6 +199,12 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "Use generate_full_report when the user asks for: 'full analysis', 'stock report', "
             "'PDF report', 'send report to me', 'email me the analysis', 'complete analysis of [stock]'."
         ),
+        "trigger_keywords": [
+            "stock", "stocks", "share", "shares", "market", "equity",
+            "ticker", "portfolio", "invest", "investment", "nifty", "sensex",
+            "nasdaq", "dow jones", "sp500", "aapl", "tsla", "price", "quote",
+            "rsi", "macd", "bollinger", "analysis", "report",
+        ],
         "module": "src.agent.ui.stock_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
@@ -165,6 +218,11 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "get page-level analytics over any date range, get organisation follower count, "
             "and manage OAuth setup (get auth URL, exchange code for token)."
         ),
+        "trigger_keywords": [
+            "linkedin", "linked in", "post", "profile", "follower", "followers",
+            "impression", "impressions", "publish", "article", "network",
+            "connection", "engagement", "analytics", "page",
+        ],
         "module": "src.agent.ui.linkedin_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },

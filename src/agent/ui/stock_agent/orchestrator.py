@@ -9,11 +9,11 @@ from src.agent.workflows.skill_react_engine import run_skill_react
 
 _TOOL_DOCS = """
 resolve_ticker(query) – Convert a company name or fuzzy query to a stock ticker symbol.
-get_quote(symbol) – Get the current price, change, volume and key stats for a ticker.
+get_quote(symbol) – Get the current price, change, volume and key stats for a ticker. Auto-saves resolved_ticker + current_price as context.
 get_historical_data(symbol, period="1mo", interval="1d") – Fetch historical OHLCV data. period: 1d/5d/1mo/3mo/6mo/1y/2y/5y/10y/ytd/max. interval: 1m/2m/5m/15m/30m/60m/90m/1h/1d/5d/1wk/1mo/3mo.
-technical_analysis(symbol, period="6mo") – RSI, MACD, Bollinger Bands, moving averages and trading signals.
+technical_analysis(symbol, period="6mo") – RSI, MACD, Bollinger Bands, moving averages and trading signals. Auto-saves resolved_ticker as context.
 risk_score(symbol, period="1y") – Volatility, beta, VaR, Sharpe ratio and overall risk score.
-fundamental_analysis(symbol) – P/E, EPS, revenue, margins, ROE and moat score.
+fundamental_analysis(symbol) – P/E, EPS, revenue, margins, ROE and moat score. Auto-saves resolved_ticker as context.
 pattern_detection(symbol, period="3mo") – Detect chart patterns (head & shoulders, flags, etc.).
 sentiment_analysis(symbol) – News-based sentiment score and recent headlines.
 compare_stocks(symbols) – Side-by-side comparison of a list of tickers.
@@ -21,6 +21,7 @@ portfolio_analysis(symbols, period="1y") – Correlation, diversification and pe
 portfolio_suggestions(symbols) – Get optimisation and rebalancing suggestions.
 market_overview(indices=None) – Snapshot of major indices and market breadth.
 generate_full_report(symbol, output_path="") – Generate a comprehensive PDF research report for a stock.
+save_context(topic, resolved_entities, awaiting="") – Persist the resolved ticker and price as cross-turn context. topic="stock_query", resolved_entities={"resolved_ticker":"TSLA","current_price":250.0}, awaiting="stock_action". Call this when the user will likely ask a follow-up about the same stock.
 """.strip()
 
 _SKILL_CONTEXT = """
@@ -37,7 +38,11 @@ Typical flows:
 - "Analyse TSLA" → get_quote → technical_analysis → fundamental_analysis → final_answer
 - "How risky is NVDA?" → risk_score
 - "Compare MSFT and GOOGL" → compare_stocks(["MSFT","GOOGL"])
-""".strip()
+Context manifest rule:
+After every get_quote() or technical_analysis() call, the resolved ticker and current
+price are automatically saved as context. On follow-up turns ('set an alert at 250',
+'show me the technical analysis', 'what\'s the risk score') use resolved_ticker from
+the injected context — do NOT call resolve_ticker again.""".strip()
 
 
 def _get_tools() -> Dict[str, Any]:
@@ -53,13 +58,29 @@ def _get_tools() -> Dict[str, Any]:
     def portfolio_suggestions(symbols: List[str]) -> dict:
         return ss.portfolio_suggestions(symbols)
 
+    from src.agent.manifest.context_manifest import (  # noqa: PLC0415
+        auto_save_stock_context, make_save_context_tool,
+    )
+
+    def get_quote(symbol: str) -> dict:
+        result = ss.get_quote(symbol)
+        return auto_save_stock_context(result, symbol)
+
+    def technical_analysis(symbol: str, period: str = "6mo") -> dict:
+        result = ss.technical_analysis(symbol, period)
+        return auto_save_stock_context(result, symbol)
+
+    def fundamental_analysis_wrapped(symbol: str) -> dict:
+        result = fs.fundamental_analysis(symbol)
+        return auto_save_stock_context(result, symbol)
+
     return {
         "resolve_ticker": lambda query: ss.resolve_ticker(query),
-        "get_quote": lambda symbol: ss.get_quote(symbol),
+        "get_quote": get_quote,
         "get_historical_data": lambda symbol, period="1mo", interval="1d": ss.get_historical_data(symbol, period, interval),
-        "technical_analysis": lambda symbol, period="6mo": ss.technical_analysis(symbol, period),
+        "technical_analysis": technical_analysis,
         "risk_score": lambda symbol, period="1y": ss.risk_score(symbol, period),
-        "fundamental_analysis": lambda symbol: fs.fundamental_analysis(symbol),
+        "fundamental_analysis": fundamental_analysis_wrapped,
         "pattern_detection": lambda symbol, period="3mo": ss.pattern_detection(symbol, period),
         "sentiment_analysis": lambda symbol: ss.sentiment_analysis(symbol),
         "compare_stocks": compare_stocks,
@@ -67,6 +88,8 @@ def _get_tools() -> Dict[str, Any]:
         "portfolio_suggestions": portfolio_suggestions,
         "market_overview": lambda indices=None: ss.market_overview(indices),
         "generate_full_report": lambda symbol, output_path="": ss.generate_full_report(symbol, output_path),
+        # ── Context manifest ────────────────────────────────────────────────
+        "save_context": make_save_context_tool("stock"),
     }
 
 

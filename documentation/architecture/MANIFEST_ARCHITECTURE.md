@@ -1,6 +1,6 @@
 # OctaMind Manifest Architecture
 
-*Last Updated: March 6, 2026*
+*Last Updated: March 7, 2026*
 
 > **Core Idea:** Separate the *reasoning layer* (LLM) from the *state layer* (Manifest).  
 > The LLM thinks. The Manifest remembers.
@@ -135,29 +135,73 @@ The critical boundary:
 **Purpose:** Store resolved entities and pending intent from the current
 conversation so the next turn has full context without re-asking the user.
 
-**Schema:**
+**Schema (v2 — keyed store, current):**
+
+The file is a **keyed store** — each agent owns its own slot so multiple
+agents' contexts can coexist without overwriting each other.
+
 ```json
 {
-  "schema_version": 1,
-  "written_at": "2026-03-05T14:32:00",
-  "turn_id": 7,
-  "agent": "calendar",
-  "topic": "slot_booking",
-  "resolved_entities": {
-    "tomorrow": "2026-03-06",
-    "free_slots": [
-      {"start": "12:00", "end": "17:00"}
-    ],
-    "subject": "meeting",
-    "attendees": ["alice@example.com"]
+  "calendar": {
+    "schema_version": 2,
+    "written_at": "2026-03-05T14:32:00",
+    "expires_at": "2026-03-05T15:32:00",
+    "agent": "calendar",
+    "topic": "slot_booking",
+    "scope": "single_file",
+    "resolved_entities": {
+      "tomorrow": "2026-03-06",
+      "free_slots": [
+        {"start": "12:00", "end": "17:00"}
+      ],
+      "subject": "meeting",
+      "attendees": ["alice@example.com"]
+    },
+    "pending_selection": {
+      "type": "time",
+      "prompt": "Which time slot do you prefer?",
+      "options": ["12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
+    },
+    "awaiting": "time_selection"
   },
-  "pending_selection": {
-    "type": "time",
-    "prompt": "Which time slot do you prefer?",
-    "options": ["12:00", "13:00", "14:00", "15:00", "16:00", "17:00"]
-  },
-  "awaiting": "time_selection"
+  "files": {
+    "schema_version": 2,
+    "written_at": "2026-03-05T14:33:10",
+    "expires_at": "2026-03-05T15:33:10",
+    "agent": "files",
+    "topic": "file_search",
+    "scope": "multi_folder",
+    "resolved_entities": {
+      "query": "payslip",
+      "count": 3,
+      "last_found_paths": ["C:\\Users\\...\\payslip_jan.pdf", "..."]
+    },
+    "awaiting": "file_action"
+  }
 }
+```
+
+**Key v2 properties:**
+- Top-level keys are agent names (`"calendar"`, `"files"`, `"email"`, etc.)
+- Each agent's slot is an independent context dict with its own `expires_at`
+- `schema_version: 2` inside every slot
+- `scope` field (optional): `"single_file"` | `"single_folder"` | `"multi_folder"` — used by the DAG planner to pick the correct zip strategy
+- Legacy v1 flat payloads (single dict with `"written_at"` at root) are automatically migrated to a keyed slot on the next `write_context()` call
+
+**API:**
+```python
+# Write — creates/updates this agent's slot (other agents' slots untouched)
+write_context(agent="files", topic="file_search",
+              resolved_entities={"query": "payslip", "count": 3},
+              scope="multi_folder", awaiting="file_action")
+
+# Read — agent-specific
+ctx = read_context(agent="files")     # returns files' slot or None if expired
+ctx = read_context()                  # returns most-recently-written slot (any agent)
+
+# Clear — targeted or full
+clear_context(agent="files")          # removes files' slot only
+clear_context()                       # deletes the entire file
 ```
 
 **Flow example — Calendar:**
@@ -296,8 +340,8 @@ a single "undo" command, and reviewed via the audit history.
 
 ### 4.4 Job Manifest — Background Tasks
 
-**File:** `~/Downloads/OctaMind/octa_jobs.json`  
-**Status:** 🔲 PLANNED
+**File:** `<workspace>/data/octa_jobs.json`  
+**Status:** ✅ LIVE (Phase 3 complete — March 2026)
 
 **Purpose:** Long-running tasks (scanning all drives, generating a large
 report, downloading many files) write progress to disk. The user can ask
@@ -335,6 +379,55 @@ for status at any time, even from a different session.
 This is how Manus and similar agent systems implement async tasks.
 They never block on long operations — they write a job manifest and return
 immediately. The background worker updates progress. The user polls status.
+
+**Implemented API (`src/agent/manifest/job_manifest.py`):**
+- `create_job(agent, description, session_id, pa_id, params) → job_id`
+- `update_job(job_id, *, status, progress_pct, progress_detail, result_summary, result_manifest) → bool`
+- `complete_job(job_id, result_summary, result_manifest) → bool`
+- `fail_job(job_id, error) → bool`
+- `get_job(job_id) → dict | None`
+- `get_recent_jobs(limit) → list[dict]`
+- `get_jobs_for_session(session_id, limit) → list[dict]`
+
+**Background runner (`src/agent/manifest/job_runner.py`):**
+- `submit_job(job_id, fn, session_id, pa_id)` — runs `fn()` in a daemon thread
+- On completion: writes result to job manifest, notifies user via Telegram or Dashboard
+- Concurrency limit: 4 simultaneous background jobs (threading.Semaphore)
+
+**Integrated into Files Agent (`src/agent/ui/files_agent/orchestrator.py`):**
+- `_is_heavy_scan(query)` — detects full-disk scan patterns
+  ("on my computer", "across all drives", "entire laptop", etc.)
+- `_try_background_job(query, artifacts_out)` — pre-flight check:
+  returns an immediate acknowledgement and dispatches the scan to a background thread
+- Execution order in `execute_with_llm_orchestration()`:
+  1. Manifest-based copy bypass (no LLM)
+  2. **Background scan dispatch** (heavy queries → daemon thread)
+  3. Normal synchronous LLM execution (all other queries)
+
+**Session routing (`src/agent/hub/processor.py`):**
+- `_run_single_agent()` now seeds `_session_id`, `_pa_id`, `_source` into
+  `artifacts_out` before every agent call so background jobs know who to notify
+
+**Delivery policy improvements (same release):**
+- `deliver_file()` is now strictly opt-in: ONLY triggered when the user explicitly says
+  "send it", "download this", "give me the file", "deliver it".
+  Count / search / analysis queries NEVER trigger file delivery.
+- Multi-file delivery rule: collect → zip → deliver the zip ONCE. Never loop.
+
+**Notification routing:**
+- Session IDs follow the pattern `{source}_{identifier}` (e.g. `telegram_12345`)
+- `_notify_user()` in job_runner.py extracts the source from the prefix and routes accordingly
+- Telegram: calls `telegram_service.send_text(chat_id, message)` inside the job thread
+  (inherits process env vars including `TELEGRAM_BOT_TOKEN` from the PA poller process)
+- Other sources: result is in the job manifest; the client polls via `get_job(job_id)`
+
+**Enabled user commands:**
+```
+"How many PDF files are there on my computer?"  → background scan, notification when done
+"Find all image files on my laptop"             → background scan
+"Search all drives for documents named report"  → background scan
+"Scan my entire computer for large files"       → background scan
+```
 
 ---
 
@@ -512,7 +605,7 @@ tool-call granularity. Below is the planned per-event schema:
 ├── operation_history.json         ← ✅ LIVE — copy/undo operation history
 │                                     Newest-first JSON array, 30-day TTL
 │
-├── octa_jobs.json                 ← Background job registry (PLANNED)
+├── octa_jobs.json                 ← ✅ LIVE — Background job registry (Phase 3)
 │
 ├── octa_index.json                ← Local file search index / incremental (PLANNED)
 │
@@ -577,7 +670,7 @@ tool-call granularity. Below is the planned per-event schema:
 | File Manifest         | `octa_manifest.txt`         | ✅ LIVE             | `save_search_manifest()`, `collect_files_from_manifest()` |
 | Context Manifest      | `octa_context.json`         | ✅ LIVE (Phase 1)   | Scheduler ✅ Email ✅ Drive ✅ Files ✅ |
 | Operation Manifest    | `operation_history.json`    | ✅ LIVE (Phase 2)   | Undo/rollback + 30-day audit |
-| Job Manifest          | `octa_jobs.json`            | 🔲 PLANNED          | Async background tasks |
+| Job Manifest          | `octa_jobs.json`            | ✅ LIVE (Phase 3)   | Async background tasks + Telegram notification |
 | Workflow Manifest     | `octa_workflow_{id}.json`   | 🔲 PLANNED          | Multi-step pipeline recovery |
 | Index Manifest        | `octa_index.json`           | 🔲 PLANNED          | Incremental file index + dedup |
 | Audit Manifest        | `octa_audit.jsonl`          | ✅ PARTIAL (context + ops) | Full event log PLANNED |
@@ -642,18 +735,32 @@ Resolves the calendar / email / files "follow-up ambiguity" class of bugs.
 
 ---
 
-### Phase 3 — Job Manifest (Async Tasks)
+### Phase 3 — Job Manifest (Async Tasks) ✅ COMPLETE (March 2026)
 
-**What to build:**
-- `src/agent/manifest/job_manifest.py`
-  - `create_job(agent, description) → job_id`
-  - `update_job(job_id, progress_pct, detail)`
-  - `complete_job(job_id, result_manifest)`
-  - `get_job(job_id) → dict`
-- Wrap `list_laptop_structure`, `search_file_all_drives`, and `analyze_disk_usage`
-  as background jobs that write progress
-- Pre-flight in `processor.py`: "status of my task" → read jobs manifest → return
-  without any LLM call
+**What was built:**
+- `src/agent/manifest/job_manifest.py` — Job manifest CRUD engine
+  - `create_job(agent, description, session_id, pa_id, params) → job_id`
+  - `update_job(job_id, *, status, progress_pct, progress_detail, …) → bool`
+  - `complete_job(job_id, result_summary, result_manifest) → bool`
+  - `fail_job(job_id, error) → bool`
+  - `get_job(job_id) → dict | None`
+  - `get_recent_jobs(limit) → list[dict]`
+  - `get_jobs_for_session(session_id, limit) → list[dict]`
+  - File: `<workspace>/data/octa_jobs.json`, newest-first JSON array, 200-job cap
+- `src/agent/manifest/job_runner.py` — Background daemon thread pool
+  - `submit_job(job_id, fn, session_id, pa_id)` — executes fn() in background thread
+  - `_notify_user(session_id, pa_id, message)` — routes notification to Telegram or manifest poll
+  - Concurrency limit: 4 slots (threading.Semaphore)
+- `src/agent/ui/files_agent/orchestrator.py` — Pre-flight heavy-scan detection
+  - `_is_heavy_scan(query)` + `_try_background_job(query, artifacts_out)`
+  - Triggers on: "on my computer", "across all drives", "entire laptop/disk", "full disk scan"
+  - Exempts scoped searches: "in Downloads", "in Documents", explicit drive path
+- `src/agent/hub/processor.py` — Seeds `_session_id`, `_pa_id`, `_source` into
+  `artifacts_out` before every agent call so background jobs know who to notify
+- Delivery policy: `deliver_file()` is now strictly opt-in (no auto-send on search/count)
+
+**Result:** "How many PDF files are there on my computer?" now returns immediately
+with a job acknowledgement and sends a Telegram message when the scan completes.
 
 ---
 

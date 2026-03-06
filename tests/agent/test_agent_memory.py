@@ -55,12 +55,23 @@ class TestInitialisation:
         assert self.EXPECTED_FILES.issubset(created)
 
     def test_get_agent_memory_returns_correct_dir(self, tmp_path, monkeypatch):
-        """get_agent_memory returns an AgentMemory pointed at the right folder."""
+        """get_agent_memory returns an AgentMemory pointed at the right folder.
+
+        Only pa_-prefixed IDs (and the multi-agent hub) receive persistent
+        on-disk memory; plain skill IDs return None by design.
+        """
         monkeypatch.chdir(tmp_path)
-        m1 = get_agent_memory("dir_check_agent")
-        m2 = get_agent_memory("dir_check_agent")
+        m1 = get_agent_memory("pa_dir_check_agent")
+        m2 = get_agent_memory("pa_dir_check_agent")
         # Both should resolve to the same memory directory path
+        assert m1 is not None
+        assert m2 is not None
         assert m1.memory_dir == m2.memory_dir
+
+    def test_get_agent_memory_returns_none_for_skill(self):
+        """Skills (non-pa_ IDs) return None from get_agent_memory — they are stateless."""
+        assert get_agent_memory("some_skill_uuid") is None
+        assert get_agent_memory("email_agent_abc") is None
 
 
 # ─────────────────────────── interactions (working memory) ───────────────────
