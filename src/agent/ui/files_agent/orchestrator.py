@@ -19,54 +19,6 @@ from typing import Any, Dict, Optional
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 
-_TOOL_DOCS = """
-list_directory(path, show_hidden=False, limit=200) – List files in a local directory.
-get_file_info(path) – Get metadata for a local file or folder.
-copy_file(source, destination) – Copy a file or folder.
-collect_files_to_folder(file_paths, destination) – Copy a LIST of files/folders (from any locations) into a single destination folder, creating it if needed. Returns the destination folder path as file_path. Use BEFORE zip_folder when you have files scattered across multiple locations that need to be gathered first. When the user's previous turn found files, use file_paths={__session__.last_found_paths} to reference ALL found paths without enumerating them.
-move_file(source, destination) – Move / rename a file or folder.
-delete_file(path, permanent=False) – Delete a file (recycle bin by default).
-create_folder(path) – Create a new directory.
-rename_file(path, new_name) – Rename a file or folder.
-open_file(path) – Open a file with its default application.
-search_by_name(query, directory="~", recursive=True, limit=50) – Search files/folders whose name matches query (glob or substring). First arg is the search term, second is the directory to search.
-search_by_extension(ext, directory="~", recursive=True, limit=100) – Find all files with a given extension (e.g. 'pdf' or '.pdf').
-search_by_date(directory, date_from=None, date_to=None, recursive=True, limit=50) – Search by modification date.
-search_by_size(directory, min_bytes=None, max_bytes=None, recursive=True, limit=50) – Search by file size.
-find_duplicates(directory, recursive=True) – Find duplicate files.
-find_empty_folders(directory, recursive=True) – Find empty folders.
-zip_folder(folder_path, output_path="") – Zip an entire folder into a .zip archive. output_path defaults to same location as folder with .zip extension.
-zip_files(sources, output_path) – Zip one or more files and/or folders into a single archive. sources is a list of paths.
-unzip_file(archive_path, destination="") – Extract a zip archive. destination defaults to a folder named after the archive.
-list_archive_contents(archive_path) – List contents of a zip archive without extracting.
-write_text_file(path, content) – Write text content to a local file (creates or overwrites it). Use when the user says "write this in a notepad", "save this as text", or similar.
-write_pdf_report(path, title, content) – Generate a formatted PDF report. Falls back to .txt if fpdf2 is not installed. Use for polished multi-page reports.
-write_excel_report(path, sheet_data, title="") – Generate an Excel .xlsx workbook. sheet_data is a dict mapping sheet_name → list-of-dicts. Use when the user asks for data in a spreadsheet or Excel format.
-deliver_file(path) – Send a single file to the user as a download (Telegram document / Dashboard button). ⛔ ONLY call when the user EXPLICITLY requests to receive a file ('send it', 'download this', 'give me the file', 'deliver it', 'show me the file'). NEVER call for count/search/analysis queries. For MULTIPLE files: collect → zip_files() → deliver_file() the zip ONCE.
-search_file_all_drives(query, extensions=None, limit=20, include_folders=True) – Search ALL drives (C:, D:, …) for a file OR folder. query is a name/glob substring; use query="*" to match ALL files when filtering only by extension. extensions is an optional list e.g. ["pdf","docx"] to restrict file types. Set limit=500 for comprehensive counting queries. Returns file_path set to the first match. ALWAYS use this (not search_by_name/search_by_extension) when the user says "on my computer", "on my laptop" or gives no specific folder. ALWAYS use this before zip_folder when the folder path is unknown.
-list_laptop_structure(include_hidden=False, output_file="", depth=2) – DETERMINISTIC full-laptop scan: discovers all available drives (C:, D:, …) and lists every drive root plus the major user directories (Home, Downloads, Desktop, Documents, Pictures, Music, Videos). The *depth* parameter controls how many levels deep to recurse inside user-created folders (default 2 — shows folder contents). Always writes a report .txt file automatically; the file_path in the result can be attached to emails. Use this whenever the user asks about ALL folders/files on their laptop, entire machine, or all drives.
-organize_folder(directory, by="extension", dry_run=True, include_hidden=False) – Organise files in a folder into sub-folders. by options: "extension" (PDF/, Images/, etc.), "date" (year-month), "name" (A-Z), "size" (Small/Medium/Large). ALWAYS call with dry_run=True first to show the user the plan, then call again with dry_run=False to apply.
-analyze_disk_usage(path, depth=2, top_n=20) – Recursively compute folder sizes and show biggest space consumers. Use when user asks 'what's taking up space' or 'show disk usage'.
-get_drive_info() – Return total/used/free space for all local drives (C:, D:, etc.).
-find_duplicate_files(directory, recursive=True, min_size_bytes=1024) – Find duplicate files by MD5 hash. Returns groups and wasted space.
-search_files_by_content(query, directory="~", extensions=None, max_results=50, case_sensitive=False) – Grep-like search: find files whose content contains query text. extensions e.g. ['py','txt','md'].
-batch_rename(directory, find, replace, dry_run=True, use_regex=False, extensions=None) – Rename files by replacing 'find' with 'replace' in filenames. ALWAYS dry_run=True first to show plan.
-secure_delete(path, passes=3) – Overwrite file with random bytes N times before deleting. Use for sensitive files.
-cleanup_temp_files(dry_run=True) – Remove OS temp files, Windows Update cache, Python __pycache__. ALWAYS dry_run=True first to show what will be removed.
-monitor_folder(path, timeout_seconds=30, poll_interval=1.0) – Watch a folder for file changes (created/modified/deleted) for up to N seconds.
-cleanup_app_caches(dry_run=True) – Remove Chrome/Edge/Firefox browser caches and Windows AppData temp files. ALWAYS dry_run=True first to show sizes, then dry_run=False to delete.
-archive_old_files(folder, months_old=6, output_zip="", dry_run=True) – Compress files not modified in N months into a zip. dry_run=True first to preview.
-resolve_shortcut(lnk_path) – Resolve a Windows .lnk shortcut file to its target executable or folder path.
-get_file_hash(file_path, algorithm="md5") – Compute MD5/SHA256/SHA1 hash of a file for integrity checking or duplicate detection.
-list_running_apps() – List all running processes with PID, name, memory usage, and CPU percentage.
-save_search_manifest(found_paths, manifest_path="") – Persist a list of found file paths to <workspace>/data/octa_manifest.txt (one path per line). Call this IMMEDIATELY after any search step so the paths survive across turns. found_paths must be a Python list of absolute path strings.
-collect_files_from_manifest(manifest_path="", destination="") – Read the manifest file written by save_search_manifest and copy EVERY listed file to *destination*. Default destination: <workspace>/data/. Use this instead of collect_files_to_folder when copying files from a previous search turn — it is NOT limited by session-state size.
-undo_last_file_operation() – Undo the most-recent copy/collect operation by deleting the destination folder that was created. Call this when the user says 'undo', 'revert that', 'undo the copy', 'take that back', or 'delete what you just copied'.
-list_file_operations(days=30) – Return the file-operation audit history for the last N days (newest-first). Each entry has: type, destination, count, timestamp, undone. Call this when the user asks 'what did you copy recently?', 'show operation history', or 'what operations have been done?'.
-save_context(topic, resolved_entities, awaiting="") – Persist the current file listing as cross-turn context. topic="file_search", resolved_entities={"listed_files":[...], "query":"..."}, awaiting="file_action". Call AFTER every search so the user can say 'copy them' next turn without repeating the query.
-""".strip()
-
-
 def _build_skill_context() -> str:
     """Build the files-agent system prompt with real OS paths injected."""
     import sys as _sys
@@ -241,7 +193,6 @@ def _build_skill_context() -> str:
         "On the NEXT turn, if the user says 'copy them', 'move those', etc., check for injected context BEFORE asking.\n"
     ).strip()
 
-
 def _get_tools() -> Dict[str, Any]:
     from src.files.features.file_ops import (  # noqa: PLC0415
         list_directory, get_file_info, copy_file, move_file,
@@ -345,7 +296,6 @@ def _get_tools() -> Dict[str, Any]:
         "save_context":                 make_save_context_tool("files"),
     }
 
-
 def _maybe_save_manifest(artifacts_out: Optional[Dict[str, Any]]) -> None:
     """Save found_paths to the manifest file if the current execution produced any."""
     if not artifacts_out:
@@ -363,7 +313,6 @@ def _maybe_save_manifest(artifacts_out: Optional[Dict[str, Any]]) -> None:
     except Exception as exc:
         import logging as _lg
         _lg.getLogger("files.orchestrator").warning("[manifest] save failed: %s", exc)
-
 
 # ---------------------------------------------------------------------------
 # Pre-flight: direct copy-from-manifest (no LLM needed)
@@ -385,11 +334,9 @@ _FOLLOW_UP_COPY_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-
 def _is_follow_up_copy(query: str) -> bool:
     """Return True when the query looks like 'copy them / put those / collect the files'."""
     return bool(_FOLLOW_UP_COPY_RE.search(query))
-
 
 def _resolve_destination_from_query(user_query: str) -> str:
     """
@@ -509,7 +456,6 @@ _FRESH_SEARCH_RE = re.compile(
     re.IGNORECASE,
 )
 
-
 def _try_direct_copy_from_manifest(
     user_query: str,
     artifacts_out: Optional[Dict[str, Any]],
@@ -598,7 +544,6 @@ def _try_direct_copy_from_manifest(
         "action":  "react_response",
     }
 
-
 # ---------------------------------------------------------------------------
 # Background job dispatch — heavy full-disk scans
 # ---------------------------------------------------------------------------
@@ -627,7 +572,6 @@ _SCOPED_DIR_RE = re.compile(
     re.IGNORECASE,
 )
 
-
 def _is_heavy_scan(query: str) -> bool:
     """
     Return True when the query requires an unscoped full-disk scan that
@@ -639,7 +583,6 @@ def _is_heavy_scan(query: str) -> bool:
     if _SCOPED_DIR_RE.search(query):
         return False
     return True
-
 
 def _try_background_job(
     user_query: str,
@@ -859,19 +802,17 @@ def _try_background_job(
         "job_id":  job_id,
     }
 
-
-
 def _get_tool_docs_for_dag() -> str:
     """Return full tool docs for the DAG planner (needs all tools to plan)."""
     from src.agent.core.skill_loader import get_all_tool_docs  # noqa: PLC0415
     docs = get_all_tool_docs("files")
     if not docs:
-        logger.error(
+        import logging as _lg  # noqa: PLC0415
+        _lg.getLogger("files.orchestrator").error(
             "[files-agent] skills.md returned no tools — check ui/files_agent/skills.md exists. "
             "DAG planning will fail without tool docs."
         )
     return docs
-
 
 def _get_tool_docs_for_react(user_query: str) -> str:
     """Return filtered tool docs for the ReAct engine (cosine-similarity top-K)."""
@@ -881,12 +822,12 @@ def _get_tool_docs_for_react(user_query: str) -> str:
         always_include=["save_context", "deliver_file", "save_search_manifest"],
     )
     if not docs:
-        logger.error(
+        import logging as _lg  # noqa: PLC0415
+        _lg.getLogger("files.orchestrator").error(
             "[files-agent] FAISS returned no tool docs for query=%r — "
             "check ui/files_agent/skills.md", user_query[:60]
         )
     return docs
-
 
 def execute_with_llm_orchestration(
     user_query: str,

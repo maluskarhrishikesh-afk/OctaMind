@@ -63,16 +63,13 @@ The single LLM client used by all agents.
 | Method | Purpose | max_tokens | Notes |
 |--------|---------|-----------|-------|
 | `chat()` | Casual conversation | 300 | Uses full memory system prompt |
-| `classify_intent()` | COMMAND vs CHAT | 5 | Deterministic, temp=0 |
-| `reason_and_act()` | ReAct tool loop | 3000 per iter | Up to 6 iterations |
-| `orchestrate_mcp_tool()` | Single tool dispatch | 300 | Used by legacy path |
 
 ### `src/agent/ui/*/orchestrator.py` � ReAct Orchestrators
 
 Each agent has its own orchestrator that:
 1. Builds memory context from the agent's memory files
-2. Runs `reason_and_act()` with the agent's tool list
-3. Returns `{"action": "react_response", "message": "<final_answer>"}` � a complete, LLM-formatted response
+2. Calls `run_skill_dag()` (DAG planner) or `run_skill_react()` (ReAct loop) with tool docs loaded from `skills.md`
+3. Returns `{"action": "react_response", "message": "<final_answer>"}` — a complete, LLM-formatted response
 
 ### `src/agent/ui/*/app.py` � Response Composition
 

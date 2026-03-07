@@ -277,63 +277,6 @@ def _get_tools() -> Dict[str, Any]:
         ).make_save_context_tool("email"),
     }
 
-
-_TOOL_DOCS = """
-send_email(to, subject, message) – Send an email.
-send_email_with_attachment(to, subject, message, attachment_path) – Send email with a local file attachment.
-list_emails(query="in:inbox", max_results=10) – List emails matching a Gmail query string.
-get_inbox_count() – Return unread inbox count.
-get_todays_emails() – Fetch emails received today.
-delete_emails(query, max_results=10) – Delete emails matching a Gmail query.
-summarize_email(message_id) – Summarise a specific email by its ID.
-generate_daily_digest() – Generate a digest of today's emails.
-create_draft(to, subject, body) – Save an email as a draft.
-list_drafts() – List all saved drafts.
-send_draft(draft_id) – Send a previously saved draft.
-extract_action_items(message_id) – Extract to-do items from a specific email.
-get_all_pending_actions() – List all pending action items from emails.
-detect_urgent_emails() – Surface emails marked or detected as urgent.
-get_email_stats(days=7) – Return email volume statistics for the past N days.
-create_label(label_name) – Create a Gmail label / folder (creates it if it doesn’t already exist).
-move_emails_to_label(query, label_name, max_results=50) – Move emails matching a Gmail query into a label/folder (creates the label automatically if needed and removes them from INBOX).
-get_frequent_contacts() – Return a list of frequently emailed contacts.
-search_emails_with_attachments(file_type="") – Find emails that have file attachments.
-generate_weekly_report() – Generate a weekly email activity report.
-schedule_email(to, subject, body, send_time) – Schedule an email to be sent at a future time (send_time: ISO 8601, e.g. "2026-03-01T14:00:00").
-extract_calendar_events(message_id) – Extract any calendar event details mentioned in a specific email.
-set_vacation_responder(enabled, subject="", body="", start_date="", end_date="", restrict_to_contacts=False) – Enable or disable Gmail's Out-of-Office / Vacation auto-reply. enabled=True to turn on, False to turn off. start_date/end_date are ISO date strings 'YYYY-MM-DD'. Use this when the user asks to set OOO, out-of-office, vacation reply, or auto-reply.
-get_vacation_responder() – Check the current state of the Gmail vacation / OOO responder (enabled/disabled, message, dates).
-sync_contacts() – Sync Gmail contacts to the local cache (data/contacts.json) using Google People API + email interaction mining. Run this periodically or when the user asks to refresh/download contacts.
-search_contacts(query) – Search the local contacts cache by name or email address. Fast — uses the local file, no API call.
-list_contacts(limit=50) – List the top contacts from the local cache sorted by interaction frequency.
-fetch_emails_to_markdown(query="in:inbox", max_results=5, cap=20) – PREFERRED for multi-email summarization. Fetches all N emails matching a Gmail query in ONE call, saves them as a Markdown file, and returns file_path + structured list + full content. Use this whenever the user asks to 'summarize the latest N emails from X' or 'get N emails and summarize'. Returns error if max_results > cap (default 20) — tell the user to reduce the number. Do NOT call summarize_email in a loop.
-unsubscribe_email(message_id) – Extract the List-Unsubscribe header from an email and attempt one-click unsubscribe (RFC 8058). Returns unsubscribe URLs/mailto. Use when user says 'unsubscribe me from X' or 'stop receiving emails from X'.
-archive_emails(query, max_results=50) – Remove emails matching a Gmail query from Inbox without deleting them (they remain in All Mail). Use for bulk clearing the inbox.
-thread_mute(thread_id) – Mute a thread — future replies skip the Inbox.
-thread_archive(thread_id) – Archive an entire thread (remove from Inbox).
-thread_delete(thread_id) – Move an entire thread to Trash.
-create_smart_label_rule(label_name, from_email="", subject_contains="", to_email="", also_archive=False) – Apply a label to all matching emails and instruct the user how to create a Gmail filter for future emails.
-find_unanswered_emails(days=3, max_results=20) – Surface sent emails that have received no reply in the last N days.
-empty_trash() – Permanently delete all emails in Trash.
-batch_mark_spam(query, max_results=50) – Move emails matching a query to Spam.
-add_forwarding_address(forward_to) – Register a forwarding address (sends verification email to recipient).
-enable_email_forwarding(forward_to) – Enable auto-forwarding of all incoming email to an address (address must be pre-verified).
-get_signature(send_as_email="me") – Get the current Gmail signature.
-set_signature(signature_html, send_as_email="me") – Set the Gmail signature (HTML tags accepted).
-save_email_template(name, subject, body) – Save a reusable email template to data/email_templates.json. Use {{variable}} placeholders.
-list_email_templates() – List all saved email templates.
-send_from_template(template_name, to, variables={}) – Send an email using a saved template, substituting {{key}} placeholders with variables dict.
-recover_deleted_emails(query="", max_results=20) – Search Trash for emails matching query and restore them to Inbox. Use when user asks to 'recover', 'restore', or 'undo delete'.
-analyze_email_sentiment(message_id) – Detect tone of an email: urgent / positive / negative / neutral. No LLM required — fast keyword-based heuristic. Use before prioritizing a response.
-extract_urls_from_email(message_id) – Extract all hyperlinks from an email body, classified as: links, tracking_pixels, unsubscribe_urls.
-get_email_chains_summary(max_results=10) – List the most active email threads sorted by reply count. Useful for 'show me long conversations' or 'which threads need attention'.
-send_completion_reminder(message_id, days=3) – Set a follow-up reminder on a sent email. Triggers a self-reminder if no reply arrives within N days.
-write_pdf_report(path, title, content) – Write a formatted PDF report to a local file. Use when creating email summaries, digests, or analysis reports. path should be inside Downloads folder, e.g. 'C:/Users/malus/Downloads/email_summary.pdf'. Returns file_path.
-write_text_file(path, content) – Write plain text or Markdown content to a local file. Returns file_path.
-deliver_file(path) – Send a file to the user as a download (dashboard button / Telegram document). Call ONLY after write_pdf_report or write_text_file. Returns file_path.
-save_context(topic, resolved_entities, awaiting="") – Persist the current email list for the next turn so the user can say "reply to the first one" without listing again. topic="email_list", resolved_entities={"listed_emails":[{"id":"...","subject":"...","sender":"..."}]}, awaiting="email_action".
-""".strip()
-
 _SKILL_CONTEXT = """
 You are the Email Skill Agent backed by the Gmail API.
 Your job is to help the user manage their Gmail inbox: read, send, draft, delete, summarise and analyse emails.
@@ -388,7 +331,6 @@ The user query may include a '## Session State' JSON block from the previous con
   For multiple files, the files agent will zip them first and pass the zip path via {files_step.file_path}.
 """.strip()
 
-
 # ---------------------------------------------------------------------------
 # Required entry-point
 # ---------------------------------------------------------------------------
@@ -398,12 +340,12 @@ def _get_tool_docs_for_dag() -> str:
     from src.agent.core.skill_loader import get_all_tool_docs  # noqa: PLC0415
     docs = get_all_tool_docs("email")
     if not docs:
-        logger.error(
+        import logging as _lg  # noqa: PLC0415
+        _lg.getLogger("email.orchestrator").error(
             "[email-agent] skills.md returned no tools — check ui/email_agent/skills.md exists. "
             "DAG planning will fail without tool docs."
         )
     return docs
-
 
 def _get_tool_docs_for_react(user_query: str) -> str:
     """Return filtered tool docs for the ReAct engine (cosine-similarity top-K)."""
@@ -413,12 +355,12 @@ def _get_tool_docs_for_react(user_query: str) -> str:
         always_include=["save_context", "deliver_file", "write_pdf_report"],
     )
     if not docs:
-        logger.error(
+        import logging as _lg  # noqa: PLC0415
+        _lg.getLogger("email.orchestrator").error(
             "[email-agent] FAISS returned no tool docs for query=%r — "
             "check ui/email_agent/skills.md", user_query[:60]
         )
     return docs
-
 
 def execute_with_llm_orchestration(
     user_query: str,
