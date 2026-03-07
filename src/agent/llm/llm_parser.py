@@ -11,6 +11,9 @@ import logging
 logger = logging.getLogger("email_agent.llm_parser")
 logger.setLevel(logging.DEBUG)
 
+# Module-level singleton — populated lazily by get_llm_client()
+_llm_client = None
+
 
 class GitHubModelsLLM:
     """
