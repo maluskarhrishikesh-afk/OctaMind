@@ -41,24 +41,10 @@ sync_local_folder_to_drive(local_path, drive_folder_id, dry_run=True) – Upload
 save_context(topic, resolved_entities, awaiting="") – Persist the current Drive file listing for the next turn so the user can say "share the second one" without searching again. topic="drive_listing", resolved_entities={"listed_files":[{"id":"...","name":"...","mimeType":"..."}]}, awaiting="drive_file_action".
 """.strip()
 
-_SKILL_CONTEXT = """
-You are the Google Drive Skill Agent.
-Help the user manage their Google Drive: list, search, upload, download, move, copy, delete, share and organise files.
-When the user says "upload", ask for the local file path if not provided.
-When the user says "download", ask for the file name or ID if not provided.
-Always prefer search_files over list_files when looking for a specific file by name.
-For sharing: use share_file(file_id, email, role) to share with a specific person, or share_file(file_id, make_public=True) for a public link.
-For bulk operations (move/delete/copy multiple files): use batch_move_files / batch_delete_files / batch_copy_files — pass a list of file IDs, NOT individual calls per file.
-For storage questions ("how much space do I have?", "what's eating my storage?"): call get_storage_quota() then find_large_files().
-For duplicate cleanup: call find_drive_duplicates() to show groups, then trash_drive_duplicates() to clean.
-For format conversion: use convert_document(file_id, output_format) — supports pdf, docx, xlsx, pptx, csv, txt.
-For permission management: use manage_file_permissions(file_id, 'list') to see who has access, then 'remove'/'update' to modify.
-
-CONTEXT MANIFEST (cross-turn awareness):
-After EVERY call to list_files or search_files, context is AUTOMATICALLY saved to the manifest — no extra step needed.
-This means the user can say "share the second one" or "download the PDF" on the next turn without searching again.
-If you need to save context for edge cases not covered by the auto-wrap, use the save_context tool via call_tool.
-""".strip()
+def _load_skill_context() -> str:
+    """Load the drive skill context from skill_context.md (next to this file)."""
+    from pathlib import Path as _Path
+    return (_Path(__file__).parent / "skill_context.md").read_text(encoding="utf-8").strip()
 
 
 def _get_tools() -> Dict[str, Any]:
@@ -123,6 +109,23 @@ def _get_tools() -> Dict[str, Any]:
     }
 
 
+def _get_tool_docs_for_dag() -> str:
+    """Return full tool docs for the DAG planner (needs all tools to plan)."""
+    from src.agent.core.skill_loader import get_all_tool_docs  # noqa: PLC0415
+    docs = get_all_tool_docs("drive")
+    return docs if docs else _TOOL_DOCS
+
+
+def _get_tool_docs_for_react(user_query: str) -> str:
+    """Return filtered tool docs for the ReAct engine (cosine-similarity top-K)."""
+    from src.agent.core.skill_loader import load_tool_docs  # noqa: PLC0415
+    docs = load_tool_docs(
+        "drive", user_query, top_k=12,
+        always_include=["save_context"],
+    )
+    return docs if docs else _TOOL_DOCS
+
+
 def execute_with_llm_orchestration(
     user_query: str,
     agent_id: Optional[str] = None,
@@ -134,12 +137,14 @@ def execute_with_llm_orchestration(
     Fallback:      ReAct loop (1 LLM call per step, up to 6 iterations).
     """
     tool_map = _get_tools()
+    skill_context = _load_skill_context()
+    dag_tool_docs = _get_tool_docs_for_dag()
     try:
         return run_skill_dag(
             skill_name="drive",
-            skill_context=_SKILL_CONTEXT,
+            skill_context=skill_context,
             tool_map=tool_map,
-            tool_docs=_TOOL_DOCS,
+            tool_docs=dag_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
         )
@@ -148,12 +153,13 @@ def execute_with_llm_orchestration(
         _logging.getLogger("drive.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
         )
+    react_tool_docs = _get_tool_docs_for_react(user_query)
     try:
         return run_skill_react(
             skill_name="drive",
-            skill_context=_SKILL_CONTEXT,
+            skill_context=skill_context,
             tool_map=tool_map,
-            tool_docs=_TOOL_DOCS,
+            tool_docs=react_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
         )
