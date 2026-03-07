@@ -130,6 +130,17 @@ def run_skill_react(
             skill_name, action, thought,
         )
 
+        # ── Auto-recover: LLM sometimes outputs tool name directly as action
+        # instead of wrapping it in call_tool.  Silently normalise so we don't
+        # waste an iteration on the correction round-trip.
+        if action not in ("final_answer", "call_tool", "") and action in tool_map:
+            logger.info("│  ↩ [%s] Recovering direct action '%s' → call_tool", skill_name, action)
+            _raw_params = params if isinstance(params, dict) else {}
+            # params may already be flat kwargs, or may have a nested 'kwargs' key
+            _kwargs = _raw_params.get("kwargs", _raw_params)
+            params = {"tool": action, "kwargs": _kwargs if isinstance(_kwargs, dict) else {}}
+            action = "call_tool"
+
         # ── final_answer ──────────────────────────────────────────────────
         if action == "final_answer":
             _elapsed = time.time() - _t0
@@ -186,6 +197,18 @@ def run_skill_react(
                     if all_result_paths:
                         existing = artifacts_out.get("found_paths", [])
                         artifacts_out["found_paths"] = existing + all_result_paths
+                        # Auto-save manifest so ALL found paths survive across turns
+                        # regardless of how many paths the LLM includes in its next
+                        # save_search_manifest call (LLMs tend to truncate long lists).
+                        try:
+                            from src.files.features.file_ops import save_search_manifest  # noqa: PLC0415
+                            save_search_manifest(artifacts_out["found_paths"])
+                            logger.info(
+                                "│    [%s] manifest auto-saved (%d paths)",
+                                skill_name, len(artifacts_out["found_paths"]),
+                            )
+                        except Exception as _me:
+                            logger.debug("│    [%s] manifest auto-save failed: %s", skill_name, _me)
                 obs = _format_observation(tool_name, result)
                 logger.info("│    [%s] ✔ tool=%s  obs=%.120s", skill_name, tool_name, obs)
             except Exception as exc:

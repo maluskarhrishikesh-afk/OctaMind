@@ -515,6 +515,20 @@ class HubProcessor:
         # skill / LLM call so all related log lines share the same corr= value.
         _cid = bind_correlation(new_correlation_id())
         logger.info(
+            "╔══════════════════════════════════════════════════════════════╗",
+        )
+        logger.info(
+            "║  TURN START  corr=%-8s  src=%-8s  session=%s",
+            _cid, source, session_id,
+        )
+        logger.info(
+            "║  MSG: %.110s",
+            message,
+        )
+        logger.info(
+            "╚══════════════════════════════════════════════════════════════╝",
+        )
+        logger.info(
             "┌─ [Hub:%s] Turn START  corr=%s  session=%s  command=%.120s",
             source, _cid, session_id, message,
         )
@@ -803,11 +817,11 @@ class HubProcessor:
         """
         try:
             from src.agent.workflows.agent_registry import get_executor
-            from pathlib import Path as _P
+            from pathlib import Path as _P  # noqa: PLC0415  # late import to avoid circular
 
             executor = get_executor(agent)
             if executor is None:
-                return f"❌ Agent '{agent}' is registered but could not be loaded.", [], []
+                return f"❌ Agent '{agent}' is registered but could not be loaded.", [], [], []
 
             effective_query = query if query is not None else req.message
             # ── Context Manifest injection ────────────────────────────────

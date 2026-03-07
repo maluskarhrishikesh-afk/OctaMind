@@ -1,6 +1,6 @@
 # Octa Bot — Architecture
 
-Last updated: 2026-03-15
+Last updated: 2026-03-08
 
 > **See also:** [DAG_WALKTHROUGH.md](DAG_WALKTHROUGH.md) for a complete step-by-step trace of the DAG algorithm through two worked examples (simple single-skill and complex multi-agent).
 
@@ -196,8 +196,182 @@ Three categories of log files, **truncated on every `start.py` run**:
 - `files_agent.log`
 - `personal_assistant.log`
 
+## Files Agent — Search Strategy
+
+The Files Agent uses two distinct search paths depending on what the user asks:
+
+| Query type | Example | Tool called |
+|---|---|---|
+| Extension-based ("on my computer") | "Are there any image files on my computer?" | `search_file_all_drives("*", extensions=["jpg","jpeg","png",...], include_folders=False, limit=500)` |
+| Single extension | "How many PDF files are on my computer?" | `search_file_all_drives("*", extensions=["pdf"], include_folders=False, limit=500)` |
+| Keyword in filename | "How many payslips are on my computer?" | `search_file_all_drives("payslip", include_folders=False, limit=500)` |
+| Multi-word keyword | "Are there any offer letters on my computer?" | `search_file_all_drives("offer letter", include_folders=False, limit=500)` |
+
+**Key rules:**
+- `search_file_all_drives` with `query="*"` matches every file on every drive; the `extensions` list does the filtering.
+- Always set `limit=500` for counting/inventory queries (default `limit=20` is only for "find this one file" lookups).
+- `search_by_extension` and `search_by_name` both default to `directory="~"` (home folder only) — **never** use them for "on my computer" queries that should scan all drives.
+- Extension groups: **Image** → jpg/jpeg/png/gif/bmp/tiff/tif/webp/svg/ico · **Video** → mp4/avi/mov/mkv/wmv/flv/webm · **Document** → pdf/docx/doc/xlsx/xls/pptx/ppt/txt
+
+---
+
 ## Memory Folder
 
 PA memories are stored under `memory/<pa_id>/`. Only Personal Assistants have folders here � Skills are stateless and have no memory. Each PA folder holds 6 `.md` memory layers.
 
 The `_collective_memory_` PA hub is the only agent that also maintains a `collective_consciousness.md` file, synthesising all skill consciousness files on each consolidation cycle.
+
+---
+
+## Skills.md — External Tool Metadata
+
+Each skill agent maintains a `skills.md` file at `src/agent/ui/<agent>_agent/skills.md` that catalogues **every tool** the agent can call. This replaces the previous practice of hard-coding `_TOOL_DOCS` strings inside each orchestrator.
+
+### Format
+
+```markdown
+## Category: Browse & Inspect
+
+### list_directory
+**signature**: list_directory(path, show_hidden=False, limit=200)
+**description**: List files and sub-folders in a local directory.
+**tags**: list, browse, folder, contents, directory
+```
+
+Each tool entry has:
+| Field | Purpose |
+|-------|---------|
+| `### tool_name` | H3 header = tool identifier |
+| `**signature**` | Function signature with parameters |
+| `**description**` | One-line summary of what the tool does |
+| `**tags**` | Comma-separated keywords for semantic matching |
+
+Tools are grouped under `## Category:` headers (e.g., Browse & Inspect, Search, Archives & Compression).
+
+### Current skills.md files
+
+| Agent | File | Tools | Categories |
+|-------|------|-------|------------|
+| Files | `src/agent/ui/files_agent/skills.md` | 43 | 8 |
+| Drive | `src/agent/ui/drive_agent/skills.md` | 30 | 8 |
+| Email | `src/agent/ui/email_agent/skills.md` | 48 | 12 |
+
+---
+
+## Cosine-Similarity Tool Selection
+
+Instead of sending **all** tool docs to the LLM on every request (wasting tokens and diluting focus), orchestrators now use cosine similarity to select only the most relevant tools for each user query.
+
+### How it works
+
+```
+User query: "zip all the payslips and email them"
+                    │
+                    ▼
+          skill_loader.py
+          ┌─────────────────────────┐
+          │ 1. Parse skills.md      │
+          │ 2. Build search text    │
+          │    per tool (name +     │
+          │    description + tags)  │
+          │ 3. Encode with          │
+          │    SentenceTransformer  │
+          │    (all-MiniLM-L6-v2)   │
+          │ 4. FAISS IndexFlatIP    │
+          │    cosine similarity    │
+          │ 5. Return top-K tools   │
+          └─────────────────────────┘
+                    │
+                    ▼
+        Top 15 tool docs → ReAct prompt
+        All tool docs    → DAG planner
+```
+
+### Key module: `src/agent/core/skill_loader.py`
+
+| Function | Purpose |
+|----------|---------|
+| `load_tool_docs(agent, query, top_k, always_include, min_score)` | Filtered tool docs (ReAct) — top-K by similarity, then drops anything below `min_score` |
+| `get_all_tool_docs(agent)` | Full tool list (DAG planner needs all tools to build a plan) |
+
+### Why two strategies?
+
+- **DAG planner** sees all tools because it plans upfront and must know the full inventory.
+- **ReAct engine** sees only the top-K most relevant tools because it reasons step-by-step and benefits from a focused, less noisy tool list.
+
+### Confidence threshold (anti-hallucination)
+
+`load_tool_docs` applies a **minimum cosine-similarity score** (`min_score`, default **0.20**) after the top-K selection.  Tools scoring below this floor are logged with a `✗` marker and dropped:
+
+```
+│  #1  score=0.8714  ✓  tool=search_files
+│  #2  score=0.6231  ✓  tool=zip_folder
+│  #3  score=0.1102  ✗  tool=send_email      ← dropped (score < 0.20)
+└─ [skill-loader] using 14/42 tools (min_score=0.20)
+```
+
+**Why this matters:**  Giving the LLM tools that have nothing to do with the query causes it to hallucinate calls to those tools, mix up argument names, or plan unnecessary extra steps.  A hard score floor keeps the prompt clean.
+
+**Safety net:**  If the threshold filters out *everything*, the top-3 results are used unconditionally so the LLM always has at least one tool to work with.
+
+### always_include (pinned tools)
+
+Some tools must always be in the ReAct prompt regardless of query similarity:
+
+| Agent | Pinned tools |
+|-------|-------------|
+| Files | `save_context`, `deliver_file`, `save_search_manifest` |
+| Drive | `save_context` |
+| Email | `save_context`, `deliver_file`, `write_pdf_report` |
+
+### Hard-coded fallback removed
+
+The original `_TOOL_DOCS` hard-coded string in each orchestrator was a copy-paste list that drifted out of sync with `skills.md` every time a new tool was added.  
+`email_agent` and `files_agent` no longer fall back to it — if `skills.md` is missing, an `ERROR` log fires immediately and the call fails with a clear message instead of silently using an outdated tool list.  
+(`whatsapp_agent` and `stock_agent` do not yet have `skills.md` files and still use their `_TOOL_DOCS`.)
+
+---
+
+## Log Analyser Dashboard
+
+The Streamlit hub (`src/agent/ui/dashboard/`) now includes a built-in log viewer accessible via the **📊 Log Analyser** button in the sidebar.
+
+### Module: `src/agent/ui/dashboard/log_viewer.py`
+
+| Feature | Detail |
+|---------|--------|
+| File selector | All `logs/*.log` files, sorted by most-recently-modified first |
+| Level filter | Multi-select: DEBUG / INFO / WARNING / ERROR / CRITICAL |
+| Search | Full-text search with yellow match highlighting |
+| View: Turns | Groups log lines by `corr=` correlation ID; shows per-turn user message, source, LLM-call count, and error indicators |
+| View: Flat | Raw chronological stream, capped at 1,000 rendered rows |
+| Stats bar | Total lines · Turns · LLM calls · Warnings · Errors · Error turns |
+| LLM calls panel | Collapsible summary of every `llm.call` / `llm.response` line |
+| Errors panel | Collapsible list of all ERROR/CRITICAL lines for quick triage |
+| 🔄 Refresh | Manual one-click refresh |
+| ⟳ Auto | Checkbox + interval select (3 / 5 / 10 / 30 s) for live tailing |
+| 🏠 Home | Returns to the main Agent Hub without reloading |
+
+### Log format parsed
+
+```
+[2026-03-07 15:39:41.123] INFO  | corr=ac699088 req=7f3a1b2c | skill_dag_engine       | │  ✔ [email] Plan contains 3 step(s)
+```
+
+Turn boundaries are detected via the `╔══…` / `║ TURN START` box-drawing lines emitted by `hub/processor.py`.
+
+---
+
+## Router — Keyword Stemming
+
+The router's keyword pre-filter now applies minimal English stemming before matching.
+
+**Problem:** User says "payslips" but keyword map has "payslip" → no match → skips LLM → fast-path to chat (wrong agent).
+
+**Fix:** `_stem()` in `src/agent/workflows/router.py` strips common English suffixes:
+- `-ies` → `-y` (e.g., "directories" → "directory")
+- `-ves` → `-fe` (e.g., "archives" → "archive")
+- `-ses`, `-xes`, `-zes` → trim 2 chars
+- `-ing`, `-ed`, `-es`, `-s` → trim (with length guards)
+
+Both the user's words **and** the keyword map words are expanded with their stemmed forms before intersection. This ensures plural/singular and verb-form variations match reliably.

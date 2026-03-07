@@ -6,6 +6,9 @@ Key corrections vs. older version:
 - _build_skill_context() is dynamic so the LLM receives the real
   system paths (home / Downloads / Desktop / Documents) rather than
   guessing platform-specific placeholders.
+- Tool documentation is loaded from skills.md with cosine-similarity
+  selection for the ReAct engine (fewer tokens, more relevant tools).
+  The DAG planner still sees the full tool list.
 """
 from __future__ import annotations
 
@@ -40,7 +43,7 @@ write_text_file(path, content) – Write text content to a local file (creates o
 write_pdf_report(path, title, content) – Generate a formatted PDF report. Falls back to .txt if fpdf2 is not installed. Use for polished multi-page reports.
 write_excel_report(path, sheet_data, title="") – Generate an Excel .xlsx workbook. sheet_data is a dict mapping sheet_name → list-of-dicts. Use when the user asks for data in a spreadsheet or Excel format.
 deliver_file(path) – Send a single file to the user as a download (Telegram document / Dashboard button). ⛔ ONLY call when the user EXPLICITLY requests to receive a file ('send it', 'download this', 'give me the file', 'deliver it', 'show me the file'). NEVER call for count/search/analysis queries. For MULTIPLE files: collect → zip_files() → deliver_file() the zip ONCE.
-search_file_all_drives(query, extensions=None, limit=20, include_folders=True) – Search ALL drives (C:, D:, …) and the full home directory tree for a file OR folder by name/pattern. Use when the user asks to "find", "search", or "zip" something and gives only a name with no path. Returns file_path set to the first match. ALWAYS use this before zip_folder when the folder path is unknown.
+search_file_all_drives(query, extensions=None, limit=20, include_folders=True) – Search ALL drives (C:, D:, …) for a file OR folder. query is a name/glob substring; use query="*" to match ALL files when filtering only by extension. extensions is an optional list e.g. ["pdf","docx"] to restrict file types. Set limit=500 for comprehensive counting queries. Returns file_path set to the first match. ALWAYS use this (not search_by_name/search_by_extension) when the user says "on my computer", "on my laptop" or gives no specific folder. ALWAYS use this before zip_folder when the folder path is unknown.
 list_laptop_structure(include_hidden=False, output_file="", depth=2) – DETERMINISTIC full-laptop scan: discovers all available drives (C:, D:, …) and lists every drive root plus the major user directories (Home, Downloads, Desktop, Documents, Pictures, Music, Videos). The *depth* parameter controls how many levels deep to recurse inside user-created folders (default 2 — shows folder contents). Always writes a report .txt file automatically; the file_path in the result can be attached to emails. Use this whenever the user asks about ALL folders/files on their laptop, entire machine, or all drives.
 organize_folder(directory, by="extension", dry_run=True, include_hidden=False) – Organise files in a folder into sub-folders. by options: "extension" (PDF/, Images/, etc.), "date" (year-month), "name" (A-Z), "size" (Small/Medium/Large). ALWAYS call with dry_run=True first to show the user the plan, then call again with dry_run=False to apply.
 analyze_disk_usage(path, depth=2, top_n=20) – Recursively compute folder sizes and show biggest space consumers. Use when user asks 'what's taking up space' or 'show disk usage'.
@@ -92,6 +95,24 @@ def _build_skill_context() -> str:
         except Exception:
             pass
 
+    # Load user-defined personal folders from settings.json
+    personal_folders_note = ""
+    try:
+        import json as _json
+        _sf = Path(__file__).resolve().parents[4] / "config" / "settings.json"
+        _cfg = _json.loads(_sf.read_text(encoding="utf-8"))
+        _pf = {k: v for k, v in _cfg.get("personal_folders", {}).items() if not k.startswith("_")}
+        if _pf:
+            _lines = "\n".join(f"  {k}: {v}" for k, v in _pf.items())
+            personal_folders_note = (
+                "\nUser-defined personal folders (use these EXACT paths \u2014 do NOT search):\n"
+                + _lines + "\n"
+                "  Rule: when the user mentions one of these exact names (e.g. 'payslips', 'neo'),"
+                " call list_directory(<exact path>) DIRECTLY \u2014 never use search_file_all_drives for a known folder.  \n"
+            )
+    except Exception:
+        pass
+
     return (
         "You are the Local Files Skill Agent.\n"
         "You can browse, search, copy, move, delete, rename and organise files on the user's local filesystem.\n"
@@ -102,7 +123,8 @@ def _build_skill_context() -> str:
         f"  Downloads: {downloads}\n"
         f"  Desktop:   {desktop}\n"
         f"  Documents: {documents}\n"
-        + drive_root_note +
+        + drive_root_note
+        + personal_folders_note +
         "\n"
         "Examples of correct absolute paths on this machine:\n"
         f"  Downloads folder       \u2192 {downloads}\n"
@@ -140,14 +162,26 @@ def _build_skill_context() -> str:
         "    2. zip_folder() or zip_files() → creates a single .zip\n"
         "    3. deliver_file() on the .zip ONCE — never loop deliver_file() over individual files.\n"
         "- When searching for a file to DELIVER: use search_file_all_drives first; SKIP .lnk shortcut files.\n"
-        "⚠️ SEARCH STRATEGY FOR FILE TYPE QUERIES:\n"
-        "  When the user asks 'are there any image files / video files / pdf files' etc., ALWAYS search by\n"
-        "  extension (NOT by name). Run one search_by_extension call per relevant extension, then after ALL\n"
-        "  searches complete, call save_search_manifest(found_paths=[...all collected paths...]).\n"
-        "  Image extensions  → jpg, jpeg, png, gif, bmp, tiff, tif, webp, svg, ico\n"
-        "  Video extensions  → mp4, avi, mov, mkv, wmv, flv, webm\n"
-        "  Document extensions → pdf, docx, doc, xlsx, xls, pptx, ppt, txt\n"
-        "  Run ALL extension searches BEFORE calling save_search_manifest with the combined list.\n"
+        "⚠️ SEARCH STRATEGY — 'ON MY COMPUTER' QUERIES (follow these rules EXACTLY):\n"
+        "\n"
+        "  Rule A — Extension-based queries ('image files on my computer', 'how many pdfs', 'video files')::\n"
+        "    • Call search_file_all_drives(\"*\", extensions=[...], include_folders=False, limit=500)\n"
+        "      — query=\"*\" means match all filenames; the extensions list does the filtering.\n"
+        "    • This searches EVERY drive (C:\\, D:\\, …), NOT just the home folder.\n"
+        "    • Image   → extensions=[\"jpg\",\"jpeg\",\"png\",\"gif\",\"bmp\",\"tiff\",\"tif\",\"webp\",\"svg\",\"ico\"]\n"
+        "    • Video   → extensions=[\"mp4\",\"avi\",\"mov\",\"mkv\",\"wmv\",\"flv\",\"webm\"]\n"
+        "    • Document → extensions=[\"pdf\",\"docx\",\"doc\",\"xlsx\",\"xls\",\"pptx\",\"ppt\",\"txt\"]\n"
+        "    • Single type (e.g. 'how many pdfs'): search_file_all_drives(\"*\", extensions=[\"pdf\"], include_folders=False, limit=500)\n"
+        "    • After searching, call save_search_manifest(found_paths=[...all collected paths...]).\n"
+        "    • ⛔ NEVER use search_by_extension for 'on my computer' — it only searches the home folder.\n"
+        "\n"
+        "  Rule B — Name/keyword-based queries ('payslips on my computer', 'offer letters', 'invoices')::\n"
+        "    • Call search_file_all_drives(\"keyword\", include_folders=False, limit=500)\n"
+        "      — e.g. 'payslips' → search_file_all_drives(\"payslip\", include_folders=False, limit=500)\n"
+        "      — e.g. 'offer letters' → search_file_all_drives(\"offer letter\", include_folders=False, limit=500)\n"
+        "    • This matches any file whose name CONTAINS the keyword (case-insensitive) on ALL drives.\n"
+        "    • ⛔ NEVER use search_by_name for 'on my computer' — it only searches the home folder.\n"
+        "    • ⛔ NEVER use the default limit=20 for counting queries — always pass limit=500.\n"
         "- Use organize_folder with dry_run=True first to preview, then dry_run=False to move files.\n"
         "- Use analyze_disk_usage(path) when user asks 'what\'s taking up space', 'disk usage', or 'which folder is largest'.\n"
         "- Use get_drive_info() for total storage overview across all drives (total/used/free per drive).\n"
@@ -790,12 +824,14 @@ def _try_background_job(
                        progress_detail="Starting analysis…")
             _skill_context = _build_skill_context()
             _tool_map      = _get_tools()
+            _dag_docs = _get_tool_docs_for_dag()
+            _react_docs = _get_tool_docs_for_react(_raw_query)
             try:
                 res = run_skill_dag(
                     skill_name="files",
                     skill_context=_skill_context,
                     tool_map=_tool_map,
-                    tool_docs=_TOOL_DOCS,
+                    tool_docs=_dag_docs,
                     user_query=_raw_query,
                     artifacts_out={},
                 )
@@ -804,7 +840,7 @@ def _try_background_job(
                     skill_name="files",
                     skill_context=_skill_context,
                     tool_map=_tool_map,
-                    tool_docs=_TOOL_DOCS,
+                    tool_docs=_react_docs,
                     user_query=_raw_query,
                     artifacts_out={},
                 )
@@ -823,6 +859,33 @@ def _try_background_job(
         "job_id":  job_id,
     }
 
+
+
+def _get_tool_docs_for_dag() -> str:
+    """Return full tool docs for the DAG planner (needs all tools to plan)."""
+    from src.agent.core.skill_loader import get_all_tool_docs  # noqa: PLC0415
+    docs = get_all_tool_docs("files")
+    if not docs:
+        logger.error(
+            "[files-agent] skills.md returned no tools — check ui/files_agent/skills.md exists. "
+            "DAG planning will fail without tool docs."
+        )
+    return docs
+
+
+def _get_tool_docs_for_react(user_query: str) -> str:
+    """Return filtered tool docs for the ReAct engine (cosine-similarity top-K)."""
+    from src.agent.core.skill_loader import load_tool_docs  # noqa: PLC0415
+    docs = load_tool_docs(
+        "files", user_query, top_k=15,
+        always_include=["save_context", "deliver_file", "save_search_manifest"],
+    )
+    if not docs:
+        logger.error(
+            "[files-agent] FAISS returned no tool docs for query=%r — "
+            "check ui/files_agent/skills.md", user_query[:60]
+        )
+    return docs
 
 
 def execute_with_llm_orchestration(
@@ -853,12 +916,13 @@ def execute_with_llm_orchestration(
 
     skill_context = _build_skill_context()  # dynamic — includes real OS paths
     tool_map = _get_tools()
+    dag_tool_docs = _get_tool_docs_for_dag()
     try:
         result = run_skill_dag(
             skill_name="files",
             skill_context=skill_context,
             tool_map=tool_map,
-            tool_docs=_TOOL_DOCS,
+            tool_docs=dag_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
         )
@@ -869,12 +933,13 @@ def execute_with_llm_orchestration(
         _logging.getLogger("files.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
         )
+    react_tool_docs = _get_tool_docs_for_react(user_query)
     try:
         result = run_skill_react(
             skill_name="files",
             skill_context=skill_context,
             tool_map=tool_map,
-            tool_docs=_TOOL_DOCS,
+            tool_docs=react_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
         )

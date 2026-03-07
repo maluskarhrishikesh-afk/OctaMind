@@ -170,6 +170,17 @@ def setup_pa_logging(pa_name: str, level: int = logging.DEBUG, console: bool = T
     for noisy in ("httpx", "httpcore", "urllib3", "watchdog", "fsevents"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
+    # OpenAI SDK: keep INFO (retry/rate-limit messages) but silence DEBUG spam
+    # (verbose request options JSON and full HTTP response headers).
+    logging.getLogger("openai").setLevel(logging.INFO)
+    logging.getLogger("openai._base_client").setLevel(logging.INFO)
+
+    # yfinance, peewee, googleapiclient: debug-level SQL/HTTP noise not useful
+    logging.getLogger("yfinance").setLevel(logging.WARNING)
+    logging.getLogger("peewee").setLevel(logging.WARNING)
+    logging.getLogger("googleapiclient.discovery").setLevel(logging.WARNING)
+    logging.getLogger("google_auth_httplib2").setLevel(logging.WARNING)
+
     logger = logging.getLogger("log_manager")
     logger.info("PA logging initialised → %s", log_file)
 

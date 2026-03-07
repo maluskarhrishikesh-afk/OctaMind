@@ -15,6 +15,7 @@ from src.agent.ui.dashboard.styles import inject_css
 from src.agent.ui.dashboard.create_form import show_create_agent_form
 from src.agent.ui.dashboard.agent_card import show_agent_card
 from src.agent.ui.dashboard.configure_panel import show_configure_panel
+from src.agent.ui.dashboard.log_viewer import show_log_viewer
 
 logger = logging.getLogger("Octa Bot.dashboard")
 
@@ -449,6 +450,8 @@ def main() -> None:
         st.session_state.show_create_form = False
     if "configure_agent_id" not in st.session_state:
         st.session_state.configure_agent_id = None
+    if "show_log_viewer" not in st.session_state:
+        st.session_state.show_log_viewer = False
 
     manager = get_agent_manager()
     agents = manager.list_agents()
@@ -481,6 +484,15 @@ def main() -> None:
 
         if st.button("➕  Add Agent / Skill", use_container_width=True):
             st.session_state.show_create_form = True
+            st.session_state.show_log_viewer = False
+            st.rerun()
+
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+        logs_btn_type = "primary" if st.session_state.show_log_viewer else "secondary"
+        if st.button("📊  Log Analyser", use_container_width=True, type=logs_btn_type):
+            st.session_state.show_log_viewer = not st.session_state.show_log_viewer
+            st.session_state.show_create_form = False
             st.rerun()
 
         st.divider()
@@ -615,6 +627,10 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    if st.session_state.show_log_viewer:
+        show_log_viewer()
+        return
 
     if st.session_state.show_create_form:
         show_create_agent_form()

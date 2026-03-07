@@ -101,6 +101,63 @@ def _extract_session_state(user_query: str) -> Dict[str, Any]:
     return {}
 
 
+def _merge_manifest_into_session(session_vars: Dict[str, Any]) -> Dict[str, Any]:
+    """Augment session_vars with paths from octa_manifest.txt.
+
+    The manifest is updated by every file search (including background jobs) and
+    always contains the MOST RECENT set of found paths.  Session state extracted
+    from conversation history can be stale (e.g. points at an old email report
+    folder) when a background job completed after the last conversation turn.
+
+    Strategy:
+    - Read octa_manifest.txt (one absolute path per line).
+    - If the manifest has at least 1 path AND its modification time is more recent
+      than the session state's last_found_folder / last_found_paths, replace those
+      session fields with the manifest values.
+    - If session_vars is empty (no prior paths at all), still inject manifest paths
+      so that {__session__.last_found_paths} resolves correctly.
+    """
+    import os
+    from pathlib import Path as _Path
+
+    try:
+        workspace = _Path(__file__).resolve().parents[3]  # repo root
+        manifest_path = workspace / "data" / "octa_manifest.txt"
+        if not manifest_path.exists():
+            return session_vars
+
+        raw_paths = [
+            p.strip()
+            for p in manifest_path.read_text(encoding="utf-8").splitlines()
+            if p.strip()
+        ]
+        if not raw_paths:
+            return session_vars
+
+        # Only replace session state paths when the manifest file has been written
+        # more recently than the session state suggests paths were last found.
+        # As a heuristic: the manifest is "fresh" if it was modified in the last
+        # 30 minutes (1800 seconds).
+        manifest_age_s = time.time() - os.path.getmtime(manifest_path)
+        if manifest_age_s > 1800:
+            return session_vars  # manifest too old — keep session state as-is
+
+        updated = dict(session_vars)
+        updated["last_found_paths"] = raw_paths
+        updated["last_found_file_path"] = raw_paths[0]
+        # Derive last_found_folder from the first manifest path
+        first_parent = str(_Path(raw_paths[0]).parent)
+        updated["last_found_folder"] = first_parent
+        logger.info(
+            "│  [session-merge] manifest has %d path(s) (age=%.0fs) → updating last_found_paths",
+            len(raw_paths), manifest_age_s,
+        )
+        return updated
+    except Exception as exc:
+        logger.debug("│  [session-merge] manifest read failed: %s", exc)
+        return session_vars
+
+
 # ---------------------------------------------------------------------------
 # Public entry-point
 # ---------------------------------------------------------------------------
@@ -141,6 +198,11 @@ def run_skill_dag(
     # ── Extract session state from enriched query (## Session State block) ──
     # Used to resolve {__session__.field} tokens in LLM-planned kwargs.
     session_vars = _extract_session_state(user_query)
+    # ── Augment last_found_paths from octa_manifest.txt when available ──
+    # Background jobs update the manifest but NOT the session state, which can
+    # cause stale session state to point at old file paths (e.g. the email report
+    # folder instead of the just-searched payslip files).
+    session_vars = _merge_manifest_into_session(session_vars)
     if session_vars:
         logger.debug("│  [%s] Session state extracted: %s", skill_name, str(session_vars)[:200])
 
@@ -296,9 +358,13 @@ def _plan_steps(
 
     llm = get_llm_client()
 
-    system_prompt = f"""{skill_context}
+    # ── Planning prompt: planning instruction FIRST, skill_context LAST ──
+    # IMPORTANT: skill_context must NOT override the JSON-array output rule.
+    # Put it at the end as "domain guidance" only, never as runtime instructions.
+    system_prompt = f"""You are a tool-call planner for the {skill_name} skill agent.
 
-You are planning tool calls to fulfill the user's request.
+⚠️  YOUR ONLY JOB: output a JSON array of tool steps. Nothing else.
+    NEVER output an empty array [].  Always plan at least one tool call.
 
 Available tools:
 {tool_docs}
@@ -312,11 +378,11 @@ Output a JSON array — no markdown fences, no extra text — where each element
   "description": "<one sentence: what this step does>"
 }}
 
-Rules:
+Planning rules:
 - Use ONLY tools listed above.  Do NOT invent tool names.
 - kwargs must contain concrete, real values — never placeholders like "<value>" or "value1".
 - ⛔ NEVER produce a plan that asks the user for clarification or a missing value.
-  If a destination folder is not specified, use the default path from the skill context (<workspace>/data/).
+  If a destination folder is not specified, use the default path shown in the domain guide below.
   Always plan a real tool call with a concrete value.
 - If a kwarg value depends on the output of a previous step, write it as {{step_id}} (the
   full result JSON string) or {{step_id.field}} to access a specific field, e.g.
@@ -337,7 +403,10 @@ Rules:
   Video extensions: mp4, avi, mov, mkv, wmv, flv
   Document extensions: pdf, docx, xlsx, pptx, txt
 - Keep the plan minimal: include only the steps actually required.
-- Output ONLY the JSON array."""
+- Output ONLY the JSON array.
+
+Domain guidance (informational — use to understand tool purpose and defaults):
+{skill_context}"""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -356,7 +425,10 @@ Rules:
         logger.error("│  ✗ [%s] Planning LLM call failed: %s", skill_name, exc)
         return None, 1
 
+    logger.debug("│  [%s] raw planning response: %.500s", skill_name, raw)
     plan = _parse_plan(raw, tool_map, skill_name)
+    if plan is None:
+        logger.warning("│  [%s] full raw planning response (for diagnosis): %s", skill_name, raw[:1000])
     return plan, 1
 
 
@@ -384,6 +456,13 @@ def _parse_plan(
         else:
             logger.warning("│  ✗ [%s] No JSON array found in planning response", skill_name)
             return None
+
+    # If the LLM wrapped the array in an object like {"steps": [...]} unwrap it
+    if isinstance(plan, dict):
+        for key in ("steps", "plan", "dag", "tasks"):
+            if isinstance(plan.get(key), list):
+                plan = plan[key]
+                break
 
     if not isinstance(plan, list) or len(plan) == 0:
         logger.warning("│  ✗ [%s] Plan is empty or not a list", skill_name)
@@ -599,10 +678,15 @@ def _deep_get(path: str, results: Dict[str, Any], session_vars: Optional[Dict[st
 # ---------------------------------------------------------------------------
 
 def _strip_fences(raw: str) -> str:
-    """Remove optional ```json … ``` fences from LLM output."""
+    """Remove optional ```json … ``` fences and any leading prose from LLM output."""
     if "```" in raw:
         parts = raw.split("```", 2)
         raw = parts[1] if len(parts) >= 2 else parts[0]
         if raw.startswith("json"):
             raw = raw[4:]
+    raw = raw.strip()
+    # If the LLM prepended explanation text before the JSON array, strip it
+    bracket = raw.find("[")
+    if bracket > 0:
+        raw = raw[bracket:]
     return raw.strip()

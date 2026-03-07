@@ -197,6 +197,25 @@ def _get_tools() -> Dict[str, Any]:
     def send_completion_reminder(message_id: str, days: int = 3) -> dict:
         return svc.send_completion_reminder(message_id, days)
 
+    def write_pdf_report(path: str, title: str, content: str) -> dict:
+        from src.files.features.file_ops import write_pdf_report as _wpdf  # noqa: PLC0415
+        return _wpdf(path, title, content)
+
+    def write_text_file(path: str, content: str) -> dict:
+        try:
+            from pathlib import Path as _Path
+            _p = _Path(path).expanduser()
+            _p.parent.mkdir(parents=True, exist_ok=True)
+            _p.write_text(content, encoding="utf-8")
+            return {"status": "success", "path": str(_p), "file_path": str(_p),
+                    "message": f"Written {len(content)} chars to '{_p}'."}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+
+    def deliver_file(path: str) -> dict:
+        from src.files.features.file_ops import deliver_file as _df  # noqa: PLC0415
+        return _df(path)
+
     return {
         "send_email": send_email,
         "send_email_with_attachment": send_email_with_attachment,
@@ -248,6 +267,10 @@ def _get_tools() -> Dict[str, Any]:
         "extract_urls_from_email": extract_urls_from_email,
         "get_email_chains_summary": get_email_chains_summary,
         "send_completion_reminder": send_completion_reminder,
+        # ── Report / deliver (for PDF summaries) ─────────────────────────
+        "write_pdf_report": write_pdf_report,
+        "write_text_file": write_text_file,
+        "deliver_file": deliver_file,
         # ── Context Manifest ──────────────────────────────────────────────
         "save_context": __import__(
             "src.agent.manifest.context_manifest", fromlist=["make_save_context_tool"]
@@ -305,6 +328,9 @@ analyze_email_sentiment(message_id) – Detect tone of an email: urgent / positi
 extract_urls_from_email(message_id) – Extract all hyperlinks from an email body, classified as: links, tracking_pixels, unsubscribe_urls.
 get_email_chains_summary(max_results=10) – List the most active email threads sorted by reply count. Useful for 'show me long conversations' or 'which threads need attention'.
 send_completion_reminder(message_id, days=3) – Set a follow-up reminder on a sent email. Triggers a self-reminder if no reply arrives within N days.
+write_pdf_report(path, title, content) – Write a formatted PDF report to a local file. Use when creating email summaries, digests, or analysis reports. path should be inside Downloads folder, e.g. 'C:/Users/malus/Downloads/email_summary.pdf'. Returns file_path.
+write_text_file(path, content) – Write plain text or Markdown content to a local file. Returns file_path.
+deliver_file(path) – Send a file to the user as a download (dashboard button / Telegram document). Call ONLY after write_pdf_report or write_text_file. Returns file_path.
 save_context(topic, resolved_entities, awaiting="") – Persist the current email list for the next turn so the user can say "reply to the first one" without listing again. topic="email_list", resolved_entities={"listed_emails":[{"id":"...","subject":"...","sender":"..."}]}, awaiting="email_action".
 """.strip()
 
@@ -319,7 +345,21 @@ Prefer using message IDs returned by list_emails or get_todays_emails when calli
 If list_emails(query="in:inbox") returns zero results, retry with list_emails(query="", max_results=10) to search across all mail before concluding the inbox is empty.
 For Out-of-Office / OOO / vacation responder requests: use set_vacation_responder(). Parse the user's intended date from context (e.g. "5th March" → "2026-03-05"). The body should be the message the user described. Always call get_vacation_responder() first if the user asks to check or update existing OOO.
 For contact lookup: use search_contacts(query) to find a name → email mapping before sending. If the cache is empty, call sync_contacts() first.
-For multi-email summarization ('summarize latest N emails from X', 'get N emails and summarize'): ALWAYS call fetch_emails_to_markdown(query="from:X", max_results=N) ONCE — this returns all email bodies in a single call. Then summarise the returned content yourself in your final answer, flagging any urgent action items (deadlines, responses required, payments, security alerts). Do NOT loop over message IDs calling summarize_email. If N > 20, tell the user the cap is 20 and ask them to reduce the number.
+
+ZERO-RESULT POLICY (CRITICAL):
+If fetch_emails_to_markdown or list_emails returns 0 emails for a sender-specific query
+(e.g. query="from:linkedin.com" returns 0 results), you MUST immediately call final_answer
+reporting "No [sender] emails found in your inbox." — do NOT retry with a broader query,
+do NOT summarize unrelated emails, do NOT iterate further.
+Only broaden the query (remove sender filter) when the user explicitly asks to search
+more broadly — never do it automatically after a zero-result sender search.
+
+For multi-email summarization ('summarize latest N emails from X', 'get N emails and summarize', 'give me a report of emails'):
+  STEP 1 — fetch: call fetch_emails_to_markdown(query="from:X", max_results=N) ONCE to get all email bodies.
+  STEP 2 — write PDF: call write_pdf_report(path="C:/Users/malus/Downloads/email_summary_<sender>.pdf", title="Email Summary — <Sender> (<date>)", content=<formatted summary>) with content structured as:
+    ## Overview\n<2-sentence summary of themes>\n\n## Emails (newest first)\n### <Subject> — <Date>\n**From:** <sender>\n**Key points:** <bullet list>\n**Action required:** <yes/no + what>\n\n## Action Items\n<numbered list of any deadlines, replies needed, payments, or security alerts>
+  STEP 3 — deliver or email: if the user said 'email it' or 'send via email', call send_email_with_attachment; otherwise call deliver_file(path) so the user can download the PDF.
+  Do NOT loop over message IDs calling summarize_email. If N > 20, tell the user the cap is 20 and ask them to reduce the number.
 For unsubscribe requests: call unsubscribe_email(message_id) — first list_emails to get the message ID.
 For archiving inbox: call archive_emails(query) to bulk-clear without deleting.
 For thread operations: use thread_mute / thread_archive / thread_delete with the thread_id from list_emails.
@@ -353,6 +393,33 @@ The user query may include a '## Session State' JSON block from the previous con
 # Required entry-point
 # ---------------------------------------------------------------------------
 
+def _get_tool_docs_for_dag() -> str:
+    """Return full tool docs for the DAG planner (needs all tools to plan)."""
+    from src.agent.core.skill_loader import get_all_tool_docs  # noqa: PLC0415
+    docs = get_all_tool_docs("email")
+    if not docs:
+        logger.error(
+            "[email-agent] skills.md returned no tools — check ui/email_agent/skills.md exists. "
+            "DAG planning will fail without tool docs."
+        )
+    return docs
+
+
+def _get_tool_docs_for_react(user_query: str) -> str:
+    """Return filtered tool docs for the ReAct engine (cosine-similarity top-K)."""
+    from src.agent.core.skill_loader import load_tool_docs  # noqa: PLC0415
+    docs = load_tool_docs(
+        "email", user_query, top_k=15,
+        always_include=["save_context", "deliver_file", "write_pdf_report"],
+    )
+    if not docs:
+        logger.error(
+            "[email-agent] FAISS returned no tool docs for query=%r — "
+            "check ui/email_agent/skills.md", user_query[:60]
+        )
+    return docs
+
+
 def execute_with_llm_orchestration(
     user_query: str,
     agent_id: Optional[str] = None,
@@ -364,12 +431,13 @@ def execute_with_llm_orchestration(
     Fallback:      ReAct loop (1 LLM call per step, up to 10 iterations).
     """
     tool_map = _get_tools()
+    dag_tool_docs = _get_tool_docs_for_dag()
     try:
         result = run_skill_dag(
             skill_name="email",
             skill_context=_SKILL_CONTEXT,
             tool_map=tool_map,
-            tool_docs=_TOOL_DOCS,
+            tool_docs=dag_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
         )
@@ -380,12 +448,13 @@ def execute_with_llm_orchestration(
         _logging.getLogger("email.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
         )
+    react_tool_docs = _get_tool_docs_for_react(user_query)
     try:
         return run_skill_react(
             skill_name="email",
             skill_context=_SKILL_CONTEXT,
             tool_map=tool_map,
-            tool_docs=_TOOL_DOCS,
+            tool_docs=react_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
             max_iterations=10,
