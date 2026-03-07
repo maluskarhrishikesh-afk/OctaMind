@@ -298,13 +298,13 @@ User query: "zip all the payslips and email them"
 
 ### Confidence threshold (anti-hallucination)
 
-`load_tool_docs` applies a **minimum cosine-similarity score** (`min_score`, default **0.20**) after the top-K selection.  Tools scoring below this floor are logged with a `✗` marker and dropped:
+`load_tool_docs` applies a **minimum cosine-similarity score** (`min_score`, default **0.45**) after the top-K selection.  Tools scoring below this floor are logged with a `✗` marker and dropped:
 
 ```
 │  #1  score=0.8714  ✓  tool=search_files
 │  #2  score=0.6231  ✓  tool=zip_folder
-│  #3  score=0.1102  ✗  tool=send_email      ← dropped (score < 0.20)
-└─ [skill-loader] using 14/42 tools (min_score=0.20)
+│  #3  score=0.1102  ✗  tool=send_email      ← dropped (score < 0.45)
+└─ [skill-loader] using 14/42 tools (min_score=0.45)
 ```
 
 **Why this matters:**  Giving the LLM tools that have nothing to do with the query causes it to hallucinate calls to those tools, mix up argument names, or plan unnecessary extra steps.  A hard score floor keeps the prompt clean.

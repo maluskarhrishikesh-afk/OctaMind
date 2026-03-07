@@ -141,7 +141,7 @@ def _select_top_k(
     skills: List[ToolSkill],
     top_k: int,
     agent_name: str = "?",
-    min_score: float = 0.20,
+    min_score: float = 0.45,
 ) -> List[ToolSkill]:
     """Return the top-K most relevant tools for the query using cosine similarity.
 
@@ -216,7 +216,7 @@ def load_tool_docs(
     user_query: str = "",
     top_k: int = 15,
     always_include: Optional[List[str]] = None,
-    min_score: float = 0.20,
+    min_score: float = 0.45,
 ) -> str:
     """Load and filter tool docs for an agent.
 
@@ -233,11 +233,11 @@ def load_tool_docs(
     always_include:
         Tool names that should ALWAYS be included regardless of similarity
         (e.g. "save_context", "deliver_file").
-    min_score:
+    min_score: 
         Minimum cosine-similarity score [0–1] a tool must reach to be
         included.  Tools below this threshold are logged and dropped.
-        Reducing this keeps the LLM focused and cuts hallucination of
-        irrelevant tool calls.  Default 0.20.
+        Increasing this keeps the LLM focused and cuts hallucination of
+        irrelevant tool calls.  Default 0.45.
 
     Returns
     -------
