@@ -112,26 +112,70 @@ The email executor delegates to `run_skill_dag`.
 
 ---
 
+### Step 3.5 — Orchestrator: Tool Set Preparation (0 LLM calls)
+
+**File:** `src/agent/ui/email_agent/orchestrator.py` — `execute_with_llm_orchestration()`
+
+Before calling `run_skill_dag`, the email orchestrator prepares **two separate tool sets** for the two possible execution paths:
+
+```python
+# Path A — DAG planning: ALL 53 tools (compact first-sentence format)
+dag_tool_docs = get_all_tool_docs("email")
+# e.g. each line: "get_todays_emails(n_emails=5) – Fetch the most recent inbound emails received today."
+
+# Path B — ReAct fallback: FAISS top-15 filtered to this query
+react_tool_docs = load_tool_docs("email", user_query,
+                                 always_include=["save_context", "deliver_file"])
+# e.g. 8 tools selected with scores ≥ 0.45
+```
+
+**Session State injection** also happens here. The query passed to the skill is actually:
+```
+List my last 3 emails
+
+## Session State (structured — prefer these resolved values over raw text)
+{
+  "current_date": "2026-03-08",
+  "current_time": "13:47",
+  "timezone": "India Standard Time (UTC+05:30)",
+  "active_date": "2026-03-08"
+}
+```
+
+The `## Session State` block gives the planner access to today's date without the LLM having to infer or guess it. The `{__session__.current_date}` token can be used in DAG step kwargs.
+
+**FAISS query stripping:** Before FAISS similarity search, `_strip_context_blocks()` removes the `## Session State` block so only the clean query `"List my last 3 emails"` is embedded — preventing the session JSON from diluting cosine scores.
+
+---
+
 ### Step 4 — Skill DAG: Planning (1 LLM call)
 
 **File:** `src/agent/workflows/skill_dag_engine.py` — `_plan_steps()`
 
-The planner receives a system prompt describing every email tool (list_emails, read_email, send_email, …) and the user query. It asks the LLM to return a minimal JSON array of tool steps.
+The planner receives ALL email tools in **compact first-sentence-only format** (not the full rich FAISS descriptions). `_compact_tool_docs_for_planning()` trims each tool's description to its first sentence (≤ 90 chars), enabling all 53 tools to fit in a single prompt well under the 8,000 token limit.
 
 **Prompt (simplified):**
 ```
 You are a planning engine for the Email skill.
 
 Available tools:
-  list_emails(query, max_results) – List email summaries matching query.
-  read_email(message_id) – Read full content of an email.
-  send_email(to, subject, body, ...) – Compose and send an email.
-  ...
+  get_todays_emails(n_emails=5) – Fetch the most recent inbound emails received today.
+  list_emails(query, max_results) – List email summaries matching a search query.
+  send_email(to, subject, body) – Compose and send an email.
+  schedule_email(to, subject, body, send_at) – Schedule an email to be sent later.
+  ... (all 53 tools, first sentence only)
 
 Output ONLY the JSON array — no markdown fences, no extra text.
 
 Request: List my last 3 emails
 ```
+
+**Token budget:**
+- 53 tools × ~40 chars compact = ~350 tokens (vs ~1,400 tokens with full descriptions)
+- Skill context (first 2,000 chars only) = ~500 tokens
+- Planning rules + prompt scaffolding = ~400 tokens
+- `max_tokens=800` for the plan response
+- **Total: ~2,050 tokens** — comfortably under the 8,000 token limit for gpt-4o-mini
 
 **LLM response (LLM call #2):**
 ```json
@@ -702,6 +746,67 @@ The fallback is logged at WARNING level and the execution_mode in the result dic
 
 ---
 
+## Why DAG Uses All Tools, Not FAISS
+
+A common question: *"The ReAct engine uses FAISS to filter to 15 tools — why doesn't DAG planning do the same?"*
+
+**The core reason: multi-step dependency visibility.**
+
+Consider: *"Find all PDF files from last week and email me the list."*
+
+- FAISS embedding of this query strongly matches file-search tools (`search_by_date`, `search_by_extension`)
+- It might score `schedule_email` or `generate_pdf_report` below threshold and drop them
+- The DAG planner would then be unable to plan the `search → email` chain, since `schedule_email` is missing from its tool list
+
+With ALL tools visible, the planner correctly produces:
+```json
+[{"id": "s1", "tool": "search_by_date", ...}, {"id": "s2", "tool": "schedule_email", ...}]
+```
+
+**Why FAISS is valuable for ReAct (but not DAG):**
+
+ReAct iterates: each iteration is one LLM call that sees the tool list. Reducing from 50 tools to 15 saves ~500 tokens multiplied by up to 6 iterations = ~3,000 tokens total. That matters.
+
+DAG planning is a **single LLM call**. The compact format (`_compact_tool_docs_for_planning()`) already reduces 50 tools to ~350 tokens — small enough that applying FAISS saves only ~100 more tokens while risking broken multi-step plans.
+
+**Summary:**
+
+| Property | DAG Planning | ReAct Engine |
+|---|---|---|
+| Tool selection | ALL tools (compact first-sentence) | FAISS top-15 (full rich descriptions) |
+| LLM calls that see the tool list | 1 | Up to 6 |
+| Risk of missing tools | None | Acceptable (single-step oriented) |
+| Token cost per call | ~350 tokens | ~3,500 tokens (15 detailed tools) |
+| Fallback if wrong tool chosen | DAG → ReAct fallback | Next iteration can correct |
+
+---
+
+## Session State vs Manifests: Complementary Roles
+
+Every skill query is annotated with a `## Session State` JSON block. This works alongside (not instead of) the manifest system:
+
+```
+Session State = per-turn entity extraction from conversation history
+Manifests     = persistent disk state written by previous tool calls
+```
+
+**Session State carries** (extracted by `ConversationStateTracker`):
+- `current_date`, `current_time`, `timezone` — resolves "today", "this week"
+- `active_date`, `mentioned_dates` — resolves "March 15", "next Friday", "tomorrow" → ISO date
+- `active_time_start/end` — resolves "at 2 PM" → "14:00"
+- `mentioned_emails` — resolves "to John" → `john@example.com` (from earlier in conversation)
+- `last_found_paths`, `last_found_folder` — extracted from previous assistant reply text
+
+**Manifests carry** (written by tool calls):
+- `octa_manifest.txt` — all file paths from the most recent file search (unlimited size)
+- `octa_context.json` — agent-namespaced resolved entities (calendar slots, email IDs)
+- `operation_history.json` — copy/move history for undo
+- `octa_jobs.json` — background task status
+
+**Overlap at `last_found_paths`:** Both sources provide file paths. `_merge_manifest_into_session()` in `skill_dag_engine.py` resolves this by replacing session-state paths with manifest paths whenever the manifest was written in the last 30 minutes (fresher = wins). This prevents stale session state from pointing at old results when a background job updated the manifest.
+
+---
+
 ## Key Files Reference
 
 | File | Role |
@@ -710,6 +815,8 @@ The fallback is logged at WARNING level and the execution_mode in the result dic
 | `src/agent/workflows/router.py` | Classifies command → list of agent names (1 LLM call) |
 | `src/agent/workflows/master_orchestrator.py` | Multi-agent: plan + execute + final answer assembly |
 | `src/agent/workflows/dag_planner.py` | DAGStep/DAGPlan data classes; topological sort; `plan_dag_workflow`; `execute_dag_workflow` |
-| `src/agent/workflows/skill_dag_engine.py` | Per-agent: 2-call plan→execute→synthesise loop |
+| `src/agent/workflows/skill_dag_engine.py` | Per-agent: 2-call plan→execute→synthesise loop; `_compact_tool_docs_for_planning()` |
 | `src/agent/workflows/skill_react_engine.py` | Fallback: per-agent ReAct loop (up to 6 iterations) |
 | `src/agent/workflows/agent_registry.py` | Maps agent name → executor callable + capabilities text |
+| `src/agent/core/skill_loader.py` | FAISS tool selection; `_strip_context_blocks()` strips session state before embedding |
+| `src/agent/context/conversation_state.py` | Extracts structured entities (dates, emails, paths) → `## Session State` block |

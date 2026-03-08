@@ -1217,6 +1217,12 @@ def _render_pa_chat(pa: dict) -> None:
         _result_ph = st.empty()
 
     # Decide which skill(s) are needed.
+    # Show a status card immediately — before any LLM call — so the user
+    # never sees a blank assistant bubble while routing is in progress.
+    _card_ph.markdown(
+        _status_card("🤔 Analyzing your request…", ["Detecting required skill…"]),
+        unsafe_allow_html=True)
+
     # Enrich bare time-slot replies (e.g. "2 PM to 3 PM") so the router
     # recognises them as scheduling tasks instead of casual conversation.
     _routing_command = _enrich_scheduling_followup(
@@ -1343,7 +1349,7 @@ def _render_pa_chat(pa: dict) -> None:
             _result_status = result.get("status", "success")
             action = result.get("action", "react_response")
             if action == "react_response" or "message" in result:
-                reply = result.get("message", str(result))
+                reply = result.get("message") or str(result)
             else:
                 try:
                     import importlib
@@ -1364,8 +1370,10 @@ def _render_pa_chat(pa: dict) -> None:
                 unsafe_allow_html=True)
 
         logger.info(
-            "└─ [PA:%s] Turn END (skill=%s)  status=%s  elapsed=%.2fs",
-            pa_name, single_agent, _result_status, time.perf_counter() - _t_turn,
+            "└─ [PA:%s] Turn END (skill=%s)  status=%s  llm_calls=%d  elapsed=%.2fs",
+            pa_name, single_agent, _result_status,
+            (result or {}).get("llm_calls", 0),
+            time.perf_counter() - _t_turn,
         )
 
         if _result_status == "auth_error":
@@ -1526,6 +1534,19 @@ def _render_pa_chat(pa: dict) -> None:
             importance="High",
         )
         st.session_state[mk("count")] += 1
+
+        # Task-completion trigger: capture patterns from this workflow NOW
+        # rather than waiting for the next timed cycle (Devin-style).
+        import threading as _threading
+        def _task_end_consolidation(_aid: str = pa_id) -> None:
+            try:
+                from src.agent.memory.agent_memory import get_agent_memory as _gam
+                from src.agent.memory.memory_consolidator import MemoryConsolidator as _MC
+                _MC(_gam(_aid)).consolidate_lightweight()
+            except Exception:
+                pass
+        _threading.Thread(target=_task_end_consolidation, daemon=True).start()
+
     except Exception as _mem_err:
         logger.debug("PA workflow memory record skipped: %s", _mem_err)
 

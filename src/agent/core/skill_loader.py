@@ -18,8 +18,8 @@ Usage
 -----
     from src.agent.core.skill_loader import load_tool_docs
 
-    # Returns a filtered _TOOL_DOCS string with the top-K relevant tools
-    tool_docs = load_tool_docs("files", user_query, top_k=15)
+    # Returns a filtered tool docs string using faiss.tool_selection defaults from settings.json
+    tool_docs = load_tool_docs("files", user_query)
 """
 from __future__ import annotations
 
@@ -27,9 +27,31 @@ import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 logger = logging.getLogger("skill_loader")
+
+# ── Query cleaning ──────────────────────────────────────────────────────────
+
+_CONTEXT_BLOCK_MARKERS = (
+    "## Conversation Diary",
+    "## Session State",
+    "## Context",
+    "## History",
+)
+
+def _strip_context_blocks(query: str) -> str:
+    """Strip appended context blocks from the user query before FAISS embedding.
+
+    Production queries have '## Session State\\n{...}' appended which injects
+    hundreds of tokens of JSON into the embedding, severely diluting cosine
+    similarity scores.  Strip everything from the first marker onwards.
+    """
+    for marker in _CONTEXT_BLOCK_MARKERS:
+        if marker in query:
+            query = query.split(marker, 1)[0].strip()
+    return query
+
 
 # ── Data model ──────────────────────────────────────────────────────────────
 
@@ -61,6 +83,39 @@ _CATEGORY_RE = re.compile(r"^##\s+Category:\s*(.+)$")
 _FIELD_RE = re.compile(r"^-\s+\*\*(\w+)\*\*:\s*(.+)$")
 
 _cache: Dict[str, List[ToolSkill]] = {}
+
+# ── Config helpers (lazy-loaded from config/settings.json) ──────────────────
+
+_CONFIG_CACHE: Dict[str, Dict] = {}   # keyed by "tool_sel" once loaded
+
+
+def _load_faiss_tool_config() -> Dict:
+    """Read the ``faiss.tool_selection`` block from config/settings.json (cached)."""
+    if "tool_sel" not in _CONFIG_CACHE:
+        try:
+            import json as _json  # noqa: PLC0415
+            _cfg_path = Path(__file__).resolve().parents[3] / "config" / "settings.json"
+            _cfg = _json.loads(_cfg_path.read_text(encoding="utf-8"))
+            _CONFIG_CACHE["tool_sel"] = _cfg.get("faiss", {}).get("tool_selection", {})
+        except Exception:  # noqa: BLE001 — config may not exist on all setups
+            _CONFIG_CACHE["tool_sel"] = {}
+    return _CONFIG_CACHE["tool_sel"]
+
+
+def _cfg_min_score() -> float:
+    """Return the configured FAISS minimum similarity score for tool selection (default 0.45).
+
+    Reads ``faiss.tool_selection.min_score`` from config/settings.json.
+    """
+    return float(_load_faiss_tool_config().get("min_score", 0.45))
+
+
+def _cfg_top_k_react() -> int:
+    """Return the configured top-K tool count for the ReAct engine (default 15).
+
+    Reads ``faiss.tool_selection.top_k`` from config/settings.json.
+    """
+    return int(_load_faiss_tool_config().get("top_k", 15))
 
 
 def _parse_skills_md(path: Path) -> List[ToolSkill]:
@@ -141,7 +196,7 @@ def _select_top_k(
     skills: List[ToolSkill],
     top_k: int,
     agent_name: str = "?",
-    min_score: float = 0.45,
+    min_score: float = 0.45,  # callers pass _cfg_min_score(); this default is a safety fallback
 ) -> List[ToolSkill]:
     """Return the top-K most relevant tools for the query using cosine similarity.
 
@@ -175,6 +230,7 @@ def _select_top_k(
     )
     selected: List[ToolSkill] = []
     skipped: List[tuple] = []
+    selected_scores: List[tuple] = []  # (name, score) for summary line
     for rank, (idx, score) in enumerate(results, 1):
         if idx < len(skills):
             accepted = score >= min_score
@@ -185,6 +241,7 @@ def _select_top_k(
             )
             if accepted:
                 selected.append(skills[idx])
+                selected_scores.append((skills[idx].name, float(score)))
             else:
                 skipped.append((skills[idx].name, float(score)))
 
@@ -201,10 +258,12 @@ def _select_top_k(
             "│  [skill-loader] all tools below threshold — using top-3 as safety fallback",
         )
         selected = [skills[idx] for idx, _s in results[:3] if idx < len(skills)]
+        selected_scores = [(s.name, float(score)) for (idx, score), s in zip(results[:3], selected)]
 
     logger.info(
-        "└─ [skill-loader] using %d/%d tools (min_score=%.2f)",
+        "└─ [skill-loader] selected %d/%d tools (min_score=%.2f): %s",
         len(selected), len(skills), min_score,
+        ", ".join(f"{n}={s:.3f}" for n, s in selected_scores) or "(none)",
     )
     return selected
 
@@ -214,9 +273,9 @@ def _select_top_k(
 def load_tool_docs(
     agent_name: str,
     user_query: str = "",
-    top_k: int = 15,
+    top_k: Optional[int] = None,
     always_include: Optional[List[str]] = None,
-    min_score: float = 0.45,
+    min_score: Optional[float] = None,
 ) -> str:
     """Load and filter tool docs for an agent.
 
@@ -229,15 +288,17 @@ def load_tool_docs(
         If empty, all tools are returned (useful for DAG planner which
         needs to see the full tool set).
     top_k:
-        Maximum number of tools to return via similarity.
+        Maximum number of tools to return via similarity.  Defaults to
+        ``faiss.tool_selection.top_k`` in config/settings.json (15).
     always_include:
         Tool names that should ALWAYS be included regardless of similarity
         (e.g. "save_context", "deliver_file").
-    min_score: 
+    min_score:
         Minimum cosine-similarity score [0–1] a tool must reach to be
         included.  Tools below this threshold are logged and dropped.
-        Increasing this keeps the LLM focused and cuts hallucination of
-        irrelevant tool calls.  Default 0.45.
+        Defaults to ``faiss.tool_selection.min_score`` in config/settings.json
+        (0.45).  Increasing this keeps the LLM focused and reduces
+        hallucination of irrelevant tool calls.
 
     Returns
     -------
@@ -245,6 +306,9 @@ def load_tool_docs(
     injection into the DAG planner or ReAct engine system prompt.
     Returns empty string if skills.md is not found.
     """
+    _top_k     = top_k     if top_k     is not None else _cfg_top_k_react()
+    _min_score = min_score if min_score is not None else _cfg_min_score()
+
     skills = _get_skills(agent_name)
     if not skills:
         return ""
@@ -252,7 +316,8 @@ def load_tool_docs(
     always_include = set(always_include or [])
 
     if user_query:
-        selected = _select_top_k(user_query, skills, top_k, agent_name=agent_name, min_score=min_score)
+        clean_query = _strip_context_blocks(user_query)
+        selected = _select_top_k(clean_query, skills, _top_k, agent_name=agent_name, min_score=_min_score)
         # Merge in always_include tools that weren't selected
         selected_names = {s.name for s in selected}
         for skill in skills:
@@ -275,6 +340,54 @@ def get_all_tool_docs(agent_name: str) -> str:
     return "\n".join(skill.doc_line for skill in skills)
 
 
+def select_tool_names(
+    agent_name: str,
+    user_query: str,
+    top_k: Optional[int] = None,
+    always_include: Optional[List[str]] = None,
+    min_score: Optional[float] = None,
+) -> List[str]:
+    """Return just the *names* of tools selected by FAISS for a query.
+
+    Useful for building a filtered tool-callable map in an orchestrator
+    without re-parsing the documentation string.
+
+    Parameters
+    ----------
+    agent_name:  Agent identifier (e.g. "files").
+    user_query:  Natural-language user query.
+    top_k:       Max tools to consider (defaults to ``faiss.tool_selection.top_k`` in settings.json).
+    always_include:  Tool names always added regardless of score.
+    min_score:   Minimum cosine-similarity threshold (defaults to
+                 ``faiss.tool_selection.min_score`` in settings.json).
+
+    Returns
+    -------
+    List of tool name strings (order: similarity rank, then always_include).
+    Returns all tool names when ``user_query`` is empty or FAISS is unavailable.
+    """
+    _top_k     = top_k     if top_k     is not None else _cfg_top_k_react()
+    _min_score = min_score if min_score is not None else _cfg_min_score()
+
+    skills = _get_skills(agent_name)
+    if not skills:
+        return []
+
+    always_include_set = set(always_include or [])
+
+    if not user_query or _top_k >= len(skills):
+        return [s.name for s in skills]
+
+    clean_query = _strip_context_blocks(user_query)
+    selected = _select_top_k(clean_query, skills, _top_k, agent_name=agent_name, min_score=_min_score)
+    selected_names = {s.name for s in selected}
+    for skill in skills:
+        if skill.name in always_include_set and skill.name not in selected_names:
+            selected.append(skill)
+    return [s.name for s in selected]
+
+
 def clear_cache() -> None:
-    """Clear the skills cache (for testing or hot-reload)."""
+    """Clear the skills cache and config cache (for testing or hot-reload)."""
     _cache.clear()
+    _CONFIG_CACHE.clear()

@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-03-08T13:12:29Z",
+  "entries": [
+    {
+      "fingerprint": "2ea9992d91394f05",
+      "category": "provider_rate_limit",
+      "logger": "workflows",
+      "normalized_message": "│ ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-08 17:38:41.773",
+      "last_seen": "2026-03-08 17:38:41.773",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:38:41.773",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "│  ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66770 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66770 seconds before retrying.'}}",
+          "correlation_id": "ea632b15",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        }
+      ]
+    },
+    {
+      "fingerprint": "de211ddd766bf70e",
+      "category": "general_error",
+      "logger": "workflows",
+      "normalized_message": "run_workflow: DAG planning failed — falling back to ReAct loop",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-08 17:38:39.772",
+      "last_seen": "2026-03-08 17:38:39.772",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:38:39.772",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "run_workflow: DAG planning failed — falling back to ReAct loop",
+          "correlation_id": "ea632b15",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        }
+      ]
+    },
+    {
+      "fingerprint": "0284ce2bc6107777",
+      "category": "provider_rate_limit",
+      "logger": "workflows.dag",
+      "normalized_message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}} — falling back",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-08 17:38:39.767",
+      "last_seen": "2026-03-08 17:38:39.767",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:38:39.767",
+          "level": "ERROR",
+          "logger": "workflows.dag",
+          "message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66772 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66772 seconds before retrying.'}} — falling back",
+          "correlation_id": "ea632b15",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        }
+      ]
+    },
+    {
+      "fingerprint": "4787f008ab57d72d",
+      "category": "provider_rate_limit",
+      "logger": "workflows",
+      "normalized_message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}) — using keyword fallback",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-08 17:38:36.376",
+      "last_seen": "2026-03-08 17:38:36.376",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:38:36.376",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66775 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66775 seconds before retrying.'}}) — using keyword fallback",
+          "correlation_id": "ea632b15",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        }
+      ]
+    },
+    {
+      "fingerprint": "984411cf3cb92404",
+      "category": "email_followup_selection_failure",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [email] ✗ step=s2 tool=summarize_email returned error:",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-08 17:36:32.099",
+      "last_seen": "2026-03-08 17:36:32.099",
+      "root_cause": "Planner or follow-up resolution passed a serialized email object/list where a single message id was required.",
+      "tool_description_guidance": [
+        "Email list and summary tool descriptions should explicitly mention positional follow-ups like 'summarize the 2nd one' and require using saved listed email ids.",
+        "Result-shape docs should consistently call out stable keys such as results, emails, id, and report_content."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:36:32.099",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [email] ✗ step=s2 tool=summarize_email returned error:",
+          "correlation_id": "a6ee74ce",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        }
+      ]
+    },
+    {
+      "fingerprint": "533a8815511b60be",
+      "category": "provider_rate_limit",
+      "logger": "huggingface_hub.utils._http",
+      "normalized_message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-08 17:34:15.639",
+      "last_seen": "2026-03-08 17:34:15.639",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:34:15.639",
+          "level": "WARNING",
+          "logger": "huggingface_hub.utils._http",
+          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        }
+      ]
+    }
+  ]
+}

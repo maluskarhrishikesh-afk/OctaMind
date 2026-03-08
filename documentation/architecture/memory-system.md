@@ -483,8 +483,8 @@ class MemoryConsolidator:
                      ↓
          ┌──────────────────────────┐
          │ Should Consolidate?      │
-         │ - Count >= 20?           │
-         │ - 24 hours passed?       │
+         │ - Count >= 5? (test)     │
+         │ - 1 hour passed? (test)  │
          └───────┬──────────────────┘
                  │
          ┌───────┴────────┐
@@ -622,16 +622,16 @@ class MemoryConsolidator:
 - Implementation: `ConsolidationRunner` daemon thread (`src/agent/memory/consolidation_runner.py`)
 - Starts: Automatically when the Agent Hub dashboard boots (`dashboard/app.py` at import time)
 - First run: Immediately on startup
-- Subsequent runs: Every 24 hours
+- Subsequent runs: Every **1 hour** *(testing mode — set `CHECK_EVERY_HOURS = 8` in `consolidation_runner.py` for production)*
 - Scope: **All registered agents + `_collective_memory_`** — including stopped/inactive agents
 - Survives dashboard reruns: Yes (daemon thread lives with the Streamlit process)
 - Use case: Ensures memory improves continuously regardless of agent activity
 
-**2. Counter-Based Trigger (Per-Agent, Legacy)**
-- Triggers: Every 20 interactions within an active agent session
+**2. Counter-Based Trigger (Per-Agent, in-session)**
+- Triggers: Every **5 interactions** *(testing mode — set to 20 for production)*
 - Reset: After each consolidation
 - Survives restarts: No (counter resets)
-- Use case: Active sessions that need more frequent consolidation
+- Use case: Active sessions that need rapid early-cycle consolidation during development
 
 **3. Manual Trigger**
 - Triggers: `memory.run_consolidation()` called directly
@@ -819,7 +819,7 @@ def _save_state(self):
 if 'last_consolidation_check' not in st.session_state:
     st.session_state.last_consolidation_check = datetime.now()
     
-    # Check if 24+ hours passed since last consolidation
+    # Check if 1+ hour passed (testing mode) or 8+ hours (production)
     consolidator = memory.get_consolidator()
     if consolidator.last_consolidation:
         hours_since = (datetime.now() - consolidator.last_consolidation).total_seconds() / 3600
@@ -872,7 +872,7 @@ Day 2 - 02:00 PM:
     - Agent STARTS
     - Loads state: last_consolidation = Day 1 08:00 AM
     - Calculates: 30 hours passed
-    - ⚡ TRIGGERS IMMEDIATELY (24+ hour rule)
+    - ⚡ TRIGGERS IMMEDIATELY (time-elapsed rule)
     - Consolidation runs on startup
     - Updates state: last_consolidation = Day 2 02:00 PM
 ```
@@ -958,7 +958,7 @@ Medium Importance events (90+ days):
 | ----------------------------------------- | --------------------------------------- | ----- |
 | `src/agent/memory/agent_memory.py`        | Core memory management class + `MULTI_AGENT_ID` constant | ~ 1140 lines |
 | `src/agent/memory/memory_consolidator.py` | Consolidation engine: patterns, habits, self reflection, collective consciousness | ~830 lines |
-| `src/agent/memory/consolidation_runner.py` | Global 24 h background thread — covers all agents | ~140 lines |
+| `src/agent/memory/consolidation_runner.py` | Global background thread (1 h testing / 8 h production) — covers all agents | ~140 lines |
 | `src/agent/memory/collective_memory.py`   | Episodic snapshot aggregator for Personal Assistant LLM context | ~140 lines |
 | `src/agent/ui/dashboard/app.py`           | Dashboard entry — boots ConsolidationRunner + `_collective_memory_` memory on startup | |
 | `src/agent/llm/llm_parser.py`             | LLM integration with memory context     | |
@@ -1702,8 +1702,8 @@ SemanticSearchIndex.semantic_search(query, texts, top_k)
 | Embedding model | `all-MiniLM-L6-v2` | 80 MB, 384-dim, excellent recall/speed trade-off |
 | FAISS index type | `IndexFlatIP` | Exact search; corpus < 10 K entries so no approximation needed |
 | Similarity metric | Cosine (via L2-normalised inner product) | Robust to embedding magnitude variation |
-| Episodic threshold | 0.25 | Captures paraphrase + related queries |
-| Semantic threshold | 0.30 | Slightly stricter — semantic lines are denser facts |
+| Episodic threshold | 0.25 (config: `faiss.memory_episodic.min_score`) | Captures paraphrase + related queries |
+| Semantic threshold | 0.30 (config: `faiss.memory_semantic.min_score`) | Slightly stricter — semantic lines are denser facts |
 | Fallback | Keyword search | Activates automatically if `faiss`/`sentence_transformers` not installed |
 
 ### Model Loading
@@ -1744,6 +1744,90 @@ If `faiss-cpu` or `sentence-transformers` are not installed, `semantic_search()`
 
 ---
 
+## Gaps & Planned Improvements
+
+### Known Limitations
+
+| # | Gap | Impact | Status |
+|---|-----|--------|--------|
+| 1 | **No session-end trigger** — consolidation only fires on interaction count or time, never at the natural end of a task or conversation | Patterns from the most recent session may not be captured until the next scheduled cycle | ✅ **Implemented** — `_run_idle_checks()` in `ConsolidationRunner` detects 15-min idle and fires `consolidate_lightweight()` |
+| 2 | **No importance-based early trigger** — a single `High`-importance event does not immediately kick off consolidation | High-value data sits in working memory longer than necessary | ✅ **Implemented** — `_importance_flush()` in `AgentMemory.add_interaction()` immediately writes to semantic memory when `importance="High"` |
+| 3 | **Hardcoded `insight` field** — auto-recorded interactions write `"User performed {action}"` instead of a meaningful LLM-generated insight | Episodic theme extraction produces shallow semantic memory entries | ✅ **Implemented** — `_enrich_recent_insights()` runs at the start of each full consolidation cycle, replacing template insights with LLM-generated one-liners (one batch call per cycle) |
+| 4 | **`consciousness.md` orphan files** — older deployments wrote `consciousness.md`; code now writes `self_reflection.md`. The old files are never read or cleaned up automatically | Confusion during debugging; stale files accumulate | ⚠️ Low priority — cleaned up manually for now |
+| 5 | **No per-layer delta check** — if working memory hasn't actually changed between cycles the consolidator still calls the LLM | Unnecessary token spend on idle agents (partially mitigated by the `_has_new_interactions` file-mtime check in `ConsolidationRunner`) | ✅ Already mitigated via `_has_new_interactions()` |
+| 6 | **`_channel_ingest_state.json` not in file-structure docs** — bookkeeping file for Live Channel ingestion is present in every agent folder but absent from the architecture diagram | Docs are incomplete; confusing to new contributors | ✅ Noted above in file structure table |
+| 7 | **Self-reflection update is purely time-gated** — it runs on a calendar cadence regardless of how much new information has arrived | A burst of high-signal interactions doesn't accelerate the synthesis; a quiet period still waits the full interval | Low priority — acceptable given the 3-day testing cadence |
+
+### Towards Devin / Manus Style Autonomous Memory
+
+Production autonomous agents (Devin, Manus, MemGPT/Letta, Mem0) treat consolidation as an **event-driven** process, not a scheduled job. The industry pattern is:
+
+| Trigger | What it means | Our status |
+|---------|--------------|-----------|
+| **Per-turn explicit read/write** (MemGPT/Letta) | The agent calls memory tools on every turn — reads relevant facts before acting, writes new facts immediately after | Partially: working memory auto-updated every turn; semantic memory updated on High-importance events via `_importance_flush()` |
+| **Task-completion trigger** (Devin, Manus) | Full consolidation runs when a task or subtask is marked done, not on a timer | ✅ **Implemented** — background `consolidate_lightweight()` spawned after every `multi_skill_workflow` completes |
+| **Session-end trigger** (Mem0, general practice) | Consolidation runs when the user goes idle or the conversation window closes | ✅ **Implemented** — `_run_idle_checks()` fires after 15 min of inactivity |
+| **Importance-weighted early flush** | A `High`-importance episodic event immediately promotes its insight to semantic memory without waiting for a cycle | ✅ **Implemented** — `_importance_flush()` in `add_interaction()` |
+| **LLM-powered insight generation** (Manus, MemGPT) | Each episodic entry gets a meaningful, LLM-generated one-line insight rather than a template string | ✅ **Implemented** — `_enrich_recent_insights()` batch-enriches up to 10 events per full consolidation cycle |
+| **Context-boundary summarisation** (Manus sliding window) | When the context window fills, a rolling summary is written to semantic memory so nothing is lost | ✅ **Implemented** — `_sliding_window_summarise()` in `agent_memory.py` fires in a background thread when `add_interaction()` trims overflow entries; LLM generates 2-4 bullet summary written to `semantic_memory.md` under "Sliding Window Summary" |
+
+**Recommended next steps** (in priority order):
+
+1. Add a `consolidate_on_task_end()` call in the PA agent's task-completion path.
+2. Add an `importance_flush()` in `add_interaction()` that immediately promotes `High`-importance interactions to semantic memory without a full consolidation cycle.
+3. Implement the session-end trigger by detecting idle time (e.g., 15 minutes without a new message from a Live Channel).
+4. Replace the hardcoded `insight` string with a short LLM-generated one-line summary on every `add_interaction()` call (1 cheap completion per turn).
+
+### Current Tuning (Testing Mode)
+
+All tuning constants are centralised for easy promotion to production:
+
+| Constant | File | Testing value | Production value |
+|----------|------|--------------|----------------|
+| `interaction_count >= N` | `memory_consolidator.py::should_consolidate` | **5** | 20 |
+| `hours_since >= H` | `memory_consolidator.py::should_consolidate` | **1** | 8 |
+| `days_since >= D` | `memory_consolidator.py::_should_update_self_reflection` | **3** | 14 |
+| `CHECK_EVERY_HOURS` | `consolidation_runner.py` | **1** | 8 |
+| `_CYCLE_HOURS` | `run_consolidation.py` | **1** | 8 |
+| `_IDLE_THRESHOLD_SECONDS` | `consolidation_runner.py` | **900 (15 min)** | 900 (keep as is) |
+
+### New Architecture: Consolidation Trigger Hierarchy
+
+```
+Each user interaction
+        │
+        ▼
+add_interaction()
+  ├─ Working memory updated                       [every turn]
+  ├─ Episodic memory updated (rule-based insight) [every turn]
+  └─ importance == "High"?
+       └─ _importance_flush() → semantic memory   [immediate ✅ NEW]
+
+Background loop (every 30 s tick)
+  └─ _run_idle_checks()
+       └─ agent idle 15+ min AND new interactions since last consolidation?
+            └─ consolidate_lightweight()           [session-end ✅ NEW]
+                 ├─ patterns → semantic memory
+                 ├─ themes → semantic memory
+                 └─ habits detected
+
+Background loop (every 1 h / 8 h full cycle)
+  └─ _run_cycle() → consolidate()
+       ├─ Step 0: _enrich_recent_insights()        [LLM batch ✅ NEW]
+       ├─ Step 1: patterns → semantic memory
+       ├─ Step 2: themes → semantic memory
+       ├─ Step 3: habit detection
+       ├─ Step 4: 90-day decay
+       ├─ Step 5: self reflection (every 3/14 days)
+       ├─ Step 6: personality evolution
+       └─ Step 7: collective consciousness (hub only)
+
+After multi-skill workflow completes (app.py)
+  └─ Background thread: consolidate_lightweight() [task-end ✅ NEW]
+```
+
+---
+
 ## Conclusion
 
 The Cognitive Memory Architecture provides agents with:
@@ -1755,14 +1839,17 @@ The Cognitive Memory Architecture provides agents with:
 ✅ **Bounded context** - Smart character caps prevent unbounded token growth  
 ✅ **On-demand recall** - Episodic memory searched when the user references the past  
 ✅ **Natural language recall** - 38+ signal phrases + temporal resolution ("past week", "2 days ago")  
-✅ **Meaningful episodic insights** - Searchable descriptions instead of generic placeholders  
+✅ **Meaningful episodic insights** - LLM-enriched descriptions via `_enrich_recent_insights()` (1 batch call per cycle)  
 ✅ **FAISS semantic search** - Cosine similarity retrieval for episodic and semantic memory  
-❌ **Decay file rewrite** - Not yet implemented (entries classified but file not updated)
+✅ **Decay file rewrite** - `_apply_decay_mechanism()` rewrites episodic file and archives to monthly files  
+✅ **Session-end consolidation** - `_run_idle_checks()` fires lightweight consolidation after 15 min idle  
+✅ **Task-completion consolidation** - `consolidate_lightweight()` spawned after every multi-skill workflow  
+✅ **Importance-based early flush** - `_importance_flush()` writes High-priority events to semantic memory immediately
 
 ---
 
-**Document Version**: 1.2  
-**Last Updated**: February 22, 2026  
+**Document Version**: 1.4  
+**Last Updated**: March 7, 2026  
 **Authors**: AI Development Team  
-**Status**: Production
+**Status**: Testing — consolidation in fast-cycle mode (5 interactions / 1 hour / 15-min idle)
 

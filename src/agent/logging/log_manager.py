@@ -61,6 +61,8 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Optional
 
+from .error_registry import JsonErrorRegistryHandler
+
 # ---------------------------------------------------------------------------
 # Context variables — async & thread safe
 # ---------------------------------------------------------------------------
@@ -103,6 +105,7 @@ def _make_formatter() -> logging.Formatter:
 # Handler registry — prevents duplicate handlers on repeated imports
 # ---------------------------------------------------------------------------
 _active_pa_handler: Optional[logging.FileHandler] = None
+_error_registry_handler: Optional[logging.Handler] = None
 
 
 # ---------------------------------------------------------------------------
@@ -125,8 +128,6 @@ def setup_pa_logging(pa_name: str, level: int = logging.DEBUG, console: bool = T
                   Set to False for headless background processes where stdout
                   is redirected to DEVNULL (avoids silent Windows crashes).
     """
-    global _active_pa_handler
-
     _LOGS_DIR.mkdir(exist_ok=True)
 
     # Sanitise name for use as filename
@@ -140,9 +141,10 @@ def setup_pa_logging(pa_name: str, level: int = logging.DEBUG, console: bool = T
     fmt = _make_formatter()
 
     # Remove previous PA file handler if present
-    if _active_pa_handler is not None:
-        root.removeHandler(_active_pa_handler)
-        _active_pa_handler.close()
+    active_pa_handler = _active_pa_handler
+    if active_pa_handler is not None:
+        root.removeHandler(active_pa_handler)
+        active_pa_handler.close()
 
     # File handler — rotates nothing; kept simple to inspect with a text editor
     fh = logging.FileHandler(log_file, encoding="utf-8", mode="a")
@@ -150,7 +152,14 @@ def setup_pa_logging(pa_name: str, level: int = logging.DEBUG, console: bool = T
     fh.setFormatter(fmt)
     fh.addFilter(filt)
     root.addHandler(fh)
-    _active_pa_handler = fh
+    globals()["_active_pa_handler"] = fh
+
+    error_registry_handler = _error_registry_handler
+    if error_registry_handler is None:
+        error_registry_handler = JsonErrorRegistryHandler(level=logging.WARNING)
+        error_registry_handler.addFilter(filt)
+        root.addHandler(error_registry_handler)
+        globals()["_error_registry_handler"] = error_registry_handler
 
     # Console handler (INFO only, useful during dev/startup)
     # Only add if explicitly requested and not already present (avoids duplicates
@@ -210,6 +219,13 @@ def setup_test_logging(level: int = logging.DEBUG) -> None:
     fh.setFormatter(fmt)
     fh.addFilter(filt)
     root.addHandler(fh)
+
+    error_registry_handler = _error_registry_handler
+    if error_registry_handler is None:
+        error_registry_handler = JsonErrorRegistryHandler(level=logging.WARNING)
+        error_registry_handler.addFilter(filt)
+        root.addHandler(error_registry_handler)
+        globals()["_error_registry_handler"] = error_registry_handler
 
     for noisy in ("httpx", "httpcore", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

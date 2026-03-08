@@ -16,6 +16,10 @@
     - [What changes with a Manifest](#what-changes-with-a-manifest)
   - [2. What Is a Manifest?](#2-what-is-a-manifest)
   - [3. The Two Layers: Reasoning vs State](#3-the-two-layers-reasoning-vs-state)
+  - [3b. Session State vs Manifests: Complementary Layers](#3b-session-state-vs-manifests-complementary-layers)
+    - [Where each one is essential](#where-each-one-is-essential)
+    - [Overlap resolution](#overlap-resolution)
+    - [Why not eliminate session state and use manifests everywhere?](#why-not-eliminate-session-state-and-use-manifests-everywhere)
   - [4. Manifest Types in OctaMind](#4-manifest-types-in-octamind)
     - [4.1 Context Manifest — Conversational State](#41-context-manifest--conversational-state)
     - [4.2 File Manifest — Search Results](#42-file-manifest--search-results)
@@ -135,6 +139,78 @@ the last one left off.
 The critical boundary:
 - The LLM **never stores state** — it reasons and responds.
 - The Manifest **never reasons** — it stores and retrieves.
+
+---
+
+## 3b. Session State vs Manifests: Complementary Layers
+
+A common point of confusion: both Session State and manifests carry "context". They solve different problems and are designed to coexist, not replace each other.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│              SESSION STATE  (in-memory, per-turn)          │
+│                                                            │
+│  Built by: ConversationStateTracker                        │
+│  Lifetime: One turn — rebuilt from history each time       │
+│  Survives restart: NO                                      │
+│                                                            │
+│  Fields:                                                   │
+│    current_date, current_time, timezone                    │
+│    active_date, mentioned_dates          → ISO dates       │
+│    active_time_start, active_time_end    → 24h times       │
+│    mentioned_emails                      → email addresses │
+│    last_found_paths, last_found_folder   → file paths      │
+│    last_assistant_action                 → reply snippet   │
+│                                                            │
+│  Injected as: ## Session State JSON block appended to      │
+│               every skill-agent query                      │
+└────────────────────────────────────────────────────────────┘
+                         │
+          overlaps only for last_found_paths
+          resolved by _merge_manifest_into_session()
+                         │
+┌────────────────────────▼───────────────────────────────────┐
+│             MANIFEST FILES  (disk-persistent)              │
+│                                                            │
+│  Written by: Tool calls inside agent executors             │
+│  Lifetime: Overwritten per action; survives restarts       │
+│  Size limit: None (manifest.txt can hold 100k+ paths)      │
+│                                                            │
+│  octa_manifest.txt      → ALL file paths from last search  │
+│  octa_context.json      → calendar slots, email IDs, etc. │
+│  operation_history.json → copy/move history (undo)         │
+│  octa_jobs.json         → background task status           │
+└────────────────────────────────────────────────────────────┘
+```
+
+### Where each one is essential
+
+| Need | Session State | Manifest |
+|------|:---:|:---:|
+| Resolve "today" / "this week" to ISO date | ✅ | ❌ |
+| Resolve "next Friday" → "2026-03-13" | ✅ | ❌ |
+| Resolve "at 2 PM" → "14:00" | ✅ | ❌ |
+| Remember email address from earlier in conversation | ✅ | ❌ |
+| Store 601 file paths found by search | ❌ (too large) | ✅ |
+| Survive process restart | ❌ | ✅ |
+| Remember calendar slot from previous turn | ❌ | ✅ |
+| Track background job progress | ❌ | ✅ |
+| Provide undo / rollback for file operations | ❌ | ✅ |
+
+### Overlap resolution
+
+`last_found_paths` appears in both. `_merge_manifest_into_session()` in `skill_dag_engine.py` handles this:
+1. Extract `last_found_paths` from conversation history → session state
+2. If `octa_manifest.txt` was written within the last **30 minutes**, replace session-state paths with manifest paths (manifest is fresher — it's written directly by the tool, not parsed from assistant text)
+3. The DAG planner then uses `{__session__.last_found_paths}` which resolves to the manifest paths
+
+This ensures that paths from background jobs (which update the manifest but never appear in the conversation) are still available to follow-up commands.
+
+### Why not eliminate session state and use manifests everywhere?
+
+Session state extracts *linguistic entities* from natural language (`ConversationStateTracker` uses regex + date arithmetic). Manifests store *operational outputs* written by tools. They are fundamentally different:
+- A manifest cannot tell you that "next Friday" in the user's message means "2026-03-13"
+- A session state cannot store 10,000 file paths without blowing the LLM context window
 
 ---
 

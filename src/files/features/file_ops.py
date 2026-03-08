@@ -6,6 +6,7 @@ can report errors consistently.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -491,6 +492,89 @@ def list_laptop_structure(
         return {"status": "error", "message": str(exc)}
 
 
+def count_files_and_folders_all_drives(
+    include_hidden: bool = True,
+    follow_symlinks: bool = False,
+) -> Dict[str, Any]:
+    """Count accessible files and folders across all detected local drives."""
+    try:
+        drives: List[Path] = []
+        if platform.system() == "Windows":
+            for letter in string.ascii_uppercase:
+                drive_path = Path(f"{letter}:\\")
+                try:
+                    if drive_path.exists():
+                        drives.append(drive_path)
+                except Exception:
+                    continue
+        else:
+            drives = [Path("/")]
+
+        def _skip_name(name: str) -> bool:
+            if include_hidden:
+                return False
+            return name.startswith(".") or name.startswith("$")
+
+        total_files = 0
+        total_folders = 0
+        total_errors = 0
+        per_drive: Dict[str, Dict[str, int]] = {}
+
+        for drive in drives:
+            drive_counts = {"files": 0, "folders": 0, "errors": 0}
+            stack = [str(drive)]
+            while stack:
+                current = stack.pop()
+                try:
+                    with os.scandir(current) as entries:
+                        for entry in entries:
+                            if _skip_name(entry.name):
+                                continue
+                            try:
+                                is_dir = entry.is_dir(follow_symlinks=follow_symlinks)
+                            except (PermissionError, OSError):
+                                drive_counts["errors"] += 1
+                                continue
+
+                            if is_dir:
+                                drive_counts["folders"] += 1
+                                try:
+                                    if entry.is_symlink() and not follow_symlinks:
+                                        continue
+                                except OSError:
+                                    pass
+                                stack.append(entry.path)
+                            else:
+                                drive_counts["files"] += 1
+                except (PermissionError, OSError):
+                    drive_counts["errors"] += 1
+                    continue
+
+            per_drive[str(drive)] = drive_counts
+            total_files += drive_counts["files"]
+            total_folders += drive_counts["folders"]
+            total_errors += drive_counts["errors"]
+
+        return {
+            "status": "success",
+            "total_files": total_files,
+            "total_folders": total_folders,
+            "total_items": total_files + total_folders,
+            "scanned_drives": [str(drive) for drive in drives],
+            "per_drive": per_drive,
+            "include_hidden": include_hidden,
+            "follow_symlinks": follow_symlinks,
+            "message": (
+                f"Counted {total_files} file(s) and {total_folders} folder(s) "
+                f"across {len(drives)} drive(s)."
+                + (f" Skipped {total_errors} inaccessible location(s)." if total_errors else "")
+            ),
+        }
+    except Exception as exc:
+        logger.error("count_files_and_folders_all_drives failed: %s", exc)
+        return {"status": "error", "message": f"count_files_and_folders_all_drives error: {exc}"}
+
+
 def deliver_file(path: str) -> Dict[str, Any]:
     """
     Explicitly mark a local file for download delivery to the user.
@@ -528,8 +612,7 @@ def write_pdf_report(path: str, title: str, content: str) -> Dict[str, Any]:
     """
     Write a formatted PDF report to *path*.
 
-    Requires ``fpdf2`` (``pip install fpdf2``).  Falls back to writing a
-    plain ``.txt`` file if the library is not available.
+    Requires ``fpdf2`` (``pip install fpdf2``).
 
     Args:
         path:    Destination file path (should end in .pdf).
@@ -540,28 +623,70 @@ def write_pdf_report(path: str, title: str, content: str) -> Dict[str, Any]:
         out = Path(path).expanduser()
         out.parent.mkdir(parents=True, exist_ok=True)
 
+        if isinstance(content, dict):
+            content = json.dumps(content, indent=2, ensure_ascii=False)
+        elif not isinstance(content, str):
+            content = str(content)
+
+        def _normalise_report_text(text: str) -> str:
+            import textwrap
+
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
+            text = text.replace("\t", "    ")
+            text = text.replace("\u00a0", " ")
+            text = text.replace("\u2022", "- ")
+            text = text.replace("\u2013", "-")
+            text = text.replace("\u2014", "-")
+            text = text.replace("\u2018", "'")
+            text = text.replace("\u2019", "'")
+            text = text.replace("\u201c", '"')
+            text = text.replace("\u201d", '"')
+            text = re.sub(r"^```.*?$", "", text, flags=re.MULTILINE)
+            text = text.replace("### ", "\n")
+            text = text.replace("## ", "\n")
+            text = text.replace("**", "")
+            text = text.replace("`", "")
+            text = "\n".join(line.rstrip() for line in text.split("\n"))
+
+            wrapped_lines: List[str] = []
+            for raw_line in text.split("\n"):
+                line = raw_line.strip()
+                if not line:
+                    if not wrapped_lines or wrapped_lines[-1] != "":
+                        wrapped_lines.append("")
+                    continue
+                wrapped_lines.extend(
+                    textwrap.wrap(line, width=90, break_long_words=True, break_on_hyphens=False)
+                    or [line]
+                )
+            return "\n".join(wrapped_lines).strip() or "Report generated."
+
+        content = _normalise_report_text(content)
+
         try:
             from fpdf import FPDF  # type: ignore
+
+            def _pdf_safe(text: str) -> str:
+                return text.encode("latin-1", "replace").decode("latin-1")
+
             pdf = FPDF()
             pdf.set_auto_page_break(auto=True, margin=15)
             pdf.add_page()
             pdf.set_font("Helvetica", "B", 16)
-            pdf.cell(0, 10, title, ln=True, align="C")
+            usable_width = pdf.w - pdf.l_margin - pdf.r_margin
+            pdf.cell(usable_width, 10, _pdf_safe(title), new_x="LMARGIN", new_y="NEXT", align="C")
             pdf.set_font("Helvetica", size=10)
             pdf.ln(4)
             for line in content.split("\n"):
-                # multi_cell wraps long lines
-                pdf.multi_cell(0, 6, line if line.strip() else " ")
+                if not line.strip():
+                    pdf.ln(4)
+                    continue
+                pdf.multi_cell(usable_width, 6, _pdf_safe(line), new_x="LMARGIN", new_y="NEXT")
             pdf.output(str(out))
         except ImportError:
-            # Graceful fallback: write as annotated text file
-            fallback = out.with_suffix(".txt")
-            fallback.write_text(f"{title}\n{'=' * len(title)}\n\n{content}", encoding="utf-8")
             return {
-                "status": "success",
-                "file_path": str(fallback),
-                "message": f"fpdf2 not installed — saved as plain text: {fallback.name}",
-                "note": "Run 'pip install fpdf2' to enable real PDF generation.",
+                "status": "error",
+                "message": "write_pdf_report error: fpdf2 is not installed; PDF output is unavailable.",
             }
 
         return {

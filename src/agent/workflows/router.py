@@ -207,6 +207,32 @@ Answer:"""
 # Public API
 # ---------------------------------------------------------------------------
 
+def _stem(word: str) -> str:
+    """Minimal English suffix stripping for the keyword pre-filter.
+
+    Handles common plurals and verb inflections so 'payslips' matches
+    'payslip', 'letters' matches 'letter', 'invoices' matches 'invoice', etc.
+    NOT a full stemmer — only targets the most common mismatches.
+    """
+    if len(word) <= 4:
+        return word
+    if word.endswith("ies") and len(word) > 5:        # e.g. "copies" → "copy"
+        return word[:-3] + "y"
+    if word.endswith("ves") and len(word) > 5:         # e.g. "archives" → "archive"
+        return word[:-3] + "fe"
+    if word.endswith("ses") or word.endswith("xes") or word.endswith("zes"):
+        return word[:-2]                                # e.g. "boxes" → "box"
+    if word.endswith("ing") and len(word) > 5:
+        return word[:-3]                                # e.g. "searching" → "search"
+    if word.endswith("ed") and len(word) > 5:
+        return word[:-2]                                # e.g. "scanned" → "scann"
+    if word.endswith("es") and len(word) > 4:
+        return word[:-2]                                # e.g. "invoices" → "invoic"
+    if word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]                                # e.g. "payslips" → "payslip"
+    return word
+
+
 def keyword_pre_filter(command: str) -> bool:
     """
     Fast keyword pre-filter — runs BEFORE any LLM call.
@@ -220,11 +246,18 @@ def keyword_pre_filter(command: str) -> bool:
 
     This saves one LLM call per request for casual queries such as
     "How are you?", "What time is it?", "Tell me a joke", etc.
+
+    Uses basic suffix-stripping so plurals like 'payslips' match 'payslip'.
     """
     kmap = _get_keyword_map()
     lower = command.lower()
     cmd_words = set(re.findall(r"[a-z]{3,}", lower))
-    matched = any(keywords & cmd_words for keywords in kmap.values())
+    # Expand both sides with stemmed forms for plural/inflection tolerance
+    cmd_stems = cmd_words | {_stem(w) for w in cmd_words}
+    matched = any(
+        (keywords | {_stem(w) for w in keywords}) & cmd_stems
+        for keywords in kmap.values()
+    )
     if not matched:
         logger.debug("Router [pre-filter]: no agent keywords found — skipping LLM call")
     return matched

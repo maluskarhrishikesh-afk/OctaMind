@@ -492,6 +492,84 @@ def get_context_history(days: int = _AUDIT_TTL_DAYS) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Diary — persistent, append-only cross-turn action log
+# ---------------------------------------------------------------------------
+
+def write_diary_entry(
+    user_request: str,
+    agent: str,
+    action: str,
+    found_paths: Optional[List[str]] = None,
+    file_path: str = "",
+    result_summary: str = "",
+) -> None:
+    """Append a structured diary entry to octa_context.json["diary"].
+
+    Provides persistent cross-turn memory for references like "those files",
+    "the payslips I searched earlier", even 4-5 conversation turns back.
+    Keeps the last 20 entries (older entries pruned automatically).
+
+    Called automatically by run_skill_dag, run_skill_react, and _run_job.
+    """
+    try:
+        _MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
+        store: Dict[str, Any] = {}
+        if _CONTEXT_FILE.exists():
+            try:
+                _raw = _CONTEXT_FILE.read_text(encoding="utf-8")
+                _parsed = json.loads(_raw) if _raw.strip() else {}
+                # Migrate if this is a legacy flat single-agent context (schema_version absent
+                # and it has "agent" at the top level).
+                if isinstance(_parsed, dict) and "agent" in _parsed and "diary" not in _parsed and "schema_version" not in _parsed:
+                    store = {}  # start fresh — flat legacy format
+                else:
+                    store = _parsed if isinstance(_parsed, dict) else {}
+            except Exception:
+                store = {}
+
+        now = datetime.now()
+        entry_id = f"turn_{now.strftime('%Y%m%d_%H%M%S')}_{agent}"
+        entry: Dict[str, Any] = {
+            "id": entry_id,
+            "timestamp": now.isoformat(timespec="seconds"),
+            "user_request": (user_request or "")[:200],
+            "agent": agent,
+            "action": action,
+            "found_paths": (found_paths or [])[:50],   # cap at 50 to keep file small
+            "file_path": file_path or "",
+            "result_summary": (result_summary or "")[:300],
+        }
+
+        diary: List[Dict[str, Any]] = store.get("diary", [])
+        diary.append(entry)
+        diary = diary[-20:]   # keep last 20 entries
+        store["diary"] = diary
+
+        _CONTEXT_FILE.write_text(
+            json.dumps(store, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info(
+            "[context-manifest] diary entry written  agent=%s  action=%s  paths=%d",
+            agent, action, len(found_paths or []),
+        )
+    except Exception as exc:
+        logger.warning("[context-manifest] diary write failed: %s", exc)
+
+
+def read_diary(last_n: int = 5) -> List[Dict[str, Any]]:
+    """Return the last *last_n* diary entries, newest-first."""
+    try:
+        if not _CONTEXT_FILE.exists():
+            return []
+        raw = json.loads(_CONTEXT_FILE.read_text(encoding="utf-8"))
+        entries = raw.get("diary", [])
+        return list(reversed(entries[-last_n:]))
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Query injection
 # ---------------------------------------------------------------------------
 
@@ -528,6 +606,35 @@ def inject_context_into_query(user_query: str, current_agent: str = "") -> str:
                         the data JSON so it stays aware of prior context without
                         being instructed to call tools that don't belong to it.
     """
+    # ── Diary injection (persistent cross-turn action history) ────────────────
+    # Always injected regardless of whether short-term context (ctx) exists.
+    # This gives the planner visibility into file paths / outputs from turns
+    # 1-5+ turns ago (e.g. "those payslips", "the zip I created earlier").
+    try:
+        _diary_entries = read_diary(last_n=5)
+        if _diary_entries:
+            _d_lines = ["## Conversation Diary (recent turns — use for pronoun/context resolution)"]
+            for _e in _diary_entries:            # already newest-first from read_diary()
+                _paths_note = (
+                    f" → {len(_e.get('found_paths', []))} file(s): "
+                    + ", ".join(_e["found_paths"][:3])
+                ) if _e.get("found_paths") else ""
+                _out_note = f" → output: {_e['file_path']}" if _e.get("file_path") else ""
+                _d_lines.append(
+                    f"- [{_e.get('timestamp', '')[:16]}] {_e.get('agent', '')}/{_e.get('action', '')}: "
+                    f"{_e.get('user_request', '')[:80]}"
+                    + _paths_note + _out_note
+                )
+            _diary_block = "\n".join(_d_lines)
+            _marker = "## Session State"
+            if _marker in user_query:
+                _idx = user_query.index(_marker)
+                user_query = user_query[:_idx] + _diary_block + "\n\n" + user_query[_idx:]
+            else:
+                user_query = user_query + "\n\n" + _diary_block
+    except Exception as _diary_exc:
+        logger.debug("[context-manifest] diary injection skipped: %s", _diary_exc)
+
     # When current_agent is specified, prefer that agent's own context entry so
     # the injected instructions match the active agent's tool set.  Fall back to
     # the most-recently-written entry if no agent-specific context exists.
@@ -682,6 +789,7 @@ def auto_save_calendar_context(
     result: Any,
     resolved_date: str,
     date_label: str = "",
+    agent: str = "scheduler",
 ) -> Any:
     """
     After a calendar fetch, save resolved_date + events as context.
@@ -700,7 +808,7 @@ def auto_save_calendar_context(
             for ev in events[:20]
         ]
         write_context(
-            agent="scheduler",
+            agent=agent,
             topic="calendar_query",
             resolved_entities=entities,
             awaiting="time_selection" if not events else "event_selection",
@@ -716,7 +824,12 @@ def auto_save_email_context(result: Any, query: str = "") -> Any:
     Returns `result` unchanged.
     """
     try:
-        msgs = result if isinstance(result, list) else []
+        if isinstance(result, list):
+            msgs = result
+        elif isinstance(result, dict):
+            msgs = result.get("results") or result.get("emails") or result.get("messages") or []
+        else:
+            msgs = []
         if not msgs:
             return result
         listed = [

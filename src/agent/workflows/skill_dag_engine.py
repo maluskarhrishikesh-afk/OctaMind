@@ -169,6 +169,8 @@ def run_skill_dag(
     tool_docs: str,
     user_query: str,
     artifacts_out: Optional[Dict[str, Any]] = None,
+    react_tool_map: Optional[Dict[str, Callable]] = None,
+    react_tool_docs: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Execute a skill task using a two-call DAG approach.
@@ -177,11 +179,15 @@ def run_skill_dag(
     ----------
     skill_name:    Human-readable skill label used in log lines.
     skill_context: System-level instructions specific to this skill.
-    tool_map:      Mapping of tool_name → callable (keyword args only).
-    tool_docs:     Concise text listing every tool name + signature + purpose.
+    tool_map:      Full mapping of tool_name → callable (DAG planner needs all tools).
+    tool_docs:     Full tool documentation string (DAG planner needs all tools).
     user_query:    Natural-language instruction from the master orchestrator.
     artifacts_out: Mutable dict; tool results (file paths etc.) are merged
                    in for cross-agent handoff.
+    react_tool_map: Optional FAISS-filtered tool map used when falling back to ReAct.
+                    If not provided, the full ``tool_map`` is used (safe but noisy).
+    react_tool_docs: Optional FAISS-filtered tool docs for the ReAct fallback prompt.
+                    If not provided, the full ``tool_docs`` is used.
 
     Returns
     -------
@@ -216,11 +222,18 @@ def run_skill_dag(
         logger.warning(
             "│  ⚠ [%s] DAG planning failed — falling back to ReAct", skill_name
         )
+        _react_map  = react_tool_map  if react_tool_map  is not None else tool_map
+        _react_docs = react_tool_docs if react_tool_docs is not None else tool_docs
+        if react_tool_map is not None:
+            logger.info(
+                "│  [%s] ReAct fallback using FAISS-filtered tool map (%d tools)",
+                skill_name, len(_react_map),
+            )
         result = run_skill_react(
             skill_name=skill_name,
             skill_context=skill_context,
-            tool_map=tool_map,
-            tool_docs=tool_docs,
+            tool_map=_react_map,
+            tool_docs=_react_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
         )
@@ -276,22 +289,33 @@ def run_skill_dag(
                             artifacts_out["file_path"] = result_raw[key]
                             break
                     if not artifacts_out.get("file_path"):
-                        for item in result_raw.get("results", []):
-                            fp = (
-                                item.get("file_path") or item.get("path")
-                                if isinstance(item, dict) else None
-                            )
-                            if fp:
-                                artifacts_out["file_path"] = fp
+                        # Also check inside result lists
+                        for _list_key in ("results", "entries", "items", "files"):
+                            for item in result_raw.get(_list_key, []):
+                                fp = (
+                                    item.get("file_path") or item.get("path")
+                                    if isinstance(item, dict) else None
+                                )
+                                if fp:
+                                    artifacts_out["file_path"] = fp
+                                    break
+                            if artifacts_out.get("file_path"):
                                 break
-                    # Also collect ALL search result paths so the next turn's
-                    # session state can populate last_found_paths / last_found_folder.
-                    all_result_paths = [
-                        item.get("path") or item.get("file_path")
-                        for item in result_raw.get("results", [])
-                        if isinstance(item, dict)
-                        and (item.get("path") or item.get("file_path"))
-                    ]
+                    # Collect ALL search result paths — check every common list key
+                    # so tools like list_directory ("entries") work alongside
+                    # search_by_name/search_by_extension ("results").
+                    all_result_paths: list = []
+                    for _list_key in ("results", "entries", "items", "files"):
+                        _source_list = result_raw.get(_list_key, [])
+                        if not isinstance(_source_list, list):
+                            continue
+                        _candidates = [
+                            item.get("path") or item.get("file_path")
+                            for item in _source_list
+                            if isinstance(item, dict)
+                            and (item.get("path") or item.get("file_path"))
+                        ]
+                        all_result_paths.extend(_candidates)
                     if all_result_paths:
                         existing = artifacts_out.get("found_paths", [])
                         artifacts_out["found_paths"] = existing + all_result_paths
@@ -327,6 +351,22 @@ def run_skill_dag(
         skill_name, len(plan), llm_calls, elapsed,
     )
 
+    # ── Write diary entry so future turns can look up what was done ───────
+    try:
+        from src.agent.manifest.context_manifest import write_diary_entry  # noqa: PLC0415
+        _tools_used = [s.get("tool", "") for s in plan]
+        _action = ", ".join(_tools_used) if _tools_used else "unknown"
+        write_diary_entry(
+            user_request=user_query.split("\n")[0][:200],  # strip session state block
+            agent=skill_name,
+            action=_action,
+            found_paths=artifacts_out.get("found_paths", []),
+            file_path=artifacts_out.get("file_path", ""),
+            result_summary=final_message[:300],
+        )
+    except Exception as _de:
+        logger.debug("Diary write skipped: %s", _de)
+
     return {
         "status":      status,
         "message":     final_message,
@@ -341,6 +381,33 @@ def run_skill_dag(
 # ---------------------------------------------------------------------------
 # Planning
 # ---------------------------------------------------------------------------
+
+def _compact_tool_docs_for_planning(tool_docs: str, max_desc_chars: int = 90) -> str:
+    """Shorten each tool's description to its first sentence for the planning prompt.
+
+    The full rich descriptions in skills.md are needed for FAISS similarity selection
+    but consume too many tokens in the planning prompt (~3,500 tokens for 44 tools).
+    This trims each description to its first sentence (≤ ``max_desc_chars`` chars),
+    keeping the tool name + signature visible while dramatically reducing token count.
+    """
+    compact = []
+    for line in tool_docs.splitlines():
+        if not line:
+            compact.append(line)
+            continue
+        if " – " in line:
+            sig, desc = line.split(" – ", 1)
+            # Keep only the first sentence
+            period_idx = desc.find(". ")
+            if 0 < period_idx < max_desc_chars:
+                desc = desc[:period_idx + 1]
+            elif len(desc) > max_desc_chars:
+                desc = desc[:max_desc_chars].rstrip() + "…"
+            compact.append(f"{sig} – {desc}")
+        else:
+            compact.append(line)
+    return "\n".join(compact)
+
 
 def _plan_steps(
     skill_name: str,
@@ -358,16 +425,28 @@ def _plan_steps(
 
     llm = get_llm_client()
 
+    # Compact tool docs for planning prompt — full rich descriptions are only
+    # needed for FAISS embedding; the planner only needs name + signature + 1 sentence.
+    tool_docs_plan = _compact_tool_docs_for_planning(tool_docs)
+
+    # Trim skill_context to keep planning prompt well under the 8k token limit.
+    # The first 2000 chars cover the critical defaults (paths, rules, etc.).
+    skill_context_plan = skill_context[:2000].rstrip()
+    if len(skill_context) > 2000:
+        skill_context_plan += "\n[…context truncated for planning…]"
+
     # ── Planning prompt: planning instruction FIRST, skill_context LAST ──
     # IMPORTANT: skill_context must NOT override the JSON-array output rule.
-    # Put it at the end as "domain guidance" only, never as runtime instructions.
+    # Put it at the end as "domain guidance" only, then restate the output
+    # requirement as a final reminder so the model doesn't drift into prose.
     system_prompt = f"""You are a tool-call planner for the {skill_name} skill agent.
 
-⚠️  YOUR ONLY JOB: output a JSON array of tool steps. Nothing else.
-    NEVER output an empty array [].  Always plan at least one tool call.
+⚠️  YOUR ONLY JOB: output a JSON array of tool-call steps.
+    The array MUST contain at least one step.
+    NEVER produce an empty array or an object — always plan a concrete tool call.
 
 Available tools:
-{tool_docs}
+{tool_docs_plan}
 
 Output a JSON array — no markdown fences, no extra text — where each element is:
 {{
@@ -403,10 +482,13 @@ Planning rules:
   Video extensions: mp4, avi, mov, mkv, wmv, flv
   Document extensions: pdf, docx, xlsx, pptx, txt
 - Keep the plan minimal: include only the steps actually required.
-- Output ONLY the JSON array.
 
-Domain guidance (informational — use to understand tool purpose and defaults):
-{skill_context}"""
+Domain guidance (informational only — use to understand tool purpose and defaults):
+{skill_context_plan}
+
+--- END DOMAIN GUIDANCE ---
+⚠️  OUTPUT REMINDER: Your response MUST be a JSON array starting with `[` and ending with `]`.
+    Even for a 1-step task, output exactly `[{{...}}]`.  No prose, no wrapper object, no empty array."""
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -418,7 +500,7 @@ Domain guidance (informational — use to understand tool purpose and defaults):
             model=llm.model,
             messages=messages,
             temperature=0.0,
-            max_tokens=2000,
+            max_tokens=800,
         )
         raw = _strip_fences(response.choices[0].message.content.strip())
     except Exception as exc:
@@ -560,6 +642,9 @@ def _synthesize(
             max_tokens=800,
         )
         message = response.choices[0].message.content.strip()
+        if not message:
+            logger.warning("│  ⚠ [%s] Synthesis returned empty message — using fallback", skill_name)
+            raise ValueError("synthesis returned empty content")
         return message, 1
     except Exception as exc:
         logger.error("│  ✗ [%s] Synthesis LLM call failed: %s", skill_name, exc)
@@ -597,24 +682,44 @@ def _resolve_kwargs(
     list — not a string — so list-typed tool parameters receive proper values.
     """
     _sv = session_vars or {}
-    out: Dict[str, Any] = {}
 
-    for key, val in kwargs.items():
-        if isinstance(val, str) and '{' in val:
-            # Check for {__session__.field} — handle list values specially
-            sess_m = re.fullmatch(r'\{__session__\.([^}]+)\}', val.strip())
+    def _maybe_native_json(value: str) -> Any:
+        if not isinstance(value, str):
+            return value
+        value = value.strip()
+        if not value or value[0] not in "[{":
+            return value
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+
+    def _resolve_value(value: Any) -> Any:
+        if isinstance(value, str) and '{' in value:
+            sess_m = re.fullmatch(r'\{__session__\.([^}]+)\}', value.strip())
             if sess_m:
                 field = sess_m.group(1)
                 resolved = _sv.get(field)
                 if resolved is not None:
-                    # Keep the native type (list, str, etc.) rather than stringifying
-                    out[key] = resolved
-                    continue
-            # Fall through to general {step_id} / {step_id.field} substitution
-            val = _TOKEN_PATTERN.sub(lambda m: _deep_get(m.group(1), results, _sv), val)
-        out[key] = val
+                    return resolved
+            return _TOKEN_PATTERN.sub(lambda m: _deep_get(m.group(1), results, _sv), value)
+        if isinstance(value, list):
+            return [_resolve_value(item) for item in value]
+        if isinstance(value, dict):
+            if len(value) == 1:
+                only_key, only_val = next(iter(value.items()))
+                if (
+                    isinstance(only_key, str)
+                    and re.fullmatch(r'(?:__session__\.)?[A-Za-z0-9_]+(?:\.(?:[A-Za-z0-9_]+|\d+))*', only_key)
+                    and only_val in ("", None, [], {})
+                ):
+                    resolved = _deep_get(only_key, results, _sv)
+                    if resolved != f"{{{only_key}}}":
+                        return _maybe_native_json(resolved)
+            return {k: _resolve_value(v) for k, v in value.items()}
+        return value
 
-    return out
+    return {key: _resolve_value(val) for key, val in kwargs.items()}
 
 
 _TOKEN_PATTERN = re.compile(r'\{([^}]+)\}')
@@ -662,15 +767,46 @@ def _deep_get(path: str, results: Dict[str, Any], session_vars: Optional[Dict[st
     for part in parts[1:]:
         if isinstance(data, dict):
             data = data.get(part)
+        elif isinstance(data, list) and part in ("results", "emails", "messages", "items"):
+            data = data
         elif isinstance(data, list) and part.isdigit():
             idx = int(part)
             data = data[idx] if idx < len(data) else None
         else:
             data = None
         if data is None:
-            return f"{{{path}}}"   # resolution failed — leave token as-is
+            # Graceful fallback: the LLM used a field name that doesn't exist
+            # in the tool's return dict (e.g. "{s1.results}" when the tool
+            # returns {"status": ..., "message": "..."}).
+            # Prefer rich content fields first so report-generation steps can still
+            # succeed when the planner references the wrong key (for example
+            # {s1.results} for fetch_emails_to_markdown, which actually returns
+            # report_content/content/emails).
+            # Then fall back to the step's "message" field, then "data"/"results", then
+            # the full result serialised as JSON.
+            _sr = results.get(step_id, {})
+            if isinstance(_sr, dict):
+                _fallback = (
+                    _sr.get("report_content")
+                    or _sr.get("content")
+                    or _sr.get("summary")
+                    or _sr.get("emails")
+                    or _sr.get("message")
+                    or _sr.get("data")
+                    or _sr.get("results")
+                )
+                if _fallback is not None:
+                    return (
+                        json.dumps(_fallback)
+                        if isinstance(_fallback, (list, dict))
+                        else str(_fallback)
+                    )
+                return json.dumps(_sr)
+            if isinstance(_sr, list):
+                return json.dumps(_sr)
+            return str(_sr) if _sr is not None else f"{{{path}}}"
 
-    return str(data)
+    return json.dumps(data) if isinstance(data, (list, dict)) else str(data)
 
 
 # ---------------------------------------------------------------------------
@@ -678,15 +814,27 @@ def _deep_get(path: str, results: Dict[str, Any], session_vars: Optional[Dict[st
 # ---------------------------------------------------------------------------
 
 def _strip_fences(raw: str) -> str:
-    """Remove optional ```json … ``` fences and any leading prose from LLM output."""
+    """Remove optional ```json … ``` fences and any leading prose from LLM output.
+
+    Handles both JSON arrays (``[…]``) and JSON objects (``{…}``).
+    A common LLM pattern is to wrap the array in ``{"steps": […], "description": "…"}``;
+    ``_parse_plan`` already unwraps that — so we must not corrupt the object by
+    stripping the ``{" prefix when looking for the opening ``[``.
+    """
     if "```" in raw:
         parts = raw.split("```", 2)
         raw = parts[1] if len(parts) >= 2 else parts[0]
         if raw.startswith("json"):
             raw = raw[4:]
     raw = raw.strip()
-    # If the LLM prepended explanation text before the JSON array, strip it
-    bracket = raw.find("[")
-    if bracket > 0:
-        raw = raw[bracket:]
+    # Strip any leading prose before the actual JSON.  The response may start
+    # with an array '[' or an object '{'.  Find whichever valid JSON start
+    # comes first, and strip everything before it.
+    arr = raw.find("[")
+    obj = raw.find("{")
+    candidates = [p for p in (arr, obj) if p >= 0]
+    if candidates:
+        start = min(candidates)
+        if start > 0:
+            raw = raw[start:]
     return raw.strip()

@@ -298,7 +298,7 @@ User query: "zip all the payslips and email them"
 
 ### Confidence threshold (anti-hallucination)
 
-`load_tool_docs` applies a **minimum cosine-similarity score** (`min_score`, default **0.45**) after the top-K selection.  Tools scoring below this floor are logged with a `✗` marker and dropped:
+`load_tool_docs` applies a **minimum cosine-similarity score** (`min_score`, default **0.45**, configurable via `faiss.tool_selection.min_score` in `config/settings.json`) after the top-K selection.  Tools scoring below this floor are logged with a `✗` marker and dropped:
 
 ```
 │  #1  score=0.8714  ✓  tool=search_files
@@ -324,7 +324,7 @@ Some tools must always be in the ReAct prompt regardless of query similarity:
 ### Hard-coded fallback removed
 
 The original `_TOOL_DOCS` hard-coded string in each orchestrator was a copy-paste list that drifted out of sync with `skills.md` every time a new tool was added.  
-`email_agent` and `files_agent` no longer fall back to it — if `skills.md` is missing, an `ERROR` log fires immediately and the call fails with a clear message instead of silently using an outdated tool list.  
+`email_agent`, `files_agent`, and `drive_agent` no longer fall back to it — if `skills.md` is missing, an `ERROR` log fires immediately and the call fails with a clear message instead of silently using an outdated tool list.  
 (`whatsapp_agent` and `stock_agent` do not yet have `skills.md` files and still use their `_TOOL_DOCS`.)
 
 ---

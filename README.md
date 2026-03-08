@@ -88,6 +88,7 @@ Octa Bot/
 | [documentation/setup/TELEGRAM_SETUP.md](documentation/setup/TELEGRAM_SETUP.md) | Telegram Bot token setup |
 | [documentation/architecture/ARCHITECTURE.md](documentation/architecture/ARCHITECTURE.md) | How the system works (routing, ReAct, memory) |
 | [documentation/reference/AGENTS.md](documentation/reference/AGENTS.md) | What each agent can do + example commands |
+| [documentation/reference/REPO_HYGIENE.md](documentation/reference/REPO_HYGIENE.md) | Safe cleanup targets, persistent error registry, and maintenance workflow |
 | [documentation/reference/TOOL_REFERENCE.md](documentation/reference/TOOL_REFERENCE.md) | Every tool — parameters, defaults, example prompts |
 | [documentation/status/IMPLEMENTATION_STATUS.md](documentation/status/IMPLEMENTATION_STATUS.md) | What’s implemented, what’s not, known limits |
 | [documentation/architecture/memory-system.md](documentation/architecture/memory-system.md) | Full memory architecture reference |
@@ -98,3 +99,19 @@ Octa Bot/
 
 Log files are written to the project root and **auto-truncated on every start**:
 `email_agent.log` · `drive_agent.log` · `whatsapp_agent.log` · `telegram_agent.log` · `files_agent.log` · `personal_assistant.log`
+
+Runtime log errors are also normalized into [errors/log_error_registry.json](errors/log_error_registry.json), which is kept across sessions and can be used to improve tool descriptions, routing, and fallback behavior without relying on transient log files alone.
+
+---
+
+## Workspace Hygiene
+
+Generated and runtime-only clutter can accumulate quickly. The repository now treats these as safe cleanup targets:
+
+- `__pycache__/`, `.pytest_cache/`, `build/`, `dist/`
+- generated exports in `data/exports/` and `data/calendar_exports/`
+- transient manifest and prune artifacts such as `data/.last_context_prune` and `data/octa_manifest_1.txt`
+
+Do not casually delete the core JSON state under `data/` such as `assistants.json`, `octa_context.json`, `octa_jobs.json`, `operation_history.json`, or message/history stores. Those are live assistant state, not cache.
+
+See [documentation/reference/REPO_HYGIENE.md](documentation/reference/REPO_HYGIENE.md) for the cleanup policy and the error-registry workflow.

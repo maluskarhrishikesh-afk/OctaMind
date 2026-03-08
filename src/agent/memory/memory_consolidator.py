@@ -60,8 +60,8 @@ class MemoryConsolidator:
         Check if consolidation should run
 
         Triggers:
-        - Every 20 interactions
-        - Every 24 hours
+        - Every 5 interactions  (testing mode — was 20 in production)
+        - Every 1 hour         (testing mode — was 8 h in production)
         - Manual trigger
 
         Args:
@@ -70,15 +70,15 @@ class MemoryConsolidator:
         Returns:
             True if consolidation should run
         """
-        # Every 20 interactions
-        if interaction_count >= 20:
+        # Every 5 interactions (testing: quick feedback loop)
+        if interaction_count >= 5:
             return True
 
-        # Every 8 hours (changed from 24 h — more responsive memory updates)
+        # Every 1 hour (testing mode — change to 8 for production)
         if self.last_consolidation:
             hours_since = (datetime.now() -
                            self.last_consolidation).total_seconds() / 3600
-            if hours_since >= 8:
+            if hours_since >= 1:
                 return True
 
         return False
@@ -156,6 +156,9 @@ class MemoryConsolidator:
         """
         logger.info("=== Starting Memory Consolidation ===")
 
+        # Step 0: Enrich recent episodic insights with a single compact LLM call
+        self._enrich_recent_insights()
+
         # Step 1: Extract patterns from working memory
         patterns = self._extract_patterns_from_working_memory()
         if patterns:
@@ -194,6 +197,119 @@ class MemoryConsolidator:
         self._save_state()
 
         logger.info("=== Memory Consolidation Complete ===")
+
+    def consolidate_lightweight(self) -> None:
+        """
+        Fast pattern-only consolidation cycle (no LLM calls, no decay,
+        no self-reflection).
+
+        Runs steps 1–3 only:
+          1. Working memory → semantic patterns
+          2. Episodic themes → semantic memory
+          3. Habit detection
+
+        Use after task-completion events or when an idle-session is detected.
+        Completes in milliseconds — safe to call from any thread including
+        the Streamlit UI thread.
+        """
+        logger.info("=== Lightweight Consolidation starting ===")
+
+        patterns = self._extract_patterns_from_working_memory()
+        if patterns:
+            self._update_semantic_with_patterns(patterns)
+
+        themes = self._extract_themes_from_episodic()
+        if themes:
+            self._update_semantic_with_themes(themes)
+
+        new_habits = self._detect_habits()
+        if new_habits:
+            self._add_confirmed_habits(new_habits)
+
+        self.last_consolidation = datetime.now()
+        self._save_state()
+        logger.info("=== Lightweight Consolidation complete ===")
+
+    def _enrich_recent_insights(self) -> None:
+        """
+        Rewrite template-style episodic insights into meaningful one-sentence
+        summaries using the configured LLM.
+
+        Why: `add_interaction()` writes rule-based insights like
+        ``"User ran 'drive_download' command: 'download q3 report' → success"``.
+        This step upgrades them to purposeful descriptions like
+        ``"User retrieved the Q3 report, likely preparing for a quarterly review."``
+        making consolidation theme extraction far more valuable.
+
+        Cost: ONE LLM call per full consolidation cycle (batch of ≤10 events).
+        Falls back silently if the LLM is unavailable or returns bad output.
+        """
+        try:
+            events = self.memory.get_recent_events(count=20)
+
+            # Only enrich events whose insight was written by a rule, not the LLM
+            _TEMPLATE_PREFIXES = (
+                "Conversational exchange: user said",
+                "User ran '",
+                "User performed",
+            )
+            candidates = [
+                e for e in events
+                if any(e.get("insight", "").startswith(t) for t in _TEMPLATE_PREFIXES)
+            ][:10]
+
+            if not candidates:
+                return
+
+            lines = [
+                f"{i}. Command: \"{ev.get('event', '')[:120]}\"  "
+                f"Result: \"{ev.get('context', '')[:80]}\""
+                for i, ev in enumerate(candidates, 1)
+            ]
+
+            prompt = (
+                "You are a memory assistant for an AI agent. "
+                "Each numbered item is a user interaction. "
+                "Write a ONE-SENTENCE meaningful insight per item capturing "
+                "what the user was trying to accomplish and what it reveals "
+                "about their goals or habits. Be specific; avoid generic phrases.\n\n"
+                + "\n".join(lines)
+                + "\n\nReturn ONLY a JSON array of strings in the same order. "
+                "Example: [\"User monitors inbox volume daily.\", \"User clears spam proactively.\"]\n"
+            )
+
+            from src.agent.llm.llm_parser import get_llm_client
+            raw = get_llm_client().chat(
+                user_message=prompt,
+                agent_name="Memory Engine",
+                agent_type="memory consolidator",
+            ).strip()
+
+            # Strip markdown code fences if present
+            if raw.startswith("```"):
+                raw = "\n".join(raw.split("\n")[1:]).rstrip("`").rstrip()
+
+            import json as _json
+            new_insights = _json.loads(raw)
+            if not isinstance(new_insights, list) or len(new_insights) != len(candidates):
+                logger.warning("[MemoryConsolidator] Insight enrichment: unexpected LLM output.")
+                return
+
+            episodic_text = self.memory.episodic_memory_path.read_text(encoding="utf-8")
+            enriched = 0
+            for ev, new_insight in zip(candidates, new_insights):
+                old_line = f"**Insight:** {ev['insight']}"
+                new_line = f"**Insight:** {str(new_insight).strip()}"
+                if old_line in episodic_text and old_line != new_line:
+                    episodic_text = episodic_text.replace(old_line, new_line, 1)
+                    enriched += 1
+
+            if enriched:
+                self.memory.episodic_memory_path.write_text(episodic_text, encoding="utf-8")
+                logger.info("[MemoryConsolidator] Enriched %d episodic insights via LLM.", enriched)
+
+        except Exception as exc:
+            logger.debug("[MemoryConsolidator] Insight enrichment skipped: %s", exc)
 
     # ============ Pattern Extraction from Working Memory ============
 
@@ -672,7 +788,7 @@ class MemoryConsolidator:
         """
         Check if self reflection layer should be updated
 
-        Update frequency: Every 2-4 weeks
+        Update frequency: Every 3 days (testing mode — was 14 days in production)
 
         Returns:
             True if update is needed
@@ -684,9 +800,9 @@ class MemoryConsolidator:
             interactions = self.memory.get_recent_interactions(count=50)
             return len(interactions) >= 5
 
-        # Check if 2 weeks have passed
+        # Every 3 days (testing mode — change to 14 for production)
         days_since = (datetime.now() - self.last_self_reflection_update).days
-        return days_since >= 14
+        return days_since >= 3
 
     # Backward-compat alias
     def _should_update_consciousness(self) -> bool:

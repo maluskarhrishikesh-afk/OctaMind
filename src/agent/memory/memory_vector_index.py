@@ -92,6 +92,8 @@ def semantic_search(
         return []
 
     try:
+        import logging as _faiss_log
+        _faiss_log.getLogger("faiss.loader").setLevel(_faiss_log.WARNING)
         import faiss
         import numpy as np
 

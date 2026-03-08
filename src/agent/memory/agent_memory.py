@@ -495,6 +495,12 @@ class AgentMemory:
         # Keep only recent interactions (limited to max_working_memory)
         if len(parts) > 1:
             existing_interactions = parts[1].split('## Interaction ')
+            # Context-boundary summarisation (Manus sliding window):
+            # Before dropping the oldest interactions, summarise them into
+            # semantic memory so the conversation essence is never permanently lost.
+            to_drop = existing_interactions[self.max_working_memory:]
+            if to_drop:
+                self._sliding_window_summarise(to_drop)
             kept_interactions = existing_interactions[1:self.max_working_memory]
             for interaction in kept_interactions:
                 new_content += '## Interaction ' + interaction
@@ -513,6 +519,88 @@ class AgentMemory:
             importance=importance,
             context=result_str
         )
+
+        # Immediately promote High-importance events to semantic memory
+        # (Devin/Manus-style interrupt — important facts visible right away).
+        if importance == "High":
+            self._importance_flush(command, action, result_str, timestamp)
+
+    def _importance_flush(
+        self, command: str, action: str, result_str: str, timestamp: str
+    ) -> None:
+        """
+        Immediately surface a High-importance interaction in semantic memory
+        without waiting for the next consolidation cycle.
+
+        This is the memory equivalent of an interrupt — important facts land
+        in the long-term knowledge base the moment they occur so the LLM sees
+        them on the very next turn.  Inspired by task-completion memory updates
+        in Devin / Manus style autonomous agents.
+        """
+        entry = (
+            f"- [{timestamp[:10]}] **{action}**: "
+            f"{command[:120]} → {result_str[:100]}"
+        )
+        self.update_semantic_memory("High-Priority Event", entry)
+
+    def _sliding_window_summarise(self, dropped_interactions: List[str]) -> None:
+        """Summarise working memory interactions that are about to be dropped.
+
+        Implements the Manus sliding-window pattern: before the oldest entries
+        are trimmed from working memory, an LLM generates a compact 2-4 bullet
+        summary and writes it to semantic memory so context is never permanently
+        lost.  Runs in a fire-and-forget background thread so the active turn
+        is not slowed down.
+        """
+        if not dropped_interactions:
+            return
+        interaction_text = "\n\n".join(
+            "## Interaction " + i for i in dropped_interactions
+        ).strip()
+        if len(interaction_text) < 80:
+            return  # Too sparse to be worth an LLM call
+
+        agent_id = self.agent_id
+
+        def _run_summary(text: str) -> None:
+            import logging as _lg
+            _log = _lg.getLogger("agent_memory")
+            try:
+                from src.agent.llm.llm_parser import get_llm_client  # noqa: PLC0415
+                _llm = get_llm_client()
+                _resp = _llm.client.chat.completions.create(
+                    model=_llm.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a memory consolidation assistant. "
+                                "Summarise the following user-assistant interactions into "
+                                "2-4 concise bullet points. Capture: what the user asked for, "
+                                "what actions were taken, and key outcomes or facts discovered. "
+                                "Start each bullet with '- '. No section headers. Be specific."
+                            ),
+                        },
+                        {"role": "user", "content": f"Interactions to summarise:\n\n{text[:2000]}"},
+                    ],
+                    temperature=0.1,
+                    max_tokens=200,
+                )
+                summary = _resp.choices[0].message.content.strip()
+                if summary:
+                    self.update_semantic_memory("Sliding Window Summary", summary)
+                    _log.info(
+                        "[memory:%s] sliding-window summary written to semantic memory (%d chars)",
+                        agent_id, len(summary),
+                    )
+            except Exception as _exc:
+                _log.debug(
+                    "[memory:%s] sliding-window summarisation skipped (non-critical): %s",
+                    agent_id, _exc,
+                )
+
+        import threading
+        threading.Thread(target=_run_summary, args=(interaction_text,), daemon=True).start()
 
     def add_episodic_event(
         self,

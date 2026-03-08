@@ -2,6 +2,7 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
+Last updated: 2026-03-08 (Session 7 — repo hygiene cleanup, persistent JSON error registry, runtime clutter policy)  
 Last updated: 2026-03-07 (Session 6 — 6 pipeline architecture gaps fixed: trigger_keywords routing, keyed context store, scope field, auto-write context safety net, clear-after-delivery, search_paths in Dashboard messages)  
 Previous: 2026-03-06 (Session 5 — Calendar local timezone fix; copy destination Rule #1 fix; operation history stack with 30-day undo + list_file_operations tool; context audit history with 30-day auto-prune)  
 Previous: 2026-03-02 (Session 4 — Calendar year bug fixed; "send here" routing fixed; enriched scheduling context now propagated to agent execution; search_by_name sorts non-.lnk first; search_file_all_drives skips .lnk; skill_dag .id example fixed to .path; server restart still required)  
@@ -9,6 +10,47 @@ Previous: 2026-03-02 (Session 3 — New Files tools: search_file_all_drives, del
 Previous: 2026-03-02 (Bug fixes: calendar date-context loss, ReAct observation truncation, Telegram Markdown entity crash, DAG JSON fence parsing verified; added human-friendly per-request workflow summary log; DAG algorithm walkthrough document added)  
 Previous: 2026-03-02 (Telegram UX overhaul: typing indicators, real-time progress editing, /reset & /agents commands, long-message splitting, file-artifact delivery; Dashboard download button for file artifacts; HubProcessor scheduling-context enrichment propagated to Telegram channel; `send_document_file` multipart upload added to telegram_service)  
 Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine causing cascading `unknown action ''` failures; fixed tilde path expansion in dag_planner instruction resolver; added total LLM call count to workflow completion log; fixed website unicode emoji rendering; updated quickstart to remove internal Python snippet)
+
+---
+
+## ✅ 2026-03-08 Session 7 — Repository Hygiene + Persistent Error Registry
+
+### 1. Safe runtime clutter cleanup policy
+
+**Problem:** The workspace accumulated generated artifacts in `data/`, root caches, and build directories. There was no written policy separating disposable clutter from live assistant state.
+
+**Fix:**
+- Added [documentation/reference/REPO_HYGIENE.md](documentation/reference/REPO_HYGIENE.md)
+- Documented safe-to-delete targets such as `__pycache__/`, `.pytest_cache/`, `build/`, `dist/`, generated exports, transient prune stamps, and duplicate manifests
+- Explicitly documented which `data/` JSON files are live state and must not be deleted blindly
+
+### 2. Persistent JSON error registry
+
+**Problem:** Logs are intentionally truncated on startup, so important failures disappeared unless someone manually copied them out.
+
+**Fix:**
+- Added `src/agent/logging/error_registry.py`
+- Added a root logging handler via `src/agent/logging/log_manager.py`
+- Errors and important warnings are now normalized into `errors/log_error_registry.json`
+- Registry entries capture:
+  - fingerprint
+  - category
+  - severity
+  - count
+  - timestamps
+  - recent samples
+  - tool-description guidance for future `skills.md` tuning
+
+### 3. Improvement loop for tool descriptions
+
+The error registry explicitly categorizes failure modes like:
+
+- provider rate limits
+- email follow-up id resolution failures
+- DAG planner fallbacks
+- general tool execution errors
+
+This creates a durable backlog for improving `skills.md`, `skill_context.md`, and fallback rules instead of relying on transient memory or truncated logs.
 
 ---
 

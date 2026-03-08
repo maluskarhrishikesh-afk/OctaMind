@@ -33,9 +33,11 @@ from datetime import datetime
 logger = logging.getLogger("Octa Bot.consolidation_runner")
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
-CHECK_EVERY_HOURS = 8              # full consolidation cycle period
+# Testing mode: 1-hour cycle (change to 8 for production)
+CHECK_EVERY_HOURS = 1              # full consolidation cycle period
 _CHECK_INTERVAL_SECONDS = CHECK_EVERY_HOURS * 60 * 60
 _TICK_SECONDS = 30                 # granularity for stop responsiveness
+_IDLE_THRESHOLD_SECONDS = 15 * 60  # 15 min idle → lightweight session-end consolidation
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 _ASSISTANTS_JSON = _PROJECT_ROOT / "data" / "assistants.json"   # Personal Assistants only
@@ -87,7 +89,7 @@ class ConsolidationRunner:
     # ── Internal ───────────────────────────────────────────────────────────────
 
     def _loop(self) -> None:
-        """Main loop: run immediately, then repeat every 30 minutes."""
+        """Main loop: run immediately, then on idle-session and periodic triggers."""
         logger.info("[ConsolidationRunner] Initial consolidation pass starting…")
         self._ingest_live_channels()
         self._run_cycle()
@@ -96,13 +98,63 @@ class ConsolidationRunner:
         while not self._stop_event.is_set():
             time.sleep(_TICK_SECONDS)
             elapsed += _TICK_SECONDS
+
+            # Idle-session trigger: fast lightweight consolidation when user
+            # stops interacting (approximates session-end without a UI signal).
+            self._run_idle_checks()
+
             if elapsed >= _CHECK_INTERVAL_SECONDS:
                 elapsed = 0
-                logger.info("[ConsolidationRunner] 8-hour consolidation cycle triggered.")
+                logger.info("[ConsolidationRunner] %d-hour consolidation cycle triggered.", CHECK_EVERY_HOURS)
                 self._ingest_live_channels()
                 self._run_cycle()
 
         logger.info("[ConsolidationRunner] Thread exiting.")
+
+    def _run_idle_checks(self) -> None:
+        """
+        Detect agents idle for 15+ minutes with unprocessed interactions and
+        fire a lightweight consolidation for each.
+
+        This approximates a session-end trigger: when the user goes quiet for
+        15 minutes the agent captures patterns immediately rather than waiting
+        for the next full hourly cycle.  Lightweight = no LLM, sub-second.
+        """
+        from src.agent.memory.agent_memory import get_agent_memory
+        from src.agent.memory.memory_consolidator import MemoryConsolidator
+
+        now_ts = datetime.now().timestamp()
+        for agent_id in self._get_all_agent_ids():
+            memory_dir = _MEMORY_ROOT / agent_id
+            working_md = memory_dir / "working_memory.md"
+            state_file = memory_dir / "consolidation_state.json"
+
+            if not working_md.exists():
+                continue
+            try:
+                mtime = working_md.stat().st_mtime
+                if (now_ts - mtime) < _IDLE_THRESHOLD_SECONDS:
+                    continue  # Still active — not a session end yet
+
+                last_consolidation_ts = 0.0
+                if state_file.exists():
+                    state = json.loads(state_file.read_text(encoding="utf-8"))
+                    last_str = state.get("last_consolidation")
+                    if last_str:
+                        last_consolidation_ts = datetime.fromisoformat(last_str).timestamp()
+
+                if mtime <= last_consolidation_ts:
+                    continue  # Already consolidated after the last interaction
+
+                logger.info(
+                    "[ConsolidationRunner] Idle-session trigger for %s (idle %.0f min).",
+                    agent_id, (now_ts - mtime) / 60,
+                )
+                consolidator = MemoryConsolidator(get_agent_memory(agent_id))
+                consolidator.consolidate_lightweight()
+                logger.info("[ConsolidationRunner] ✔ Idle-session lightweight consolidation: %s", agent_id)
+            except Exception as exc:
+                logger.debug("[ConsolidationRunner] Idle check skipped for %s: %s", agent_id, exc)
 
     # ── Live Channels ingestion ────────────────────────────────────────────────
 

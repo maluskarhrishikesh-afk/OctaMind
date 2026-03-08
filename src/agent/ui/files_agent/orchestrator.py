@@ -83,13 +83,14 @@ def _build_skill_context() -> str:
         template = template.replace(k, v)
     return template.strip()
 
-def _get_tools() -> Dict[str, Any]:
+def _build_all_tools() -> Dict[str, Any]:
     from src.files.features.file_ops import (  # noqa: PLC0415
         list_directory, get_file_info, copy_file, move_file,
         delete_file, create_folder, rename_file, open_file,
         list_laptop_structure, deliver_file,
         write_pdf_report, write_excel_report, organize_folder,
         analyze_disk_usage, get_drive_info, find_duplicate_files,
+        count_files_and_folders_all_drives,
         search_files_by_content, batch_rename, secure_delete,
         cleanup_temp_files, monitor_folder,
         cleanup_app_caches, archive_old_files, resolve_shortcut,
@@ -137,54 +138,87 @@ def _get_tools() -> Dict[str, Any]:
             return {"status": "error", "message": f"Error writing file: {exc}"}
 
     return {
-        "list_directory": list_directory,
-        "get_file_info": get_file_info,
-        "copy_file": copy_file,
-        "move_file": move_file,
-        "delete_file": delete_file,
-        "create_folder": create_folder,
-        "rename_file": rename_file,
-        "open_file": open_file,
-        "search_by_name": search_by_name,
-        "search_by_extension": search_by_extension,
-        "search_by_date": search_by_date,
-        "search_by_size": search_by_size,
-        "find_duplicates": find_duplicates,
-        "find_empty_folders": find_empty_folders,
-        "zip_folder": zip_folder,
-        "zip_files": zip_files,
-        "unzip_file": unzip_file,
-        "list_archive_contents": list_archive_contents,
-        "write_text_file": write_text_file,
-        "write_pdf_report": write_pdf_report,
-        "write_excel_report": write_excel_report,
-        "deliver_file": deliver_file,
-        "search_file_all_drives": search_file_all_drives,
-        "list_laptop_structure": list_laptop_structure,
-        "organize_folder": organize_folder,
-        # ── NEW ────────────────────────────────────────────────────────────
-        "analyze_disk_usage":     analyze_disk_usage,
-        "get_drive_info":          get_drive_info,
-        "find_duplicate_files":    find_duplicate_files,
+        # Browse & Inspect
+        "list_directory":          list_directory,
+        "get_file_info":           get_file_info,
+        "open_file":               open_file,
+        # Search
+        "search_by_name":          search_by_name,
+        "search_by_extension":     search_by_extension,
+        "search_by_date":          search_by_date,
+        "search_by_size":          search_by_size,
+        "search_file_all_drives":  search_file_all_drives,
         "search_files_by_content": search_files_by_content,
+        "find_duplicates":         find_duplicates,
+        "find_empty_folders":      find_empty_folders,
+        "find_duplicate_files":    find_duplicate_files,
+        # File Operations
+        "copy_file":               copy_file,
+        "move_file":               move_file,
+        "delete_file":             delete_file,
+        "create_folder":           create_folder,
+        "rename_file":             rename_file,
         "batch_rename":            batch_rename,
         "secure_delete":           secure_delete,
+        "collect_files_to_folder": collect_files_to_folder,
+        # Archives & Compression
+        "zip_folder":              zip_folder,
+        "zip_files":               zip_files,
+        "unzip_file":              unzip_file,
+        "list_archive_contents":   list_archive_contents,
+        # Write & Report
+        "write_text_file":         write_text_file,
+        "write_pdf_report":        write_pdf_report,
+        "write_excel_report":      write_excel_report,
+        "deliver_file":            deliver_file,
+        # Organisation & Cleanup
+        "organize_folder":         organize_folder,
         "cleanup_temp_files":      cleanup_temp_files,
+        "cleanup_app_caches":      cleanup_app_caches,
+        "archive_old_files":       archive_old_files,
         "monitor_folder":          monitor_folder,
-        # ── NEW ────────────────────────────────────────────────────────────
-        "cleanup_app_caches":        cleanup_app_caches,
-        "archive_old_files":         archive_old_files,
-        "resolve_shortcut":          resolve_shortcut,
-        "get_file_hash":             get_file_hash,
-        "list_running_apps":         list_running_apps,
-        "collect_files_to_folder":    collect_files_to_folder,
+        # Disk & System
+        "analyze_disk_usage":      analyze_disk_usage,
+        "get_drive_info":          get_drive_info,
+        "count_files_and_folders_all_drives": count_files_and_folders_all_drives,
+        "list_laptop_structure":   list_laptop_structure,
+        "list_running_apps":       list_running_apps,
+        "resolve_shortcut":        resolve_shortcut,
+        "get_file_hash":           get_file_hash,
+        # Context & Manifest
         "save_search_manifest":        save_search_manifest,
         "collect_files_from_manifest": collect_files_from_manifest,
         "undo_last_file_operation":    undo_last_file_operation,
-        "list_file_operations":         list_file_operations,
-        # ── Context Manifest ───────────────────────────────────────────────
-        "save_context":                 make_save_context_tool("files"),
+        "list_file_operations":        list_file_operations,
+        "save_context":                make_save_context_tool("files"),
     }
+
+def _get_tool_map_for_react(
+    user_query: str,
+    all_tools: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return a FAISS-filtered tool map for the ReAct engine.
+
+    Falls back to the full tool map if FAISS selection fails.
+    """
+    if all_tools is None:
+        all_tools = _build_all_tools()
+    try:
+        from src.agent.core.skill_loader import select_tool_names  # noqa: PLC0415
+        selected = select_tool_names(
+            "files", user_query,
+            always_include=["save_context", "deliver_file", "save_search_manifest"],
+        )
+        filtered = {n: all_tools[n] for n in selected if n in all_tools}
+        if filtered:
+            return filtered
+    except Exception as exc:
+        import logging as _lg
+        _lg.getLogger("files.orchestrator").warning(
+            "[tool-map] FAISS filtering failed (%s) — using full tool map", exc
+        )
+    return all_tools
+
 
 def _maybe_save_manifest(artifacts_out: Optional[Dict[str, Any]]) -> None:
     """Save found_paths to the manifest file if the current execution produced any."""
@@ -606,7 +640,7 @@ def _try_background_job(
                 )
                 for root_dir in search_roots:
                     try:
-                        result = _sbe(ext, root_dir, True, 500)
+                        result = _sbe(ext, root_dir, True, 0)
                         for entry in result.get("results", []):
                             p = entry.get("path", "")
                             if p:
@@ -656,14 +690,14 @@ def _try_background_job(
             update_job(_job_id, status="running", progress_pct=5,
                        progress_detail="Starting analysis…")
             _skill_context = _build_skill_context()
-            _tool_map      = _get_tools()
+            _all_tools     = _build_all_tools()
             _dag_docs = _get_tool_docs_for_dag()
             _react_docs = _get_tool_docs_for_react(_raw_query)
             try:
                 res = run_skill_dag(
                     skill_name="files",
                     skill_context=_skill_context,
-                    tool_map=_tool_map,
+                    tool_map=_all_tools,
                     tool_docs=_dag_docs,
                     user_query=_raw_query,
                     artifacts_out={},
@@ -672,7 +706,7 @@ def _try_background_job(
                 res = run_skill_react(
                     skill_name="files",
                     skill_context=_skill_context,
-                    tool_map=_tool_map,
+                    tool_map=_get_tool_map_for_react(_raw_query, _all_tools),
                     tool_docs=_react_docs,
                     user_query=_raw_query,
                     artifacts_out={},
@@ -708,7 +742,7 @@ def _get_tool_docs_for_react(user_query: str) -> str:
     """Return filtered tool docs for the ReAct engine (cosine-similarity top-K)."""
     from src.agent.core.skill_loader import load_tool_docs  # noqa: PLC0415
     docs = load_tool_docs(
-        "files", user_query, top_k=15,
+        "files", user_query,
         always_include=["save_context", "deliver_file", "save_search_manifest"],
     )
     if not docs:
@@ -746,16 +780,19 @@ def execute_with_llm_orchestration(
         )
 
     skill_context = _build_skill_context()  # dynamic — includes real OS paths
-    tool_map = _get_tools()
+    all_tools = _build_all_tools()
     dag_tool_docs = _get_tool_docs_for_dag()
+    react_tool_docs = _get_tool_docs_for_react(user_query)
     try:
         result = run_skill_dag(
             skill_name="files",
             skill_context=skill_context,
-            tool_map=tool_map,
+            tool_map=all_tools,           # DAG planner needs the full tool set
             tool_docs=dag_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
+            react_tool_map=_get_tool_map_for_react(user_query, all_tools),
+            react_tool_docs=react_tool_docs,
         )
         _maybe_save_manifest(artifacts_out)  # safety net — DAG engine already tries this
         return result
@@ -764,12 +801,11 @@ def execute_with_llm_orchestration(
         _logging.getLogger("files.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
         )
-    react_tool_docs = _get_tool_docs_for_react(user_query)
     try:
         result = run_skill_react(
             skill_name="files",
             skill_context=skill_context,
-            tool_map=tool_map,
+            tool_map=_get_tool_map_for_react(user_query, all_tools),  # FAISS-filtered
             tool_docs=react_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,

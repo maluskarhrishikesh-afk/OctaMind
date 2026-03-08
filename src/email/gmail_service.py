@@ -69,13 +69,38 @@ class GmailServiceClient:
         _pseudo = {'me', 'myself', 'self', 'my email', 'my address', 'my email address'}
         if to.strip().lower() in _pseudo:
             if not self._actual_email:
+                # Primary: ask the Gmail API for the authenticated address
                 try:
                     profile = self.gmail_service.users().getProfile(userId='me').execute()
                     self._actual_email = profile.get('emailAddress', '')
                 except Exception:
                     pass
+                # Fallback: read from token.json cached on disk
+                if not self._actual_email:
+                    try:
+                        from pathlib import Path as _Path
+                        import json as _json
+                        _token_path = _Path(__file__).resolve().parents[2] / "config" / "token.json"
+                        if _token_path.exists():
+                            _tok = _json.loads(_token_path.read_text(encoding="utf-8"))
+                            # OAuth token doesn't store the email directly; try the id_token
+                            # or fall back to the credentials email hint if present
+                            _email_candidate = (
+                                _tok.get("id_token_email")
+                                or _tok.get("email")
+                                or _tok.get("client_email")
+                            )
+                            if _email_candidate:
+                                self._actual_email = _email_candidate
+                    except Exception:
+                        pass
             if self._actual_email:
                 return self._actual_email
+            # Last resort: warn loudly and return empty string so the caller can catch it
+            logger.warning(
+                "_resolve_recipient: could not resolve 'me' to a real address; "
+                "email will likely fail. Check Gmail token / credentials."
+            )
         return to
 
     @property
@@ -307,7 +332,7 @@ class GmailServiceClient:
 
     def get_todays_emails(self, max_results: int = 1000) -> List[Dict]:
         """
-        Get emails received today (after midnight)
+        Get emails received today (after midnight in local machine timezone).
 
         Args:
             max_results: Maximum number of emails to return
@@ -318,17 +343,15 @@ class GmailServiceClient:
         from datetime import datetime
 
         try:
-            # Get today's date at midnight
+            # Get local-midnight timestamp so filtering respects IST (or any timezone)
             today = datetime.now()
-            start_of_day = today.replace(
-                hour=0, minute=0, second=0, microsecond=0)
-            date_str = start_of_day.strftime('%Y/%m/%d')
-
-            # Use Gmail query to filter by date
-            query = f'after:{date_str}'
+            start_of_day = today.replace(hour=0, minute=0, second=0, microsecond=0)
+            # Use Unix epoch seconds: Gmail's after:{ts} is timezone-exact,
+            # while after:YYYY/MM/DD uses UTC midnight which misses early-IST emails.
+            epoch_ts = int(start_of_day.timestamp())
 
             # Use existing list_emails method with date filter
-            return self.list_emails(query=query, max_results=max_results)
+            return self.list_emails(query=f"after:{epoch_ts} in:inbox", max_results=max_results)
 
         except Exception as e:
             logger.error(f"Error getting today's emails: {e}")
@@ -893,7 +916,6 @@ class GmailServiceClient:
         Returns:
             dict with keys: status, file_path, email_count, emails (list), content.
         """
-        import os
         from datetime import datetime as _dt
         from pathlib import Path as _Path
 
@@ -923,6 +945,101 @@ class GmailServiceClient:
                 'file_path': '',
                 'message': f"No emails matched: '{query}'",
             }
+
+        def _build_report_content(items: List[Dict], query_text: str) -> str:
+            """Build a narrative summary report with lightweight insights.
+
+            This gives the DAG planner a ready-to-export summary body even if it
+            references the wrong result key in a later write_pdf_report step.
+            """
+            if not items:
+                return f"## Overview\nNo emails matched the query: {query_text}\n"
+
+            from collections import Counter
+
+            def _classify_theme(subject: str, preview: str, sender: str) -> str:
+                blob = f"{subject} {preview} {sender}".lower()
+                if any(tok in blob for tok in ("calendar", "meeting", "invite", "appointment", "schedule")):
+                    return "calendar / meetings"
+                if any(tok in blob for tok in ("invoice", "payment", "receipt", "billing", "payslip")):
+                    return "finance / billing"
+                if any(tok in blob for tok in ("security", "password", "login", "verify", "alert", "otp")):
+                    return "security / account"
+                if any(tok in blob for tok in ("drive", "document", "file", "shared", "attachment", "report")):
+                    return "documents / file sharing"
+                if any(tok in blob for tok in ("action", "review", "approve", "follow up", "deadline", "please")):
+                    return "action requests"
+                return "general updates"
+
+            def _needs_action(subject: str, preview: str) -> bool:
+                blob = f"{subject} {preview}".lower()
+                return any(tok in blob for tok in (
+                    "action required", "please", "kindly", "review", "approve",
+                    "respond", "reply", "deadline", "due", "confirm", "required",
+                    "follow up", "urgent",
+                ))
+
+            senders = Counter(item.get("sender", "Unknown") for item in items)
+            themes = Counter(
+                _classify_theme(item.get("subject", ""), item.get("body_preview", ""), item.get("sender", ""))
+                for item in items
+            )
+            action_items: List[str] = []
+            email_sections: List[str] = []
+
+            for item in items:
+                subject = item.get("subject", "No Subject")
+                sender = item.get("sender", "Unknown")
+                date = item.get("date", "")
+                preview = item.get("body_preview", "").replace("\n", " ").strip()
+                theme = _classify_theme(subject, preview, sender)
+                needs_action = _needs_action(subject, preview)
+                email_sections.extend([
+                    f"### {subject} — {date}".strip(),
+                    f"From: {sender}",
+                    f"Theme: {theme}",
+                    f"Key points: {preview[:260] or 'No preview available.'}",
+                    f"Action required: {'Yes' if needs_action else 'No'}",
+                    "",
+                ])
+                if needs_action:
+                    action_items.append(f"{subject} ({sender})")
+
+            top_senders = ", ".join(f"{name} ({count})" for name, count in senders.most_common(3))
+            top_themes = ", ".join(f"{name} ({count})" for name, count in themes.most_common(3))
+
+            overview = (
+                f"Processed {len(items)} email(s) for query '{query_text}'. "
+                + (f"Most frequent senders: {top_senders}. " if top_senders else "")
+                + (f"Main themes: {top_themes}." if top_themes else "")
+            )
+
+            insights = [
+                f"- Matching emails: {len(items)}",
+                f"- Emails that likely need action: {len(action_items)}",
+            ]
+            if top_senders:
+                insights.append(f"- Top senders: {top_senders}")
+            if top_themes:
+                insights.append(f"- Dominant themes: {top_themes}")
+
+            if action_items:
+                action_block = [f"{idx}. {value}" for idx, value in enumerate(action_items, 1)]
+            else:
+                action_block = ["1. No obvious follow-up actions were detected from the email previews."]
+
+            return "\n".join([
+                "## Overview",
+                overview,
+                "",
+                "## Additional Insights",
+                *insights,
+                "",
+                "## Emails (newest first)",
+                *email_sections,
+                "## Action Items",
+                *action_block,
+            ])
 
         # ── Build Markdown ──────────────────────────────────────────────────
         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
@@ -973,11 +1090,15 @@ class GmailServiceClient:
             file_path = ""
             logger.warning("Could not write email markdown file: %s", exc)
 
+        report_content = _build_report_content(structured, query)
+
         return {
             'status': 'success',
             'email_count': len(emails),
             'emails': structured,
             'content': content,
+            'report_content': report_content,
+            'summary': report_content.split("## Emails", 1)[0].strip(),
             'file_path': file_path,
             'message': (
                 f"Fetched {len(emails)} email(s) for '{query}'. "

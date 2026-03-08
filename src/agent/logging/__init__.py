@@ -11,6 +11,7 @@ from .log_manager import (
     log_llm_call,
     log_llm_response,
 )
+from .error_registry import sync_errors_from_log, sync_errors_from_logs
 
 __all__ = [
     "setup_pa_logging",
@@ -23,4 +24,6 @@ __all__ = [
     "get_request_id",
     "log_llm_call",
     "log_llm_response",
+    "sync_errors_from_log",
+    "sync_errors_from_logs",
 ]

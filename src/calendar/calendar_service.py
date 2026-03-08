@@ -233,6 +233,7 @@ def get_events_for_date(date_str: str, calendar_id: str = "primary") -> dict:
         calendar_id=calendar_id,
     )
     if result["status"] == "success":
+        result["results"] = result.get("events", [])
         result["message"] = f"Found {result['count']} event(s) on {date_str}."
     return result
 
@@ -248,6 +249,7 @@ def search_events(query: str, days: int = 30, max_results: int = 20) -> dict:
         query=query,
     )
     if result["status"] == "success":
+        result["results"] = result.get("events", [])
         result["message"] = f"Found {result['count']} event(s) matching '{query}'."
     return result
 
@@ -257,7 +259,8 @@ def get_event(event_id: str, calendar_id: str = "primary") -> dict:
     try:
         svc = _get_client()
         ev  = svc.events().get(calendarId=calendar_id, eventId=event_id).execute()
-        return {"status": "success", "event": _event_summary(ev), "message": "Event retrieved."}
+        summary = _event_summary(ev)
+        return {"status": "success", "event": summary, "results": [summary], "message": "Event retrieved."}
     except Exception as exc:
         if _is_auth_error(exc):
             return _auth_error(exc)
@@ -332,6 +335,7 @@ def create_event(
         return {
             "status":  "success",
             "event":   _event_summary(ev),
+            "results": [_event_summary(ev)],
             "message": f"✅ Event **{title}** created on {start[:10]}.",
         }
     except Exception as exc:
@@ -351,6 +355,7 @@ def quick_add_event(text: str, calendar_id: str = "primary") -> dict:
         return {
             "status":  "success",
             "event":   _event_summary(ev),
+            "results": [_event_summary(ev)],
             "message": f"✅ Event created: **{ev.get('summary', text)}**.",
         }
     except Exception as exc:
@@ -404,6 +409,7 @@ def update_event(
         return {
             "status":  "success",
             "event":   _event_summary(updated),
+            "results": [_event_summary(updated)],
             "message": f"✅ Event **{updated.get('summary', event_id)}** updated.",
         }
     except Exception as exc:
@@ -424,7 +430,7 @@ def delete_event(event_id: str, calendar_id: str = "primary") -> dict:
             title = event_id
         svc.events().delete(calendarId=calendar_id, eventId=event_id,
                              sendUpdates="all").execute()
-        return {"status": "success", "message": f"🗑️ Event **{title}** deleted."}
+        return {"status": "success", "results": [{"id": event_id, "title": title}], "message": f"🗑️ Event **{title}** deleted."}
     except Exception as exc:
         if _is_auth_error(exc):
             return _auth_error(exc)

@@ -18,7 +18,12 @@ from ..files_service import resolve_path, _file_dict, _fmt_size
 
 logger = logging.getLogger("files_agent")
 
-_MAX_RESULTS = 500  # hard cap to avoid scanning entire drives accidentally
+def _limit_reached(current: int, limit: Optional[int]) -> bool:
+    """Return True when the caller-requested limit has been reached.
+
+    A limit of 0 or None means unlimited results.
+    """
+    return bool(limit and limit > 0 and current >= limit)
 
 
 def search_by_name(
@@ -54,7 +59,7 @@ def search_by_name(
                 results.append(_file_dict(p))
             except Exception:
                 pass
-            if len(results) >= min(limit, _MAX_RESULTS):
+            if _limit_reached(len(results), limit):
                 break
 
         # Sort: real files (non .lnk) first, then shortcuts — so callers get
@@ -104,7 +109,7 @@ def search_by_extension(
                     results.append(_file_dict(p))
                 except Exception:
                     pass
-            if len(results) >= min(limit, _MAX_RESULTS):
+            if _limit_reached(len(results), limit):
                 break
 
         total_size = sum(r.get("size_bytes", 0) for r in results)
@@ -187,7 +192,7 @@ def search_by_date(
                 results.append(_file_dict(p))
             except Exception:
                 pass
-            if len(results) >= min(limit, _MAX_RESULTS):
+            if _limit_reached(len(results), limit):
                 break
 
         results.sort(key=lambda x: x.get("modified", ""), reverse=True)
@@ -243,7 +248,7 @@ def search_by_size(
                 results.append(_file_dict(p))
             except Exception:
                 pass
-            if len(results) >= min(limit, _MAX_RESULTS):
+            if _limit_reached(len(results), limit):
                 break
 
         results.sort(key=lambda x: x.get("size_bytes", 0), reverse=True)
@@ -437,7 +442,7 @@ def search_file_all_drives(
         _seen_paths: set = set()  # deduplicate across pattern variants
 
         for drive in drives:
-            if len(results) >= limit:
+            if _limit_reached(len(results), limit):
                 break
             try:
                 for pat in patterns:
@@ -488,9 +493,9 @@ def search_file_all_drives(
                                 })
                         except Exception:
                             results.append({"name": p.name, "path": str(p), "type": "folder" if is_dir else "file"})
-                        if len(results) >= limit:
+                        if _limit_reached(len(results), limit):
                             break
-                    if len(results) >= limit:
+                    if _limit_reached(len(results), limit):
                         break
             except (PermissionError, OSError):
                 # Skip drives / dirs we can't access

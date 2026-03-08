@@ -129,6 +129,19 @@ def _run_job(
             complete_job(job_id, result_summary=result_summary)
             logger.info("[JobRunner] Job %s completed: %.120s", job_id, result_summary)
 
+            # Write diary so the assistant can reference background job outputs
+            # in follow-up messages ("those files", "the report you found", etc.)
+            try:
+                from src.agent.manifest.context_manifest import write_diary_entry  # noqa: PLC0415
+                write_diary_entry(
+                    user_request=job_id,
+                    agent="background",
+                    action="background_job",
+                    result_summary=result_summary[:300] if result_summary else "",
+                )
+            except Exception:
+                pass
+
             notify_msg = f"✅ *Background task complete!*\n\n{result_summary}"
             _notify_user(session_id, pa_id, notify_msg)
 

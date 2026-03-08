@@ -5,6 +5,8 @@ Exported function: execute_with_llm_orchestration(user_query, agent_id, artifact
 """
 from __future__ import annotations
 
+import ast
+import json
 from typing import Any, Dict, Optional
 
 from src.agent.workflows.skill_react_engine import run_skill_react
@@ -14,10 +16,44 @@ from src.agent.workflows.skill_dag_engine import run_skill_dag
 # Tool builders (lazy so Gmail auth errors surface at call time not import time)
 # ---------------------------------------------------------------------------
 
-def _get_tools() -> Dict[str, Any]:
+def _build_all_tools() -> Dict[str, Any]:
     from src.email.gmail_service import _get_client  # noqa: PLC0415
+    from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
 
     svc = _get_client()
+
+    def _wrap_email_listing(messages: Any, query: str, label: str) -> dict:
+        emails = messages if isinstance(messages, list) else []
+        auto_save_email_context(emails, query)
+        return {
+            "status": "success",
+            "count": len(emails),
+            "query": query,
+            "results": emails,
+            "emails": emails,
+            "message": f"Found {len(emails)} {label}.",
+        }
+
+    def _coerce_message_id(message_id: Any) -> str:
+        if isinstance(message_id, dict):
+            return str(message_id.get("id", "")).strip()
+        if isinstance(message_id, list):
+            first = message_id[0] if message_id else {}
+            return str(first.get("id", "")).strip() if isinstance(first, dict) else ""
+        if not isinstance(message_id, str):
+            return str(message_id or "").strip()
+
+        candidate = message_id.strip()
+        if not candidate:
+            return ""
+        if candidate.startswith(("[", "{")):
+            for parser in (json.loads, ast.literal_eval):
+                try:
+                    parsed = parser(candidate)
+                    return _coerce_message_id(parsed)
+                except Exception:
+                    continue
+        return candidate
 
     def send_email(to: str, subject: str, message: str) -> dict:
         return svc.send_email(to, subject, message)
@@ -26,23 +62,31 @@ def _get_tools() -> Dict[str, Any]:
         return svc.send_email_with_attachment(to, subject, message, attachment_path)
 
     def list_emails(query: str = "in:inbox", max_results: int = 10) -> dict:
-        from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
         result = svc.list_emails(query, max_results)
-        return auto_save_email_context(result, query)
+        return _wrap_email_listing(result, query, "email(s)")
+
+    def get_latest_emails(n_emails: int = 10) -> dict:
+        result = svc.list_emails("in:inbox", n_emails)
+        return _wrap_email_listing(result, "in:inbox", "latest inbox email(s)")
 
     def get_inbox_count() -> dict:
         return svc.get_inbox_count()
 
-    def get_todays_emails() -> dict:
-        from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
-        result = svc.get_todays_emails()
-        return auto_save_email_context(result, "today")
+    def get_todays_emails(n_emails: int = 50) -> dict:
+        result = svc.get_todays_emails(max_results=n_emails)
+        return _wrap_email_listing(result, "today", "email(s) received today")
 
     def delete_emails(query: str, max_results: int = 10) -> dict:
         return svc.delete_emails(query, max_results)
 
     def summarize_email(message_id: str) -> dict:
-        return svc.summarize_email(message_id)
+        resolved_id = _coerce_message_id(message_id)
+        if not resolved_id:
+            return {
+                "status": "error",
+                "message": "Could not resolve the selected email id for summarization.",
+            }
+        return svc.summarize_email(resolved_id)
 
     def generate_daily_digest() -> dict:
         return svc.generate_daily_digest()
@@ -119,10 +163,9 @@ def _get_tools() -> Dict[str, Any]:
         max_results: int = 5,
         cap: int = 20,
     ) -> dict:
-        from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
         result = svc.fetch_emails_to_markdown(query, max_results, cap)
-        # fetch_emails_to_markdown returns a dict with a 'messages' key
-        msgs = result.get("messages", []) if isinstance(result, dict) else []
+        # fetch_emails_to_markdown returns a dict with an 'emails' key
+        msgs = result.get("emails", []) if isinstance(result, dict) else []
         auto_save_email_context(msgs, query)
         return result
 
@@ -199,6 +242,15 @@ def _get_tools() -> Dict[str, Any]:
 
     def write_pdf_report(path: str, title: str, content: str) -> dict:
         from src.files.features.file_ops import write_pdf_report as _wpdf  # noqa: PLC0415
+        if isinstance(content, dict):
+            content = (
+                content.get("report_content")
+                or content.get("content")
+                or content.get("summary")
+                or json.dumps(content, indent=2, ensure_ascii=False)
+            )
+        elif not isinstance(content, str):
+            content = str(content)
         return _wpdf(path, title, content)
 
     def write_text_file(path: str, content: str) -> dict:
@@ -220,6 +272,7 @@ def _get_tools() -> Dict[str, Any]:
         "send_email": send_email,
         "send_email_with_attachment": send_email_with_attachment,
         "list_emails": list_emails,
+        "get_latest_emails": get_latest_emails,
         "get_inbox_count": get_inbox_count,
         "get_todays_emails": get_todays_emails,
         "delete_emails": delete_emails,
@@ -277,6 +330,40 @@ def _get_tools() -> Dict[str, Any]:
         ).make_save_context_tool("email"),
     }
 
+def _get_tool_map_for_react(
+    user_query: str,
+    all_tools: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return a FAISS-filtered tool map for the ReAct engine.
+
+    Falls back to the full tool map if FAISS selection fails.
+    """
+    if all_tools is None:
+        all_tools = _build_all_tools()
+    try:
+        from src.agent.core.skill_loader import select_tool_names  # noqa: PLC0415
+        selected = select_tool_names(
+            "email", user_query,
+            always_include=[
+                "save_context",
+                "deliver_file",
+                "write_pdf_report",
+                "fetch_emails_to_markdown",
+                "send_email_with_attachment",
+                "summarize_email",
+            ],
+        )
+        filtered = {n: all_tools[n] for n in selected if n in all_tools}
+        if filtered:
+            return filtered
+    except Exception as exc:
+        import logging as _lg
+        _lg.getLogger("email.orchestrator").warning(
+            "[tool-map] FAISS filtering failed (%s) — using full tool map", exc
+        )
+    return all_tools
+
+
 def _load_skill_context() -> str:
     """Load the email skill context from skill_context.md (next to this file)."""
     from pathlib import Path as _Path
@@ -302,8 +389,15 @@ def _get_tool_docs_for_react(user_query: str) -> str:
     """Return filtered tool docs for the ReAct engine (cosine-similarity top-K)."""
     from src.agent.core.skill_loader import load_tool_docs  # noqa: PLC0415
     docs = load_tool_docs(
-        "email", user_query, top_k=15,
-        always_include=["save_context", "deliver_file", "write_pdf_report"],
+        "email", user_query,
+        always_include=[
+            "save_context",
+            "deliver_file",
+            "write_pdf_report",
+            "fetch_emails_to_markdown",
+            "send_email_with_attachment",
+            "summarize_email",
+        ],
     )
     if not docs:
         import logging as _lg  # noqa: PLC0415
@@ -323,17 +417,20 @@ def execute_with_llm_orchestration(
     Primary path: DAG planner (2 LLM calls regardless of task length).
     Fallback:      ReAct loop (1 LLM call per step, up to 10 iterations).
     """
-    tool_map = _get_tools()
+    all_tools = _build_all_tools()
     skill_context = _load_skill_context()
     dag_tool_docs = _get_tool_docs_for_dag()
+    react_tool_docs = _get_tool_docs_for_react(user_query)
     try:
         result = run_skill_dag(
             skill_name="email",
             skill_context=skill_context,
-            tool_map=tool_map,
+            tool_map=all_tools,
             tool_docs=dag_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
+            react_tool_map=_get_tool_map_for_react(user_query, all_tools),
+            react_tool_docs=react_tool_docs,
         )
         # If DAG itself fell back internally that's already handled; just return.
         return result
@@ -342,12 +439,11 @@ def execute_with_llm_orchestration(
         _logging.getLogger("email.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
         )
-    react_tool_docs = _get_tool_docs_for_react(user_query)
     try:
         return run_skill_react(
             skill_name="email",
             skill_context=skill_context,
-            tool_map=tool_map,
+            tool_map=_get_tool_map_for_react(user_query, all_tools),
             tool_docs=react_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,

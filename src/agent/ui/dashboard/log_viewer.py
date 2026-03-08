@@ -35,8 +35,9 @@ _LOG_RE = re.compile(
     r"(?P<message>.*)"
 )
 
-_TURN_START_RE = re.compile(r"║\s+TURN START\s+corr=(\S+)\s+src=(\S+)")
-_TURN_MSG_RE   = re.compile(r"║\s+MSG:\s+(.*)")
+_TURN_START_RE    = re.compile(r"║\s+TURN START\s+corr=(\S+)\s+src=(\S+)")
+_TURN_MSG_RE      = re.compile(r"║\s+MSG:\s+(.*)")
+_TURN_END_LLM_RE  = re.compile(r"Turn END.*llm_calls=(\d+)")
 
 _LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
 
@@ -174,8 +175,9 @@ def group_by_turns(entries: List[LogEntry]) -> List[Turn]:
             turn.has_error = True
         if entry.level == "WARNING":
             turn.has_warning = True
-        if entry.logger == "llm.call":
-            turn.llm_calls += 1
+        m_llm = _TURN_END_LLM_RE.search(entry.message)
+        if m_llm:
+            turn.llm_calls += int(m_llm.group(1))
         if entry.ts:
             if turn.start_ts is None:
                 turn.start_ts = entry.ts
@@ -352,12 +354,10 @@ def _render_turn_header(turn: Turn, idx: int) -> str:
 
 def _stats_bar(entries: List[LogEntry], turns: List[Turn]) -> None:
     counts: Dict[str, int] = {"DEBUG": 0, "INFO": 0, "WARNING": 0, "ERROR": 0, "CRITICAL": 0}
-    llm_calls = 0
     for e in entries:
         if e.parsed:
             counts[e.level] = counts.get(e.level, 0) + 1
-            if e.logger == "llm.call":
-                llm_calls += 1
+    llm_calls = sum(t.llm_calls for t in turns)
 
     error_turns = sum(1 for t in turns if t.has_error)
     cols = st.columns(7)

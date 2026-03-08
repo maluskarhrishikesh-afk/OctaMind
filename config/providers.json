@@ -3,6 +3,9 @@
 
   "active": "github_models",
 
+  "_memory_model_comment": "Optional: dedicated provider for memory consolidation LLM calls (insight enrichment in _enrich_recent_insights). Falls back to 'active' if not set. Set to 'gemma3_local' for fully offline/fast consolidation.",
+  "memory_model": "github_models",
+
   "providers": {
 
     "gemma3_local": {

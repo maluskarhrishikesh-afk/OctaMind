@@ -187,13 +187,21 @@ def run_skill_react(
                             fp = first_results[0].get("file_path") or first_results[0].get("path")
                             if fp:
                                 artifacts_out["file_path"] = fp
-                    # Accumulate ALL search result paths for manifest / session state
-                    all_result_paths = [
-                        item.get("path") or item.get("file_path")
-                        for item in result.get("results", [])
-                        if isinstance(item, dict)
-                        and (item.get("path") or item.get("file_path"))
-                    ]
+                    # Accumulate ALL search result paths for manifest / session state.
+                    # Check multiple list keys: search_by_name → "results",
+                    # list_directory → "entries", others use "items" or "files".
+                    all_result_paths: list = []
+                    for _list_key in ("results", "entries", "items", "files"):
+                        _source_list = result.get(_list_key, [])
+                        if not isinstance(_source_list, list):
+                            continue
+                        _candidates = [
+                            item.get("path") or item.get("file_path")
+                            for item in _source_list
+                            if isinstance(item, dict)
+                            and (item.get("path") or item.get("file_path"))
+                        ]
+                        all_result_paths.extend(_candidates)
                     if all_result_paths:
                         existing = artifacts_out.get("found_paths", [])
                         artifacts_out["found_paths"] = existing + all_result_paths
@@ -240,12 +248,27 @@ def run_skill_react(
         final_message = f"⚠️ {skill_name.title()} skill reached its iteration limit without completing."
         status = "error"
 
+    # Write diary entry so subsequent turns can reference "those files", etc.
+    try:
+        from src.agent.manifest.context_manifest import write_diary_entry  # noqa: PLC0415
+        write_diary_entry(
+            user_request=user_query.split("\n")[0][:200],
+            agent=skill_name,
+            action="react",
+            found_paths=artifacts_out.get("found_paths", []),
+            file_path=artifacts_out.get("file_path", ""),
+            result_summary=(final_message or "")[:300],
+        )
+    except Exception:
+        pass
+
     return {
         "status":    status,
         "message":   final_message,
         "action":    "react_response",
         "llm_calls": _llm_calls,
         "file_path": artifacts_out.get("file_path", ""),
+        "found_paths": artifacts_out.get("found_paths", []),
     }
 
 
@@ -319,12 +342,24 @@ Rules:
 
 
 def _strip_fences(raw: str) -> str:
-    """Remove optional ```json ... ``` fences from LLM output."""
+    """Remove optional ```json ... ``` fences and any leading prose from LLM output.
+
+    Handles both JSON objects (``{…}``) and arrays (``[…]``).  Strip leading
+    prose by finding whichever valid JSON start character comes first.
+    """
     if "```" in raw:
         parts = raw.split("```", 2)
         raw = parts[1] if len(parts) >= 2 else parts[0]
         if raw.startswith("json"):
             raw = raw[4:]
+    raw = raw.strip()
+    arr = raw.find("[")
+    obj = raw.find("{")
+    candidates = [p for p in (arr, obj) if p >= 0]
+    if candidates:
+        start = min(candidates)
+        if start > 0:
+            raw = raw[start:]
     return raw.strip()
 
 
