@@ -4,6 +4,7 @@
 **Date:** March 2026  
 **Project:** OctaMind — Personal AI Assistant System  
 **Repository:** https://github.com/maluskarhrishikesh-afk/OctaMind
+**DOI:** https://doi.org/10.5281/zenodo.18911464
 
 ---
 

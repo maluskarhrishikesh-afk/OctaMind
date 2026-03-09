@@ -26,7 +26,7 @@
 
 ## Overview
 
-The Cognitive Memory Architecture implements a **6-layer memory system** (7 for the multi-agent hub) inspired by human cognitive processes. This system enables agents to:
+The Cognitive Memory Architecture implements a **6-layer memory system** inspired by human cognitive processes. This system enables agents to:
 
 - ✅ Remember short-term interactions (Working Memory)
 - ✅ Store long-term events with timestamps (Episodic Memory)
@@ -34,7 +34,6 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 - ✅ Maintain stable identity (Personality)
 - ✅ Learn confirmed behavioural patterns after 3+ occurrences, including day-of-week and time-of-day habits (Habits)
 - ✅ Develop a big-picture manager-level mental model of the user — synthesised from ALL memory layers (Self Reflection)
-- ✅ **Multi-agent only:** Synthesise a cross-domain user model from all sub-agents' self reflection layers (Collective Consciousness)
 
 ### Key Features
 
@@ -62,15 +61,14 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 | `personality.md`     | Who the agent is: tone, communication style, goals. **Two auto-managed sections rewritten each consolidation cycle:** `Observed User Personality` and `Adapted Communication Style` — these capture how the user communicates and shape how the agent responds. **PA Hub: hard-coded protective persona** | Manual (stable sections) / Consolidation engine (adaptive sections). PA Hub: always restored on init | Barely — auto sections are rewritten not appended |                   ✅ Full file (no cap)                      |                Auto-managed sections rewritten; stable sections never change                |
 | `habits.md`          | Confirmed user behavioural patterns (3+ occurrences). Captures day-of-week, time-of-day, and action-type patterns | Consolidation engine | Slow |                     ✅ Last 3 000 chars                      |                     Never archived (caps protect LLM)                      |
 | `self_reflection.md` | Big-picture manager-level mental model of the user. Synthesised from ALL memory layers. Captures lessons learned from past strategies and errors | Consolidation engine (every 2–4 weeks) | Very slow |                   ✅ Full file (no cap)                      |                               Never archived                               |
-| `collective_consciousness.md` | **PA Hub only.** Cross-domain synthesis of every skill agent’s `self_reflection.md` | Consolidation engine (each cycle for `_collective_memory_`) | Very slow | ✅ Full file (no cap) | Never archived |
 
 ### Rule of thumb
 
 - **User sends a message** → `working_memory.md` gains one entry (oldest dropped if > 10). Emotion detection (`_detect_emotion`) runs immediately — if detected, an empathy note is injected into the LLM prompt at zero extra cost.
 - **App boots** → `start.py` / `start.exe` launches a **dedicated consolidation process** (`src/agent/memory/run_consolidation.py --loop`) that runs immediately and then every **8 hours**. The Streamlit dashboard also starts a `ConsolidationRunner` daemon thread as a secondary fallback.
-- **Each consolidation cycle:** (1) working memory patterns → `semantic_memory.md`; (2) episodic themes → `semantic_memory.md`; (3) day-of-week/time-of-day patterns → `habits.md`; (4) 90-day decay; (5) self reflection update if 2+ weeks since last; (6) **personality evolution** — rewrites `Observed User Personality` and `Adapted Communication Style` sections in `personality.md` based on recent interaction analysis; (7) PA hub → `collective_consciousness.md`.
+- **Each consolidation cycle:** (1) working memory patterns → `semantic_memory.md`; (2) episodic themes → `semantic_memory.md`; (3) day-of-week/time-of-day patterns → `habits.md`; (4) 90-day decay; (5) self reflection update if 2+ weeks since last; (6) **personality evolution** — rewrites `Observed User Personality` and `Adapted Communication Style` sections in `personality.md` based on recent interaction analysis.
 - **Event is 90 days old** → Low importance deleted, Medium moved to `archive/episodic_YYYY_MM.md`, High kept forever.
-- **Every LLM call** → last 10 working memory interactions sent. `personality.md` and `self_reflection.md` sent in full. `habits.md` and `semantic_memory.md` capped at 3 000 chars. `episodic_memory.md` excluded by default (on-demand recall only). Multi-agent additionally sends `collective_consciousness.md` in full.
+- **Every LLM call** → last 10 working memory interactions sent. `personality.md` and `self_reflection.md` sent in full. `habits.md` and `semantic_memory.md` capped at 3 000 chars. `episodic_memory.md` excluded by default (on-demand recall only).
 - **User asks “do you remember X?”** → `recall_for_llm()` runs before the LLM call, searches episodic/working/semantic on demand, and injects only matching entries into the prompt for that single turn.
 
 ### What gets summarised vs archived
@@ -308,31 +306,6 @@ The Cognitive Memory Architecture implements a **6-layer memory system** (7 for 
 
 ---
 
-### Layer 7: Collective Consciousness *(Personal Assistant Hub only)*
-
-**Purpose**: Cross-domain synthesis of all sub-agents’ individual self reflection layers into a single unified picture of the user
-
-**Characteristics**:  
-- Only exists for `_collective_memory_` (`memory/_collective_memory_/collective_consciousness.md`)
-- Updated every consolidation cycle (not just every 2–4 weeks)
-- Aggregates non-placeholder bullets from each agent’s `self_reflection.md`
-- Builds a composite trust baseline from all agents’ safety sections
-
-**Storage**: `memory/_collective_memory_/collective_consciousness.md`
-
-**Sections**:
-
-| Section | What it captures |
-|---------|------------------|
-| Agent-Specific Insights | Key bullets each agent has independently learned |
-| Composite Trust Baseline | Normal patterns across all services — for anomaly detection |
-| Cross-Domain Patterns | Behaviours that appear in multiple agents’ memory |
-| Conflict / Inconsistency Log | Cases where two agents have contradictory models |
-
-**Auto-updated by**: `memory_consolidator.py::_update_collective_consciousness()`
-
----
-
 ## Implementation Details
 
 ### File Structure
@@ -356,7 +329,6 @@ memory/
     ├── personality.md             # Hard-coded protective personal-assistant persona
     ├── habits.md
     ├── self_reflection.md
-    ├── collective_consciousness.md # Cross-agent synthesis (unique to PA hub)
     └── archive/
 ```
 
@@ -974,13 +946,12 @@ Medium Importance events (90+ days):
 - `remember(query)` — human-readable recall response (used by generic agent UI)
 
 **Consolidation** (`src/agent/memory/memory_consolidator.py`):
-- `consolidate()` — full consolidation cycle (6 steps; step 6 is PA hub only)
+- `consolidate()` — full consolidation cycle (working patterns, episodic themes, habits, decay, self reflection cadence, personality adaptation)
 - `_extract_patterns_from_working_memory()` — working → semantic patterns
 - `_extract_themes_from_episodic()` — episodic → semantic themes
 - `_detect_habits()` — habit detection including day-of-week + time-of-day patterns (3+ threshold)
 - `_apply_decay_mechanism()` — 90-day decay with file rewrite ✅
 - `_update_self_reflection_layer()` — reads ALL memory layers to write 7-section self reflection
-- `_update_collective_consciousness()` — **PA hub only**; synthesises `collective_consciousness.md` from all skill agents
 
 **Global Consolidation Runner** (`src/agent/memory/consolidation_runner.py`):
 - `get_consolidation_runner()` — singleton accessor

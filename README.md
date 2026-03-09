@@ -1,6 +1,20 @@
 ﻿# Octa Bot
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18911464.svg)](https://doi.org/10.5281/zenodo.18911464)
+
 An AI-powered platform for managing Gmail, Google Drive, WhatsApp, Telegram, and your local filesystem through natural language. **Personal Assistants** have memory, personality, and context. **Skills** (Email, Drive, WhatsApp, Telegram, Files) are stateless executors that the Personal Assistant orchestrates.
+
+---
+
+## Research Papers
+
+- **LLM-Driven DAG Planning with Topological Execution for Multi-Agent AI Orchestration**  
+	Zenodo DOI: [10.5281/zenodo.18911464](https://doi.org/10.5281/zenodo.18911464)  
+	Sources: [research/LLM_DAG_ORCHESTRATION.md](research/LLM_DAG_ORCHESTRATION.md) · [research/LLM_DAG_ORCHESTRATION.pdf](research/LLM_DAG_ORCHESTRATION.pdf)
+
+- **Markdown-Native Agent Memory and Skill Retrieval with FAISS: Building Persistent AI Systems Without a Traditional Database**  
+	Zenodo upload pending  
+	Source: [research/MARKDOWN_NATIVE_MEMORY_FAISS_ARCHITECTURE.md](research/MARKDOWN_NATIVE_MEMORY_FAISS_ARCHITECTURE.md)
 
 ---
 

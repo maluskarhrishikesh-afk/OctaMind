@@ -1,7 +1,196 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-03-08T13:12:29Z",
+  "updated_at": "2026-03-09T07:27:35Z",
   "entries": [
+    {
+      "fingerprint": "6528484806f10719",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [email] ✗ step=s1 tool=send_email returned error: Error while sending the email",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-09T07:27:35Z",
+      "last_seen": "2026-03-09T07:27:35Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-09T07:27:35Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [email] ✗ step=s1 tool=send_email returned error: Error while sending the email",
+          "correlation_id": "f9579769",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "2e3e6366ab3312f5",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [email] ✗ step=s1 tool=send_email_with_attachment returned error: Error sending email with attachment",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-09T07:19:51Z",
+      "last_seen": "2026-03-09T07:19:51Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-09T07:19:51Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [email] ✗ step=s1 tool=send_email_with_attachment returned error: Error sending email with attachment",
+          "correlation_id": "a52598db",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "00701ac931a1dc8c",
+      "category": "general_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ ⚠ [files] DAG planning failed — falling back to ReAct",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-09T07:16:57Z",
+      "last_seen": "2026-03-09T07:16:57Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-09T07:16:57Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│  ⚠ [files] DAG planning failed — falling back to ReAct",
+          "correlation_id": "87847a8b",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "533a8815511b60be",
+      "category": "provider_rate_limit",
+      "logger": "huggingface_hub.utils._http",
+      "normalized_message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+      "severity": "WARNING",
+      "count": 2,
+      "first_seen": "2026-03-08 17:34:15.639",
+      "last_seen": "2026-03-09T07:07:35Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:34:15.639",
+          "level": "WARNING",
+          "logger": "huggingface_hub.utils._http",
+          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        },
+        {
+          "timestamp": "2026-03-09T07:07:35Z",
+          "level": "WARNING",
+          "logger": "huggingface_hub.utils._http",
+          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+          "correlation_id": "cdc6b8f6",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b50d8ab6a7c40ed4",
+      "category": "provider_rate_limit",
+      "logger": "email_agent.llm_parser",
+      "normalized_message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-08T15:22:50Z",
+      "last_seen": "2026-03-09T06:01:45Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08T15:22:50Z",
+          "level": "ERROR",
+          "logger": "email_agent.llm_parser",
+          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 55121 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 55121 seconds before retrying.'}}",
+          "correlation_id": "782cc06a",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-09T05:50:19Z",
+          "level": "ERROR",
+          "logger": "email_agent.llm_parser",
+          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3072 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3072 seconds before retrying.'}}",
+          "correlation_id": "f060f533",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-09T06:01:45Z",
+          "level": "ERROR",
+          "logger": "email_agent.llm_parser",
+          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 2386 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 2386 seconds before retrying.'}}",
+          "correlation_id": "3c1abda0",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "4787f008ab57d72d",
+      "category": "provider_rate_limit",
+      "logger": "workflows",
+      "normalized_message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}) — using keyword fallback",
+      "severity": "WARNING",
+      "count": 2,
+      "first_seen": "2026-03-08 17:38:36.376",
+      "last_seen": "2026-03-08T15:22:29Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:38:36.376",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66775 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66775 seconds before retrying.'}}) — using keyword fallback",
+          "correlation_id": "ea632b15",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        },
+        {
+          "timestamp": "2026-03-08T15:22:29Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 55142 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 55142 seconds before retrying.'}}) — using keyword fallback",
+          "correlation_id": "782cc06a",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
     {
       "fingerprint": "2ea9992d91394f05",
       "category": "provider_rate_limit",
@@ -80,32 +269,6 @@
       ]
     },
     {
-      "fingerprint": "4787f008ab57d72d",
-      "category": "provider_rate_limit",
-      "logger": "workflows",
-      "normalized_message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}) — using keyword fallback",
-      "severity": "WARNING",
-      "count": 1,
-      "first_seen": "2026-03-08 17:38:36.376",
-      "last_seen": "2026-03-08 17:38:36.376",
-      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
-      "tool_description_guidance": [
-        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
-        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-08 17:38:36.376",
-          "level": "WARNING",
-          "logger": "workflows",
-          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66775 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66775 seconds before retrying.'}}) — using keyword fallback",
-          "correlation_id": "ea632b15",
-          "request_id": "-",
-          "source": "logs\\My_Assistant.log"
-        }
-      ]
-    },
-    {
       "fingerprint": "984411cf3cb92404",
       "category": "email_followup_selection_failure",
       "logger": "workflows.skill_dag",
@@ -126,32 +289,6 @@
           "logger": "workflows.skill_dag",
           "message": "│    [email] ✗ step=s2 tool=summarize_email returned error:",
           "correlation_id": "a6ee74ce",
-          "request_id": "-",
-          "source": "logs\\My_Assistant.log"
-        }
-      ]
-    },
-    {
-      "fingerprint": "533a8815511b60be",
-      "category": "provider_rate_limit",
-      "logger": "huggingface_hub.utils._http",
-      "normalized_message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
-      "severity": "WARNING",
-      "count": 1,
-      "first_seen": "2026-03-08 17:34:15.639",
-      "last_seen": "2026-03-08 17:34:15.639",
-      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
-      "tool_description_guidance": [
-        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
-        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-08 17:34:15.639",
-          "level": "WARNING",
-          "logger": "huggingface_hub.utils._http",
-          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
-          "correlation_id": "-",
           "request_id": "-",
           "source": "logs\\My_Assistant.log"
         }

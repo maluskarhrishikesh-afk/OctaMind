@@ -24,7 +24,7 @@ Agent     Agent      Agent    Agent     Agent     Agent     Agent    Agent     A
 
 **Skills vs Personal Assistants:**
 - **Skills** (Email, Drive, Files, WhatsApp, Telegram, Calendar, Browser, Stock, LinkedIn, Habit, Scheduler) are stateless executors � no memory, no personality. They execute a single task and return.
-- **Personal Assistants** have full 6-layer memory (working, episodic, semantic, personality, habits, consciousness) and a cross-domain `collective_consciousness.md`.
+- **Personal Assistants** have full 6-layer memory (working, episodic, semantic, personality, habits, self reflection).
 
 ---
 
@@ -141,7 +141,7 @@ detect_agents_needed()          (1 LLM call, max_tokens=5)
 
 **Only Personal Assistants (PAs) have memory.** Skill agents (Email, Drive, WhatsApp, Telegram, Files) are stateless � they execute a single request with no context from past interactions.
 
-Each PA has a dedicated memory folder at `memory/<pa_id>/`. The system uses 6 layers (7 for the PA hub with collective memory):
+Each PA has a dedicated memory folder at `memory/<pa_id>/`. The system uses 6 layers:
 
 | File | Purpose | Sent to LLM |
 |------|---------|------------|
@@ -150,8 +150,7 @@ Each PA has a dedicated memory folder at `memory/<pa_id>/`. The system uses 6 la
 | `semantic_memory.md` | Learned facts about the user � preferences, recurring needs, background | ? Last 3000 chars |
 | `personality.md` | Agent tone + identity. **PA hub: hard-coded protective persona, never overwritten by trait sliders** | ? Full file |
 | `habits.md` | Confirmed user behavioural patterns � time-of-day, day-of-week, action type. Requires 3+ occurrences | ? Last 3000 chars |
-| `consciousness.md` | Big-picture mental model of the user synthesised from ALL memory layers. Updated every 2�4 weeks | ? Full file |
-| `collective_consciousness.md` | **PA hub only.** Synthesis of every skill agent�s `consciousness.md`. Cross-domain user model | ? Full file |
+| `self_reflection.md` | Big-picture mental model of the user synthesised from ALL memory layers. Updated every 2�4 weeks | ? Full file |
 
 ### Consolidation
 
@@ -165,7 +164,7 @@ Consolidation cycle per agent:
 3. Detect habits (3+ occurrences, including day-of-week patterns) ? update `habits.md`
 4. Apply 90-day decay (Low importance ? delete, Medium ? archive, High ? keep)
 5. Update `consciousness.md` from all memory layers (if 2+ weeks since last update)
-6. **PA hub only:** synthesise `collective_consciousness.md` from all skill `consciousness.md` files
+6. Update `self_reflection.md` from all memory layers when the reflection cadence is due
 
 ### `_collective_memory_` Memory (Personal Assistant Hub)
 
@@ -216,7 +215,7 @@ The Files Agent uses two distinct search paths depending on what the user asks:
 
 PA memories are stored under `memory/<pa_id>/`. Only Personal Assistants have folders here � Skills are stateless and have no memory. Each PA folder holds 6 `.md` memory layers.
 
-The `_collective_memory_` PA hub is the only agent that also maintains a `collective_consciousness.md` file, synthesising all skill consciousness files on each consolidation cycle.
+The `_collective_memory_` PA hub follows the same 6-layer layout as any other personal assistant, with a hard-coded protective `personality.md`.
 
 ---
 

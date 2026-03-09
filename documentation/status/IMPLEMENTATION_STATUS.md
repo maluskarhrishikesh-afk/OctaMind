@@ -621,7 +621,6 @@ Fully implemented service + LLM orchestrator. Registered in agent_registry, agen
 - [x] Drive ? Email file path handoff: `artifacts_out["file_path"]` populated from `download_file` result
 - [x] Composed final response from all agent results
 - [x] **Hard-coded `_collective_memory_` personality** � warm, proactive, protective personal-assistant character baked in as prose; immune to personality trait slider edits
-- [x] **`collective_consciousness.md`** � synthesised from every sub-agent�s `consciousness.md` each consolidation cycle; gives the PA a cross-domain mental model of the user
 - [x] **WhatsApp agent** registered in `agent_registry.py` � available for PA workflows
 - [x] **Telegram agent** registered in `agent_registry.py` � available for PA workflows
 - [x] **Files agent** registered in `agent_registry.py` � available for PA workflows

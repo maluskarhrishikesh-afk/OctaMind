@@ -123,13 +123,6 @@ class AgentMemory:
         # consciousness_path without breaking (points to same file).
         self.consciousness_path = self.self_reflection_path
 
-        # Multi-agent only: combined consciousness across all sub-agents
-        self.collective_consciousness_path: Path | None = (
-            self.memory_dir / "collective_consciousness.md"
-            if agent_id == MULTI_AGENT_ID
-            else None
-        )
-
         # Legacy paths for backward compatibility
         self.short_term_path = self.working_memory_path
         self.long_term_path = self.semantic_memory_path
@@ -291,34 +284,6 @@ class AgentMemory:
 
 ## Lessons Learned
 - (Timestamped strategy improvements — what was tried, what worked, what to do instead)
-""", encoding='utf-8')
-
-        # Collective Consciousness (multi-agent only)
-        if (
-            self.agent_id == MULTI_AGENT_ID
-            and self.collective_consciousness_path is not None
-            and not self.collective_consciousness_path.exists()
-        ):
-            self.collective_consciousness_path.write_text("""# Collective Consciousness
-
-> Cross-agent synthesis: a unified picture of the user assembled from
-> every specialised agent's individual consciousness layer.
-> Updated during each consolidation cycle.
-
-## Unified User Profile
-- (Aggregated understanding of who this person is across all domains)
-
-## Cross-Domain Patterns
-- (Behaviours or preferences that appear in multiple agents' memory)
-
-## Agent-Specific Insights
-- (Notable things each agent has independently learned about the user)
-
-## Conflict / Inconsistency Log
-- (Cases where two agents have contradictory models — needs resolution)
-
-## Composite Trust Baseline
-- (Normal patterns aggregated across all services — for anomaly detection)
 """, encoding='utf-8')
 
     def _save_json(self, path: Path, data: Dict[str, Any]):

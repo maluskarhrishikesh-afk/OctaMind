@@ -307,6 +307,49 @@
         .cb-cmd { color: var(--teal); }
         .cb-str { color: #fbbf24; }
 
+        /* RESEARCH */
+        #research { background: linear-gradient(180deg, transparent 0%, rgba(168,218,220,0.05) 50%, transparent 100%); }
+        .papers-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; max-width: 1100px; margin: 0 auto; }
+        .paper-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-dim);
+            border-radius: var(--radius);
+            padding: 32px;
+            transition: all 0.3s;
+        }
+        .paper-card:hover { border-color: var(--border); transform: translateY(-4px); box-shadow: 0 24px 60px rgba(0,0,0,0.28); }
+        .paper-kicker {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 5px 12px; border-radius: 999px;
+            background: rgba(233,30,140,0.1); border: 1px solid var(--border);
+            color: var(--pink-light); font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+            text-transform: uppercase; margin-bottom: 16px;
+        }
+        .paper-title { font-size: 1.18rem; font-weight: 800; color: #fff; line-height: 1.45; margin-bottom: 14px; }
+        .paper-meta { font-size: 0.86rem; color: var(--muted); line-height: 1.75; margin-bottom: 18px; }
+        .citation-block {
+            background: rgba(8,12,24,0.92);
+            border: 1px solid var(--border-dim);
+            border-radius: 14px;
+            padding: 18px 20px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.77rem;
+            color: var(--text);
+            line-height: 1.8;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-bottom: 18px;
+        }
+        .paper-actions { display: flex; gap: 12px; flex-wrap: wrap; }
+        .paper-link {
+            display: inline-flex; align-items: center; justify-content: center;
+            padding: 10px 16px; border-radius: 10px; text-decoration: none;
+            border: 1px solid var(--border-dim); color: var(--text); font-size: 0.82rem; font-weight: 700;
+            transition: all 0.2s;
+        }
+        .paper-link:hover { border-color: var(--border); background: rgba(233,30,140,0.08); }
+        .paper-note { font-size: 0.8rem; color: var(--muted); margin-top: 16px; line-height: 1.7; }
+
         /* CTA */
         #cta { text-align: center; padding: 120px 6%; position: relative; overflow: hidden; }
         .cta-card { max-width: 760px; margin: 0 auto; background: linear-gradient(135deg, rgba(233,30,140,0.1) 0%, rgba(124,58,237,0.08) 50%, rgba(168,218,220,0.06) 100%); border: 1px solid var(--border); border-radius: 26px; padding: 72px 60px; }
@@ -400,6 +443,7 @@
             <a href="#agents">Helpers</a>
             <a href="#remote">Anywhere</a>
             <a href="#how">How it works</a>
+            <a href="#research">Research</a>
             <a href="https://github.com/maluskarhrishikesh-afk/OctaMind" class="btn-nav">⭐ Star on GitHub</a>
         </div>
         <div class="hamburger" id="hamburger" onclick="toggleNav()">
@@ -968,6 +1012,48 @@
         </div>
     </section>
 
+    <!-- RESEARCH -->
+    <section id="research" class="section-pad">
+        <div class="section-header reveal">
+            <div class="section-tag">Research</div>
+            <h2>Architecture papers<br><em>you can cite</em></h2>
+            <p class="section-sub">Two implementation-backed papers describe the orchestration and memory architecture used in Octa Bot.</p>
+        </div>
+
+        <div class="papers-grid">
+            <div class="paper-card reveal">
+                <div class="paper-kicker">Zenodo Published</div>
+                <div class="paper-title">LLM-Driven DAG Planning with Topological Execution for Multi-Agent AI Orchestration</div>
+                <div class="paper-meta">
+                    March 2026<br>
+                    DOI: <a href="https://doi.org/10.5281/zenodo.18911464" style="color:var(--teal);text-decoration:none;">10.5281/zenodo.18911464</a>
+                </div>
+                <div class="citation-block">Maluskar, H. (2026). LLM-Driven DAG Planning with Topological Execution for Multi-Agent AI Orchestration. Zenodo. https://doi.org/10.5281/zenodo.18911464</div>
+                <div class="paper-actions">
+                    <a class="paper-link" href="https://doi.org/10.5281/zenodo.18911464">Open DOI</a>
+                    <a class="paper-link" href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/research/LLM_DAG_ORCHESTRATION.md">Read Markdown</a>
+                    <a class="paper-link" href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/research/LLM_DAG_ORCHESTRATION.pdf">Open PDF</a>
+                </div>
+            </div>
+
+            <div class="paper-card reveal">
+                <div class="paper-kicker">Zenodo Upload Pending</div>
+                <div class="paper-title">Markdown-Native Agent Memory and Skill Retrieval with FAISS: Building Persistent AI Systems Without a Traditional Database</div>
+                <div class="paper-meta">
+                    March 2026<br>
+                    Status: PDF and ODT artifacts prepared for upload
+                </div>
+                <div class="citation-block">Maluskar, H. (2026). Markdown-Native Agent Memory and Skill Retrieval with FAISS: Building Persistent AI Systems Without a Traditional Database. OctaMind research preprint. Zenodo publication pending.</div>
+                <div class="paper-actions">
+                    <a class="paper-link" href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/research/MARKDOWN_NATIVE_MEMORY_FAISS_ARCHITECTURE.md">Read Markdown</a>
+                    <a class="paper-link" href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/research/MARKDOWN_NATIVE_MEMORY_FAISS_ARCHITECTURE.pdf">Open PDF</a>
+                    <a class="paper-link" href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/research/MARKDOWN_NATIVE_MEMORY_FAISS_ARCHITECTURE.odt">Open ODT</a>
+                </div>
+                <div class="paper-note">After uploading this paper to Zenodo, replace the pending-status note with its DOI and the final citation string.</div>
+            </div>
+        </div>
+    </section>
+
     <!-- CTA -->
     <section id="cta">
         <div class="cta-card reveal">
@@ -1004,6 +1090,7 @@
                 <ul>
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind">GitHub Repository</a></li>
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/tree/main/documentation">Documentation</a></li>
+                    <li><a href="#research">Research Papers</a></li>
                     <li><a href="https://github.com/maluskarhrishikesh-afk/OctaMind/blob/main/CONTRIBUTING.md">Contribute</a></li>
                 </ul>
             </div>
