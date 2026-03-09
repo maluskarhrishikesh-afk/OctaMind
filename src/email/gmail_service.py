@@ -330,6 +330,35 @@ class GmailServiceClient:
                 'error': str(e)
             }
 
+    def count_matching_emails(self, query: str = '') -> Dict:
+        """
+        Return Gmail's server-side result count estimate for a search query.
+
+        Args:
+            query: Gmail search query, e.g. 'from:cleartax.com'
+
+        Returns:
+            Dictionary containing the query and estimated total match count.
+        """
+        try:
+            response = self.gmail_service.users().messages().list(
+                userId=self.user_id,
+                q=query,
+                maxResults=1,
+            ).execute()
+            return {
+                'status': 'success',
+                'query': query,
+                'total_count': int(response.get('resultSizeEstimate', 0) or 0),
+                'message': f"Found {int(response.get('resultSizeEstimate', 0) or 0)} email(s) matching '{query}'.",
+            }
+        except Exception as exc:
+            return {
+                'status': 'error',
+                'message': 'Error counting emails',
+                'error': str(exc),
+            }
+
     def get_todays_emails(self, max_results: int = 1000) -> List[Dict]:
         """
         Get emails received today (after midnight in local machine timezone).
@@ -1826,6 +1855,19 @@ def get_inbox_count() -> Dict:
         Dictionary with total and unread message counts
     """
     return _get_client().get_inbox_count()
+
+
+def count_matching_emails(query: str = '') -> Dict:
+    """
+    Count emails matching a Gmail search query (module-level convenience function).
+
+    Args:
+        query: Gmail search query.
+
+    Returns:
+        Dictionary with total_count and query.
+    """
+    return _get_client().count_matching_emails(query)
 
 
 def get_todays_emails(max_results: int = 1000) -> List[Dict]:

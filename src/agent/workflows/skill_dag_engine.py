@@ -69,6 +69,19 @@ from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger("workflows.skill_dag")
 
+
+def _get_authenticated_user_email() -> str:
+    """Return the authenticated Gmail address when available."""
+    try:
+        from src.email.gmail_auth import get_gmail_service  # noqa: PLC0415
+
+        svc = get_gmail_service()
+        profile = svc.users().getProfile(userId="me").execute()
+        return str(profile.get("emailAddress", "") or "").strip()
+    except Exception as exc:
+        logger.debug("│  [skill-dag] could not resolve authenticated email: %s", exc)
+        return ""
+
 # ---------------------------------------------------------------------------
 # Session state helpers
 # ---------------------------------------------------------------------------
@@ -158,6 +171,181 @@ def _merge_manifest_into_session(session_vars: Dict[str, Any]) -> Dict[str, Any]
         return session_vars
 
 
+def _should_enforce_email_pdf_delivery(skill_name: str, user_query: str, plan: List[Dict[str, Any]]) -> bool:
+    """Return True when an email-summary request should produce a PDF attachment."""
+    if skill_name != "email":
+        return False
+
+    lowered = user_query.lower()
+    has_fetch_step = any(step.get("tool") == "fetch_emails_to_markdown" for step in plan)
+    wants_summary = any(token in lowered for token in ("summary", "summarize", "digest", "overview", "report"))
+    wants_pdf = "pdf" in lowered or "report" in lowered
+    wants_email_delivery = any(
+        token in lowered
+        for token in (
+            "send it to me",
+            "send me",
+            "email it",
+            "email me",
+            "mail it",
+            "mail me",
+            "send to me",
+            "my inbox",
+        )
+    )
+    return has_fetch_step and wants_summary and wants_pdf and wants_email_delivery
+
+
+def _clone_plan(plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cloned: List[Dict[str, Any]] = []
+    for step in plan:
+        cloned.append(
+            {
+                **step,
+                "kwargs": dict(step.get("kwargs", {})),
+                "depends_on": list(step.get("depends_on", [])),
+            }
+        )
+    return cloned
+
+
+def _next_step_id(plan: List[Dict[str, Any]]) -> str:
+    used = {str(step.get("id", "")).strip() for step in plan}
+    idx = 1
+    while f"s{idx}" in used:
+        idx += 1
+    return f"s{idx}"
+
+
+def _slugify_report_name(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return slug or "emails"
+
+
+def _derive_email_report_slug(fetch_step: Dict[str, Any], user_query: str) -> str:
+    query = str(fetch_step.get("kwargs", {}).get("query", "") or "")
+    sender_match = re.search(r"from:([^\s]+)", query, re.IGNORECASE)
+    if sender_match:
+        return _slugify_report_name(sender_match.group(1))
+    if "today" in user_query.lower():
+        return "today"
+    return "emails"
+
+
+def _derive_email_report_title(fetch_step: Dict[str, Any], user_query: str) -> str:
+    query = str(fetch_step.get("kwargs", {}).get("query", "") or "")
+    sender_match = re.search(r"from:([^\s]+)", query, re.IGNORECASE)
+    if sender_match:
+        return f"Email Summary Report - {sender_match.group(1)}"
+    if "today" in user_query.lower():
+        return "Email Summary Report - Today"
+    return "Email Summary Report"
+
+
+def _repair_email_pdf_delivery_plan(
+    skill_name: str,
+    user_query: str,
+    plan: List[Dict[str, Any]],
+    user_email: str,
+) -> List[Dict[str, Any]]:
+    """Ensure email-summary-to-PDF requests generate and send a PDF attachment."""
+    if not _should_enforce_email_pdf_delivery(skill_name, user_query, plan):
+        return plan
+
+    repaired = _clone_plan(plan)
+    fetch_index = next(
+        (idx for idx, step in enumerate(repaired) if step.get("tool") == "fetch_emails_to_markdown"),
+        None,
+    )
+    if fetch_index is None:
+        return plan
+
+    fetch_step = repaired[fetch_index]
+    fetch_step_id = str(fetch_step.get("id", "s1"))
+    report_slug = _derive_email_report_slug(fetch_step, user_query)
+    report_title = _derive_email_report_title(fetch_step, user_query)
+    report_path = f"~/Downloads/email_summary_{report_slug}.pdf"
+
+    pdf_index = next(
+        (idx for idx, step in enumerate(repaired) if step.get("tool") == "write_pdf_report"),
+        None,
+    )
+    if pdf_index is None:
+        pdf_step_id = _next_step_id(repaired)
+        pdf_step = {
+            "id": pdf_step_id,
+            "tool": "write_pdf_report",
+            "kwargs": {
+                "path": report_path,
+                "title": report_title,
+                "content": f"{{{fetch_step_id}.report_content}}",
+            },
+            "depends_on": [fetch_step_id],
+            "description": "Write the fetched email summary to a PDF report.",
+        }
+        repaired.insert(fetch_index + 1, pdf_step)
+        pdf_index = fetch_index + 1
+    else:
+        pdf_step = repaired[pdf_index]
+        pdf_step_id = str(pdf_step.get("id", "") or _next_step_id(repaired))
+        pdf_step["id"] = pdf_step_id
+        pdf_step["tool"] = "write_pdf_report"
+        pdf_step["kwargs"].setdefault("path", report_path)
+        pdf_step["kwargs"].setdefault("title", report_title)
+        pdf_step["kwargs"]["content"] = f"{{{fetch_step_id}.report_content}}"
+        pdf_step["depends_on"] = [fetch_step_id]
+        pdf_step.setdefault("description", "Write the fetched email summary to a PDF report.")
+
+    delivery_index = next(
+        (
+            idx for idx, step in enumerate(repaired)
+            if step.get("tool") in {"send_email", "send_email_with_attachment", "deliver_file"}
+        ),
+        None,
+    )
+
+    fallback_recipient = user_email or "me"
+    fallback_message = "Please find the attached PDF summary report."
+
+    if delivery_index is None:
+        repaired.append(
+            {
+                "id": _next_step_id(repaired),
+                "tool": "send_email_with_attachment",
+                "kwargs": {
+                    "to": fallback_recipient,
+                    "subject": report_title,
+                    "message": fallback_message,
+                    "attachment_path": f"{{{pdf_step_id}.path}}",
+                },
+                "depends_on": [pdf_step_id],
+                "description": "Email the generated PDF summary report to the user.",
+            }
+        )
+        return repaired
+
+    delivery_step = repaired.pop(delivery_index)
+    delivery_kwargs = dict(delivery_step.get("kwargs", {}))
+    message = str(delivery_kwargs.get("message", "") or "").strip()
+    if not message or "report_content" in message or len(message) > 400:
+        message = fallback_message
+
+    subject = str(delivery_kwargs.get("subject", "") or "").strip() or report_title
+    delivery_step["tool"] = "send_email_with_attachment"
+    delivery_step["kwargs"] = {
+        "to": delivery_kwargs.get("to") or fallback_recipient,
+        "subject": subject,
+        "message": message,
+        "attachment_path": f"{{{pdf_step_id}.path}}",
+    }
+    delivery_step["depends_on"] = [pdf_step_id]
+    delivery_step["description"] = "Email the generated PDF summary report to the user."
+
+    insert_at = min(len(repaired), pdf_index + 1)
+    repaired.insert(insert_at, delivery_step)
+    return repaired
+
+
 # ---------------------------------------------------------------------------
 # Public entry-point
 # ---------------------------------------------------------------------------
@@ -200,6 +388,7 @@ def run_skill_dag(
 
     t0 = time.time()
     llm_calls = 0
+    user_email = _get_authenticated_user_email()
 
     # ── Extract session state from enriched query (## Session State block) ──
     # Used to resolve {__session__.field} tokens in LLM-planned kwargs.
@@ -215,7 +404,7 @@ def run_skill_dag(
     logger.info("┌─ [%s] Skill DAG START  query=%.100s", skill_name, user_query)
 
     # ── Step 1: Planning call ──────────────────────────────────────────────
-    plan, plan_calls = _plan_steps(skill_name, skill_context, tool_docs, tool_map, user_query)
+    plan, plan_calls = _plan_steps(skill_name, skill_context, tool_docs, tool_map, user_query, user_email)
     llm_calls += plan_calls
 
     if plan is None:
@@ -241,6 +430,11 @@ def run_skill_dag(
         result["_dag_used"] = False
         return result
 
+    repaired_plan = _repair_email_pdf_delivery_plan(skill_name, user_query, plan, user_email)
+    if repaired_plan != plan:
+        logger.info("│  [%s] repaired plan to enforce PDF summary attachment delivery", skill_name)
+        plan = repaired_plan
+
     logger.info("│  ✔ [%s] Plan contains %d step(s)", skill_name, len(plan))
 
     # ── Step 2: Deterministic tool execution (0 LLM calls) ────────────────
@@ -253,7 +447,7 @@ def run_skill_dag(
         raw_kwargs = step.get("kwargs", {})
 
         # Resolve {previous_step} and {__session__.field} tokens in kwargs
-        kwargs = _resolve_kwargs(raw_kwargs, step_results, session_vars)
+        kwargs = _resolve_kwargs(raw_kwargs, step_results, session_vars, user_email)
 
         logger.info(
             "│    [%s] step=%s  tool=%s  kwargs=%s",
@@ -415,6 +609,7 @@ def _plan_steps(
     tool_docs: str,
     tool_map: Dict[str, Callable],
     user_query: str,
+    user_email: str = "",
 ) -> tuple[Optional[List[Dict[str, Any]]], int]:
     """
     Ask the LLM to produce an ordered list of tool-call steps.
@@ -460,9 +655,19 @@ Output a JSON array — no markdown fences, no extra text — where each element
 Planning rules:
 - Use ONLY tools listed above.  Do NOT invent tool names.
 - kwargs must contain concrete, real values — never placeholders like "<value>" or "value1".
+- The authenticated user's email address is available as {{__user_email__}}.
+    If the user says "email me", "send it to me", "mail it to myself", or similar,
+    use {{__user_email__}} for the recipient. Never use placeholder addresses such as
+    user@example.com or recipient@example.com, and never put literal values like "me"
+    or "myself" in the `to` field.
 - ⛔ NEVER produce a plan that asks the user for clarification or a missing value.
   If a destination folder is not specified, use the default path shown in the domain guide below.
   Always plan a real tool call with a concrete value.
+- For email counting requests like "how many emails from X", prefer a dedicated count tool
+    when available. Do not use list_emails with max_results=1 to estimate totals.
+- For email-summary requests where the user wants a PDF/report emailed to them, ALWAYS plan
+    fetch_emails_to_markdown -> write_pdf_report -> send_email_with_attachment. Do not send
+    raw markdown/report text via send_email for those requests.
 - If a kwarg value depends on the output of a previous step, write it as {{step_id}} (the
   full result JSON string) or {{step_id.field}} to access a specific field, e.g.
   {{s1.results.0.path}} for the file path of the first search result from step s1.
@@ -485,6 +690,9 @@ Planning rules:
 
 Domain guidance (informational only — use to understand tool purpose and defaults):
 {skill_context_plan}
+
+Authenticated user email:
+{user_email or "(unavailable)"}
 
 --- END DOMAIN GUIDANCE ---
 ⚠️  OUTPUT REMINDER: Your response MUST be a JSON array starting with `[` and ending with `]`.
@@ -671,6 +879,7 @@ def _resolve_kwargs(
     kwargs: Dict[str, Any],
     results: Dict[str, Any],
     session_vars: Optional[Dict[str, Any]] = None,
+    user_email: str = "",
 ) -> Dict[str, Any]:
     """
     Substitute ``{step_id}`` / ``{step_id.field.subfield}`` tokens in string
@@ -682,6 +891,7 @@ def _resolve_kwargs(
     list — not a string — so list-typed tool parameters receive proper values.
     """
     _sv = session_vars or {}
+    _user_email = user_email or ""
 
     def _maybe_native_json(value: str) -> Any:
         if not isinstance(value, str):
@@ -702,7 +912,10 @@ def _resolve_kwargs(
                 resolved = _sv.get(field)
                 if resolved is not None:
                     return resolved
-            return _TOKEN_PATTERN.sub(lambda m: _deep_get(m.group(1), results, _sv), value)
+            user_m = re.fullmatch(r'\{__user_email__\}', value.strip())
+            if user_m and _user_email:
+                return _user_email
+            return _TOKEN_PATTERN.sub(lambda m: _deep_get(m.group(1), results, _sv, _user_email), value)
         if isinstance(value, list):
             return [_resolve_value(item) for item in value]
         if isinstance(value, dict):
@@ -713,7 +926,7 @@ def _resolve_kwargs(
                     and re.fullmatch(r'(?:__session__\.)?[A-Za-z0-9_]+(?:\.(?:[A-Za-z0-9_]+|\d+))*', only_key)
                     and only_val in ("", None, [], {})
                 ):
-                    resolved = _deep_get(only_key, results, _sv)
+                    resolved = _deep_get(only_key, results, _sv, _user_email)
                     if resolved != f"{{{only_key}}}":
                         return _maybe_native_json(resolved)
             return {k: _resolve_value(v) for k, v in value.items()}
@@ -725,7 +938,12 @@ def _resolve_kwargs(
 _TOKEN_PATTERN = re.compile(r'\{([^}]+)\}')
 
 
-def _deep_get(path: str, results: Dict[str, Any], session_vars: Optional[Dict[str, Any]] = None) -> str:
+def _deep_get(
+    path: str,
+    results: Dict[str, Any],
+    session_vars: Optional[Dict[str, Any]] = None,
+    user_email: str = "",
+) -> str:
     """
     Resolve a dot-separated path like ``s1.results.0.id`` against the accumulated
     step results dict.  Returns the original ``{path}`` string if resolution fails.
@@ -739,6 +957,9 @@ def _deep_get(path: str, results: Dict[str, Any], session_vars: Optional[Dict[st
     step_id = parts[0]
 
     # ── Session state reference ────────────────────────────────────────────
+    if step_id == "__user_email__":
+        return user_email or f"{{{path}}}"
+
     if step_id == "__session__":
         sv = session_vars or {}
         if len(parts) < 2:

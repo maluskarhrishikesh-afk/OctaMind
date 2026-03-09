@@ -38,6 +38,12 @@ _LOG_RE = re.compile(
 _TURN_START_RE    = re.compile(r"║\s+TURN START\s+corr=(\S+)\s+src=(\S+)")
 _TURN_MSG_RE      = re.compile(r"║\s+MSG:\s+(.*)")
 _TURN_END_LLM_RE  = re.compile(r"Turn END.*llm_calls=(\d+)")
+_TRACE_RE = re.compile(
+    r"^\[(?P<ts>\d{2}:\d{2}:\d{2})\]\s+"
+    r"(?P<level>\w+)\s+"
+    r"(?P<logger>[^:]+):\s+"
+    r"(?P<message>.*)"
+)
 
 _LEVEL_ORDER = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3, "CRITICAL": 4}
 
@@ -60,6 +66,19 @@ _IMPORTANT_LOGGERS = {
     "skill-loader", "hub_processor", "skill_dag_engine",
     "skill_react_engine", "llm.call", "llm.response",
 }
+
+_TRACE_CATEGORY_ORDER = [
+    "Turn",
+    "Intent",
+    "Session",
+    "Tool Selection",
+    "DAG",
+    "Thought",
+    "Action",
+    "Observation",
+    "Error",
+    "Other",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +108,17 @@ class Turn:
     llm_calls: int = 0
     start_ts: Optional[str] = None
     end_ts: Optional[str] = None
+
+
+@dataclass
+class TraceEntry:
+    line_no: int
+    raw: str
+    ts: str = ""
+    level: str = "INFO"
+    logger: str = ""
+    message: str = ""
+    category: str = "Other"
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +218,62 @@ def group_by_turns(entries: List[LogEntry]) -> List[Turn]:
         ordered = [t for t in ordered if t.corr != "__orphan__"]
 
     return ordered
+
+
+def _classify_trace_message(message: str, logger_name: str, level: str) -> str:
+    lowered = message.lower()
+    logger_lower = logger_name.lower()
+
+    if "turn start" in lowered or "turn end" in lowered:
+        return "Turn"
+    if "[intent]" in lowered or "router [intent]" in lowered or "router [fast-path]" in lowered:
+        return "Intent"
+    if "[session state]" in lowered:
+        return "Session"
+    if "skill_loader" in logger_lower or "loaded 54 tool skills" in lowered:
+        return "Tool Selection"
+    if "thought=" in lowered:
+        return "Thought"
+    if "calling tool=" in lowered:
+        return "Action"
+    if "skill dag start" in lowered or "plan contains" in lowered or "step=" in lowered:
+        return "DAG"
+    if "succeeded" in lowered or "returned" in lowered:
+        return "Observation"
+    if level in {"ERROR", "CRITICAL"} or "error" in lowered or "failed" in lowered:
+        return "Error"
+    return "Other"
+
+
+def _parse_trace_line(raw: str, line_no: int) -> TraceEntry:
+    text = raw.rstrip()
+    match = _TRACE_RE.match(text)
+    if not match:
+        return TraceEntry(line_no=line_no, raw=text, message=text)
+
+    level = match.group("level").upper()
+    logger_name = match.group("logger").strip()
+    message = match.group("message")
+    return TraceEntry(
+        line_no=line_no,
+        raw=text,
+        ts=match.group("ts"),
+        level=level,
+        logger=logger_name,
+        message=message,
+        category=_classify_trace_message(message, logger_name, level),
+    )
+
+
+def load_trace_file(path: Path, max_lines: int = 3000) -> List[TraceEntry]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        lines = text.splitlines()
+        if len(lines) > max_lines:
+            lines = lines[-max_lines:]
+        return [_parse_trace_line(line, idx + 1) for idx, line in enumerate(lines)]
+    except Exception:
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +434,133 @@ def _render_turn_header(turn: Turn, idx: int) -> str:
     )
 
 
+def _trace_badge(category: str) -> str:
+    colors = {
+        "Turn": ("#1d4ed8", "#bfdbfe"),
+        "Intent": ("#0f766e", "#99f6e4"),
+        "Session": ("#7c3aed", "#ddd6fe"),
+        "Tool Selection": ("#0369a1", "#bae6fd"),
+        "DAG": ("#4f46e5", "#c7d2fe"),
+        "Thought": ("#9333ea", "#e9d5ff"),
+        "Action": ("#b45309", "#fde68a"),
+        "Observation": ("#15803d", "#bbf7d0"),
+        "Error": ("#b91c1c", "#fecaca"),
+        "Other": ("#334155", "#cbd5e1"),
+    }
+    bg, fg = colors.get(category, colors["Other"])
+    return f'<span class="log-badge" style="background:{bg};color:{fg};min-width:92px;">{category}</span>'
+
+
+def _render_trace_entry(entry: TraceEntry, search: str = "") -> str:
+    _, row_bg = _LEVEL_COLORS.get(entry.level, ("#475569", "#111827"))
+    message = _highlight((entry.message or entry.raw)[:500], search)
+    logger_name = _highlight(entry.logger[:32], search)
+    return (
+        f'<div class="log-row" style="background:{row_bg};">'
+        f'{_trace_badge(entry.category)}'
+        f'<span class="log-ts">{entry.ts or f"L{entry.line_no}"}</span>'
+        f'<span class="log-logger">{logger_name}</span>'
+        f'<span class="{_msg_class(entry.level)}">{message}</span>'
+        f'</div>'
+    )
+
+
+def _show_reasoning_trace() -> None:
+    trace_files = sorted(_LOGS_DIR.glob("pa_*_stderr.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not trace_files:
+        st.info("No stderr trace files found in the logs directory yet.")
+        return
+
+    trace_cols = st.columns([2.6, 1.6, 1.2, 1.2, 1])
+    with trace_cols[0]:
+        selected_trace = st.selectbox(
+            "Trace file",
+            [path.name for path in trace_files],
+            label_visibility="collapsed",
+            key="lv_trace_file",
+        )
+    with trace_cols[1]:
+        categories = st.multiselect(
+            "Categories",
+            _TRACE_CATEGORY_ORDER,
+            default=["Turn", "Intent", "Session", "DAG", "Thought", "Action", "Observation", "Error"],
+            label_visibility="collapsed",
+            key="lv_trace_categories",
+        )
+    with trace_cols[2]:
+        trace_tail = st.select_slider(
+            "Trace lines",
+            options=[300, 600, 1200, 3000],
+            value=1200,
+            label_visibility="collapsed",
+            key="lv_trace_tail",
+        )
+    with trace_cols[3]:
+        trace_search = st.text_input(
+            "Trace search",
+            placeholder="🔍 trace search…",
+            label_visibility="collapsed",
+            key="lv_trace_search",
+        )
+    with trace_cols[4]:
+        interesting_only = st.checkbox("Key only", value=True, key="lv_trace_key_only")
+
+    trace_path = _LOGS_DIR / selected_trace
+    try:
+        trace_mtime = datetime.fromtimestamp(trace_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        trace_mtime = "?"
+
+    st.markdown(
+        f'<div style="padding:6px 10px;color:#475569;font-size:0.78rem;">'
+        f'🧠 <b style="color:#64748b;">{selected_trace}</b>'
+        f'  &nbsp;·&nbsp;  last modified <b style="color:#94a3b8;">{trace_mtime}</b>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    all_trace_entries = load_trace_file(trace_path, max_lines=trace_tail)
+    if interesting_only:
+        all_trace_entries = [entry for entry in all_trace_entries if entry.category != "Other"]
+
+    selected_categories = set(categories) if categories else set(_TRACE_CATEGORY_ORDER)
+    filtered_trace: List[TraceEntry] = []
+    for entry in all_trace_entries:
+        haystack = f"{entry.logger} {entry.message} {entry.raw}".lower()
+        if entry.category not in selected_categories:
+            continue
+        if trace_search and trace_search.lower() not in haystack:
+            continue
+        filtered_trace.append(entry)
+
+    if not filtered_trace:
+        st.info("No reasoning-trace lines match the current filters.")
+        return
+
+    counts = {category: 0 for category in _TRACE_CATEGORY_ORDER}
+    for entry in filtered_trace:
+        counts[entry.category] = counts.get(entry.category, 0) + 1
+
+    summary = "  ".join(
+        f'<span class="stat-chip" style="background:rgba(255,255,255,0.05);color:#cbd5e1;">{category}: {counts[category]}</span>'
+        for category in _TRACE_CATEGORY_ORDER
+        if counts.get(category)
+    )
+    st.markdown(
+        f'<div style="color:#475569;font-size:0.82rem;margin:4px 0 12px 0;">'
+        f'Showing <b style="color:#a5b4fc;">{len(filtered_trace)}</b> reasoning lines</div>{summary}',
+        unsafe_allow_html=True,
+    )
+
+    trace_rows = "".join(_render_trace_entry(entry, trace_search) for entry in filtered_trace[-500:])
+    st.markdown(
+        f'<div style="background:#0f172a;border-radius:8px;padding:10px;max-height:700px;overflow-y:auto;">{trace_rows}</div>',
+        unsafe_allow_html=True,
+    )
+    if len(filtered_trace) > 500:
+        st.caption(f"⚡ Showing last 500 of {len(filtered_trace)} matching reasoning lines.")
+
+
 # ---------------------------------------------------------------------------
 # Main viewer
 # ---------------------------------------------------------------------------
@@ -405,205 +618,186 @@ def show_log_viewer() -> None:
             st.session_state.show_log_viewer = False
             st.rerun()
 
-    # ── Discover log files ────────────────────────────────────────────────
     _LOGS_DIR.mkdir(exist_ok=True)
     log_files = sorted(_LOGS_DIR.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not log_files:
-        st.info("No log files found in the `logs/` directory. Start a Personal Assistant to generate logs.")
-        return
 
-    file_names = [p.name for p in log_files]
-
-    # ── Control row ───────────────────────────────────────────────────────
-    ctrl_cols = st.columns([2.5, 1.2, 1.2, 1.2, 1, 1])
-
-    with ctrl_cols[0]:
-        selected_file = st.selectbox(
-            "Log file",
-            file_names,
-            label_visibility="collapsed",
-            key="lv_file",
-        )
-
-    with ctrl_cols[1]:
-        level_filter = st.multiselect(
-            "Levels",
-            ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-            default=["INFO", "WARNING", "ERROR", "CRITICAL"],
-            label_visibility="collapsed",
-            key="lv_levels",
-        )
-
-    with ctrl_cols[2]:
-        tail_lines = st.select_slider(
-            "Lines",
-            options=[500, 1000, 2000, 5000],
-            value=2000,
-            label_visibility="collapsed",
-            key="lv_tail",
-        )
-
-    with ctrl_cols[3]:
-        search = st.text_input(
-            "Search",
-            placeholder="🔍 search…",
-            label_visibility="collapsed",
-            key="lv_search",
-        )
-
-    with ctrl_cols[4]:
-        view_mode = st.selectbox(
-            "View",
-            ["Turns", "Flat"],
-            label_visibility="collapsed",
-            key="lv_mode",
-        )
-
-    with ctrl_cols[5]:
-        auto_refresh = st.checkbox("⟳ Auto", value=False, key="lv_auto")
-
-    # ── Manual refresh button ─────────────────────────────────────────────
-    r_col1, r_col2, r_col3 = st.columns([1, 6, 1])
-    with r_col1:
+    refresh_cols = st.columns([1, 6, 1])
+    with refresh_cols[0]:
         if st.button("🔄 Refresh", type="primary", use_container_width=True):
             st.rerun()
-
-    # ── Load file ─────────────────────────────────────────────────────────
-    log_path = _LOGS_DIR / selected_file
-    try:
-        mtime = datetime.fromtimestamp(log_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
-        mtime = "?"
-
-    with r_col2:
-        st.markdown(
-            f'<div style="padding:6px 10px;color:#475569;font-size:0.78rem;">'
-            f'📄 <b style="color:#64748b;">{selected_file}</b>'
-            f'  &nbsp;·&nbsp;  last modified <b style="color:#94a3b8;">{mtime}</b>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-    with r_col3:
+    with refresh_cols[1]:
         refresh_interval = st.selectbox(
             "Interval",
             [3, 5, 10, 30],
             index=1,
             label_visibility="collapsed",
             key="lv_interval",
-            disabled=not auto_refresh,
         )
+    with refresh_cols[2]:
+        auto_refresh = st.checkbox("⟳ Auto", value=False, key="lv_auto")
 
-    all_entries: List[LogEntry] = load_log_file(log_path, max_lines=tail_lines)
+    structured_tab, trace_tab = st.tabs(["Structured Logs", "Reasoning Trace"])
 
-    # ── Apply filters ─────────────────────────────────────────────────────
-    level_set = set(level_filter) if level_filter else set(_LEVEL_ORDER.keys())
-    filtered: List[LogEntry] = []
-    for e in all_entries:
-        if e.parsed:
-            if e.level not in level_set:
-                continue
-            if search and search.lower() not in e.message.lower() and search.lower() not in e.logger.lower():
-                continue
+    with structured_tab:
+        if not log_files:
+            st.info("No log files found in the logs directory. Start a Personal Assistant to generate logs.")
         else:
-            if search and search.lower() not in e.raw.lower():
-                continue
-        filtered.append(e)
+            file_names = [path.name for path in log_files]
+            ctrl_cols = st.columns([2.5, 1.2, 1.2, 1.2, 1, 1])
 
-    # ── Stats bar ─────────────────────────────────────────────────────────
-    turns = group_by_turns(all_entries)
-    _stats_bar(all_entries, turns)
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+            with ctrl_cols[0]:
+                selected_file = st.selectbox(
+                    "Log file",
+                    file_names,
+                    label_visibility="collapsed",
+                    key="lv_file",
+                )
 
-    # ── LLM call summary (collapsible) ────────────────────────────────────
-    llm_entries = [e for e in all_entries if e.parsed and e.logger in ("llm.call", "llm.response")]
-    if llm_entries:
-        with st.expander(f"🤖 LLM Calls — {len([e for e in llm_entries if e.logger == 'llm.call'])} calls", expanded=False):
-            html_rows = "".join(_render_entry(e, search) for e in llm_entries[-50:])
+            with ctrl_cols[1]:
+                level_filter = st.multiselect(
+                    "Levels",
+                    ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+                    default=["INFO", "WARNING", "ERROR", "CRITICAL"],
+                    label_visibility="collapsed",
+                    key="lv_levels",
+                )
+
+            with ctrl_cols[2]:
+                tail_lines = st.select_slider(
+                    "Lines",
+                    options=[500, 1000, 2000, 5000],
+                    value=2000,
+                    label_visibility="collapsed",
+                    key="lv_tail",
+                )
+
+            with ctrl_cols[3]:
+                search = st.text_input(
+                    "Search",
+                    placeholder="🔍 search…",
+                    label_visibility="collapsed",
+                    key="lv_search",
+                )
+
+            with ctrl_cols[4]:
+                view_mode = st.selectbox(
+                    "View",
+                    ["Turns", "Flat"],
+                    label_visibility="collapsed",
+                    key="lv_mode",
+                )
+
+            with ctrl_cols[5]:
+                st.markdown("<div style='padding-top:8px;color:#64748b;font-size:0.78rem;'>structured</div>", unsafe_allow_html=True)
+
+            log_path = _LOGS_DIR / selected_file
+            try:
+                mtime = datetime.fromtimestamp(log_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                mtime = "?"
+
             st.markdown(
-                f'<div style="background:#0f172a;border-radius:8px;padding:8px;'
-                f'max-height:300px;overflow-y:auto;">{html_rows}</div>',
+                f'<div style="padding:6px 10px;color:#475569;font-size:0.78rem;">'
+                f'📄 <b style="color:#64748b;">{selected_file}</b>'
+                f'  &nbsp;·&nbsp;  last modified <b style="color:#94a3b8;">{mtime}</b>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
 
-    # ── Error summary (collapsible) ───────────────────────────────────────
-    error_entries = [e for e in all_entries if e.parsed and e.level in ("ERROR", "CRITICAL")]
-    if error_entries:
-        with st.expander(f"❌ Errors & Critical — {len(error_entries)} entries", expanded=len(error_entries) > 0):
-            html_rows = "".join(_render_entry(e, search) for e in error_entries[-100:])
-            st.markdown(
-                f'<div style="background:#0f172a;border-radius:8px;padding:8px;'
-                f'max-height:300px;overflow-y:auto;">{html_rows}</div>',
-                unsafe_allow_html=True,
-            )
+            all_entries: List[LogEntry] = load_log_file(log_path, max_lines=tail_lines)
+            level_set = set(level_filter) if level_filter else set(_LEVEL_ORDER.keys())
+            filtered: List[LogEntry] = []
+            for entry in all_entries:
+                if entry.parsed:
+                    if entry.level not in level_set:
+                        continue
+                    if search and search.lower() not in entry.message.lower() and search.lower() not in entry.logger.lower():
+                        continue
+                else:
+                    if search and search.lower() not in entry.raw.lower():
+                        continue
+                filtered.append(entry)
 
-    st.divider()
+            turns = group_by_turns(all_entries)
+            _stats_bar(all_entries, turns)
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
-    # ── Main log view ─────────────────────────────────────────────────────
-    if view_mode == "Turns":
-        # --- Turn-by-Turn view ---
-        # Filter turns to only those matching the level/search criteria
-        visible_turns: List[Turn] = []
-        for turn in turns:
-            matching = [
-                e for e in turn.entries
-                if (not e.parsed or e.level in level_set)
-                and (not search or search.lower() in e.raw.lower())
-            ]
-            if matching:
-                visible_turns.append((turn, matching))
+            llm_entries = [entry for entry in all_entries if entry.parsed and entry.logger in ("llm.call", "llm.response")]
+            if llm_entries:
+                llm_call_count = len([entry for entry in llm_entries if entry.logger == "llm.call"])
+                with st.expander(f"🤖 LLM Calls — {llm_call_count} calls", expanded=False):
+                    html_rows = "".join(_render_entry(entry, search) for entry in llm_entries[-50:])
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-radius:8px;padding:8px;max-height:300px;overflow-y:auto;">{html_rows}</div>',
+                        unsafe_allow_html=True,
+                    )
 
-        if not visible_turns:
-            st.info("No entries match the current filters.")
-            return
+            error_entries = [entry for entry in all_entries if entry.parsed and entry.level in ("ERROR", "CRITICAL")]
+            if error_entries:
+                with st.expander(f"❌ Errors & Critical — {len(error_entries)} entries", expanded=True):
+                    html_rows = "".join(_render_entry(entry, search) for entry in error_entries[-100:])
+                    st.markdown(
+                        f'<div style="background:#0f172a;border-radius:8px;padding:8px;max-height:300px;overflow-y:auto;">{html_rows}</div>',
+                        unsafe_allow_html=True,
+                    )
 
-        st.markdown(
-            f'<div style="color:#475569;font-size:0.82rem;margin-bottom:12px;">'
-            f'Showing <b style="color:#a5b4fc;">{len(visible_turns)}</b> turn(s) — '
-            f'<b style="color:#94a3b8;">{len(filtered)}</b> matching log lines</div>',
-            unsafe_allow_html=True,
-        )
+            st.divider()
 
-        for idx, (turn, matching_entries) in enumerate(reversed(visible_turns), 1):
-            real_idx = len(visible_turns) - idx + 1
-            header_html = _render_turn_header(turn, real_idx)
-            st.markdown(header_html, unsafe_allow_html=True)
+            if view_mode == "Turns":
+                visible_turns = []
+                for turn in turns:
+                    matching_entries = [
+                        entry for entry in turn.entries
+                        if (not entry.parsed or entry.level in level_set)
+                        and (not search or search.lower() in entry.raw.lower())
+                    ]
+                    if matching_entries:
+                        visible_turns.append((turn, matching_entries))
 
-            # Expand the last 3 turns by default; collapse older ones
-            expand_default = idx <= 3
-            with st.expander(
-                f"{'🔴' if turn.has_error else '🟡' if turn.has_warning else '🟢'} "
-                f"{len(matching_entries)} lines  |  corr={turn.corr[:8]}",
-                expanded=expand_default,
-            ):
-                chunk = matching_entries[-200:]  # cap per-turn rendering
-                html_rows = "".join(_render_entry(e, search) for e in chunk)
+                if not visible_turns:
+                    st.info("No entries match the current filters.")
+                else:
+                    st.markdown(
+                        f'<div style="color:#475569;font-size:0.82rem;margin-bottom:12px;">'
+                        f'Showing <b style="color:#a5b4fc;">{len(visible_turns)}</b> turn(s) — '
+                        f'<b style="color:#94a3b8;">{len(filtered)}</b> matching log lines</div>',
+                        unsafe_allow_html=True,
+                    )
+
+                    for idx, (turn, matching_entries) in enumerate(reversed(visible_turns), 1):
+                        real_idx = len(visible_turns) - idx + 1
+                        header_html = _render_turn_header(turn, real_idx)
+                        st.markdown(header_html, unsafe_allow_html=True)
+                        with st.expander(
+                            f"{'🔴' if turn.has_error else '🟡' if turn.has_warning else '🟢'} {len(matching_entries)} lines  |  corr={turn.corr[:8]}",
+                            expanded=idx <= 3,
+                        ):
+                            chunk = matching_entries[-200:]
+                            html_rows = "".join(_render_entry(entry, search) for entry in chunk)
+                            st.markdown(
+                                f'<div style="background:#0f172a;border-radius:8px;padding:8px;max-height:500px;overflow-y:auto;">{html_rows}</div>',
+                                unsafe_allow_html=True,
+                            )
+                            if len(matching_entries) > 200:
+                                st.caption(f"⚡ Showing last 200 of {len(matching_entries)} lines in this turn.")
+            else:
                 st.markdown(
-                    f'<div style="background:#0f172a;border-radius:8px;padding:8px;'
-                    f'max-height:500px;overflow-y:auto;">{html_rows}</div>',
+                    f'<div style="color:#475569;font-size:0.82rem;margin-bottom:12px;">'
+                    f'Showing <b style="color:#a5b4fc;">{len(filtered)}</b> of '
+                    f'<b style="color:#94a3b8;">{len(all_entries)}</b> lines</div>',
                     unsafe_allow_html=True,
                 )
-                if len(matching_entries) > 200:
-                    st.caption(f"⚡ Showing last 200 of {len(matching_entries)} lines in this turn.")
+                chunk = filtered[-1000:]
+                html_rows = "".join(_render_entry(entry, search) for entry in chunk)
+                st.markdown(
+                    f'<div style="background:#0f172a;border-radius:8px;padding:10px;max-height:700px;overflow-y:auto;">{html_rows}</div>',
+                    unsafe_allow_html=True,
+                )
+                if len(filtered) > 1000:
+                    st.caption(f"⚡ Showing last 1,000 of {len(filtered)} matching lines. Use the Lines slider to load more.")
 
-    else:
-        # --- Flat view ---
-        st.markdown(
-            f'<div style="color:#475569;font-size:0.82rem;margin-bottom:12px;">'
-            f'Showing <b style="color:#a5b4fc;">{len(filtered)}</b> of '
-            f'<b style="color:#94a3b8;">{len(all_entries)}</b> lines</div>',
-            unsafe_allow_html=True,
-        )
-
-        chunk = filtered[-1000:]
-        html_rows = "".join(_render_entry(e, search) for e in chunk)
-        st.markdown(
-            f'<div style="background:#0f172a;border-radius:8px;padding:10px;'
-            f'max-height:700px;overflow-y:auto;">{html_rows}</div>',
-            unsafe_allow_html=True,
-        )
-        if len(filtered) > 1000:
-            st.caption(f"⚡ Showing last 1,000 of {len(filtered)} matching lines. Use the Lines slider to load more.")
+    with trace_tab:
+        _show_reasoning_trace()
 
     # ── Auto-refresh (must be last — otherwise Streamlit re-runs interrupt UI) ──
     if auto_refresh:

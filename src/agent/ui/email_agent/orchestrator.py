@@ -21,6 +21,11 @@ def _build_all_tools() -> Dict[str, Any]:
     from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
 
     svc = _get_client()
+    try:
+        _profile = svc.gmail_service.users().getProfile(userId="me").execute()
+        authenticated_email = str(_profile.get("emailAddress", "") or "").strip()
+    except Exception:
+        authenticated_email = ""
 
     def _wrap_email_listing(messages: Any, query: str, label: str) -> dict:
         emails = messages if isinstance(messages, list) else []
@@ -55,11 +60,17 @@ def _build_all_tools() -> Dict[str, Any]:
                     continue
         return candidate
 
+    def _normalize_recipient(recipient: str) -> str:
+        normalized = str(recipient or "").strip()
+        if normalized.lower() in {"me", "myself", "my email", "my email address"} and authenticated_email:
+            return authenticated_email
+        return normalized
+
     def send_email(to: str, subject: str, message: str) -> dict:
-        return svc.send_email(to, subject, message)
+        return svc.send_email(_normalize_recipient(to), subject, message)
 
     def send_email_with_attachment(to: str, subject: str, message: str, attachment_path: str) -> dict:
-        return svc.send_email_with_attachment(to, subject, message, attachment_path)
+        return svc.send_email_with_attachment(_normalize_recipient(to), subject, message, attachment_path)
 
     def list_emails(query: str = "in:inbox", max_results: int = 10) -> dict:
         result = svc.list_emails(query, max_results)
@@ -71,6 +82,9 @@ def _build_all_tools() -> Dict[str, Any]:
 
     def get_inbox_count() -> dict:
         return svc.get_inbox_count()
+
+    def count_matching_emails(query: str = "") -> dict:
+        return svc.count_matching_emails(query)
 
     def get_todays_emails(n_emails: int = 50) -> dict:
         result = svc.get_todays_emails(max_results=n_emails)
@@ -274,6 +288,7 @@ def _build_all_tools() -> Dict[str, Any]:
         "list_emails": list_emails,
         "get_latest_emails": get_latest_emails,
         "get_inbox_count": get_inbox_count,
+        "count_matching_emails": count_matching_emails,
         "get_todays_emails": get_todays_emails,
         "delete_emails": delete_emails,
         "summarize_email": summarize_email,

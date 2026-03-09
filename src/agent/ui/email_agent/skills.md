@@ -51,6 +51,11 @@
 - **description**: Return the total number of unread emails currently in the inbox. Use when the user asks "how many unread emails do I have", "what is my email count", "do I have any unread messages", "check my inbox count", "how full is my inbox", "any emails waiting for me", "how many emails unread".
 - **tags**: count, unread, inbox, how many, number, check, waiting, full, inbox count
 
+### count_matching_emails
+- **signature**: `count_matching_emails(query="")`
+- **description**: Return Gmail's server-side count estimate for emails matching a Gmail search query without listing the messages one by one. Use when the user asks "how many emails have I received from X", "count my emails from ClearTax", "how many messages mention invoice", "what is the total number of emails from boss@company.com", or any sender-specific / query-specific email count.
+- **tags**: count, total, how many, from sender, by query, sender count, mailbox count, total matches, query count, count emails from, ClearTax, invoice emails
+
 ### get_todays_emails
 - **signature**: `get_todays_emails(n_emails=50)`
 - **description**: Fetch all emails received in the inbox today since midnight local time. Use when the user says "show me today's emails", "what emails did I get today", "list emails received today", "top 4 emails today", "top N emails today", "any new emails since morning", "what came in today", "did I receive anything today", "check today's mail", "morning email roundup", "emails from today", or "today's inbox update". Pass n_emails to limit quantity returned. Returns subject, sender, date, and snippet for each.
