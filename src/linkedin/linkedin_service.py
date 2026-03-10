@@ -60,6 +60,8 @@ from urllib.parse import urlencode
 
 import requests
 
+from src.agent.runtime_paths import get_your_data_dir
+
 logger = logging.getLogger("linkedin_service")
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -854,7 +856,7 @@ def generate_ai_post_content(
 
 def generate_ai_image(
     prompt: str,
-    output_path: str = "data/linkedin_generated_image.png",
+    output_path: str = "",
     size: str = "1024x1024",
 ) -> Dict[str, Any]:
     """
@@ -885,7 +887,7 @@ def generate_ai_image(
         img_data = resp.data[0].b64_json
         img_bytes = base64.b64decode(img_data)
 
-        out_path = Path(output_path)
+        out_path = Path(output_path) if output_path else get_your_data_dir("linkedin", "linkedin_generated_image.png")
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_bytes(img_bytes)
 

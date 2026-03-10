@@ -48,11 +48,14 @@ _MAX_REACT_ITERATIONS = 12
 
 def _react_system_prompt() -> str:
     from pathlib import Path as _Path
+    from src.agent.runtime_paths import get_your_data_dir
+
     home = _Path.home()
+    your_data = get_your_data_dir()
     path_ctx = (
         f"\nSystem path context (use in instructions to the files agent):\n"
         f"  Home: {home} | Downloads: {home / 'Downloads'} | "
-        f"Desktop: {home / 'Desktop'} | Documents: {home / 'Documents'}\n"
+        f"Desktop: {home / 'Desktop'} | Documents: {home / 'Documents'} | Your Data: {your_data}\n"
         f"Always pass full absolute paths when delegating to the files agent.\n"
     )
     caps = get_capabilities_text()

@@ -10,6 +10,8 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from src.agent.runtime_paths import get_your_data_dir
+
 from ..files_service import resolve_path
 
 logger = logging.getLogger("files_agent")
@@ -36,8 +38,7 @@ def zip_and_email(
         if not p.exists():
             return {"status": "error", "message": f"Path does not exist: {p}"}
 
-        # Create zip in a temp location next to the source
-        zip_path = str(p.parent / (p.name + ".zip"))
+        zip_path = str(get_your_data_dir("archives", p.name + ".zip", create=True))
         if p.is_dir():
             zip_result = zip_folder(path, zip_path)
         else:
@@ -99,7 +100,7 @@ def zip_and_upload_to_drive(
         if not p.exists():
             return {"status": "error", "message": f"Path does not exist: {p}"}
 
-        zip_path = str(p.parent / (p.name + ".zip"))
+        zip_path = str(get_your_data_dir("archives", p.name + ".zip", create=True))
         if p.is_dir():
             zip_result = zip_folder(path, zip_path)
         else:

@@ -459,6 +459,19 @@ class TestZipFolder:
         assert result["status"] == "success"
         assert Path(out).exists()
 
+    def test_zip_folder_defaults_to_workspace_your_data(self, tmp_path, src_folder, monkeypatch):
+        import src.files.features.archives as archives_module
+
+        archive_root = tmp_path / "your_data" / "archives"
+        monkeypatch.setattr(archives_module, "get_your_data_dir", lambda *parts, create=False: archive_root)
+
+        result = archives_module.zip_folder(str(src_folder))
+        expected = archive_root / "src_folder.zip"
+
+        assert result["status"] == "success"
+        assert Path(result["file_path"]) == expected
+        assert expected.exists()
+
     def test_zip_folder_contains_contents(self, tmp_path, src_folder):
         from src.files.features.archives import zip_folder
 

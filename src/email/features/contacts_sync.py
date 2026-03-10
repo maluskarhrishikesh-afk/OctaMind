@@ -1,7 +1,7 @@
 """
 Gmail Contacts Sync — Google People API integration.
 
-Syncs Gmail contacts to data/contacts.json so the assistant can resolve
+Syncs Gmail contacts to your_data/contacts.json so the assistant can resolve
 names to email addresses without scanning the inbox for every message.
 
 Industry standard approach used here:
@@ -9,7 +9,7 @@ Industry standard approach used here:
                user's actual Google Contacts book (~all saved contacts).
   2. Fallback: Interaction mining — scan the last N emails to surface
                frequently co-emailed addresses even if not in Contacts book.
-  3. Storage:  data/contacts.json — flat list, keyed for fast name lookup.
+    3. Storage:  your_data/contacts.json — flat list, keyed for fast name lookup.
 
 Re-running sync merges results so manually added contacts are not lost.
 
@@ -21,12 +21,13 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
 
 logger = logging.getLogger("email.contacts_sync")
 
-_CONTACTS_FILE = Path(__file__).parent.parent.parent.parent / "data" / "contacts.json"
+_CONTACTS_FILE = migrate_legacy_runtime_state_file("contacts.json")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
+
 logger = logging.getLogger("hub_processor")
 
 # Structured logging helpers — correlation IDs thread through every skill/LLM call
@@ -53,7 +55,7 @@ _MAX_HISTORY_FOR_LLM = 10  # messages sent to LLM each turn
 # Cross-process conversation persistence
 # Written by poller/API process, read by the Streamlit dashboard.
 # ---------------------------------------------------------------------------
-_CONV_PATH = Path(__file__).parent.parent.parent.parent / "data" / "hub_conversations.json"
+_CONV_PATH = migrate_legacy_runtime_state_file("hub_conversations.json")
 _conv_lock = threading.Lock()
 
 

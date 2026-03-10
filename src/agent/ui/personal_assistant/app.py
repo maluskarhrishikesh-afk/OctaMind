@@ -19,6 +19,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
 from src.agent.ui.dashboard.styles import inject_agent_css
 from src.agent.ui.personal_assistant.helpers import _logo_b64, _logo_icon, _logo_path, _logo_pinkraven, _start_browser_watchdog, get_running_agents
 from src.agent.hub.pa_manager import load_assistants, create_assistant, delete_assistant
@@ -46,6 +47,31 @@ import re as _re
 def _import_workflows():
     from src.agent.workflows import classify_and_route, run_workflow
     return classify_and_route, run_workflow
+
+
+def _render_chat_artifacts(artifact_paths: list[str], key_prefix: str) -> None:
+    if not artifact_paths:
+        return
+
+    import mimetypes as _mimetypes
+
+    for idx, artifact_path in enumerate(artifact_paths, 1):
+        if not artifact_path or not os.path.isfile(artifact_path):
+            continue
+        try:
+            file_name = os.path.basename(artifact_path)
+            with open(artifact_path, "rb") as file_handle:
+                file_data = file_handle.read()
+            mime_type, _ = _mimetypes.guess_type(artifact_path)
+            st.download_button(
+                label=f"⬇️ Download {file_name}",
+                data=file_data,
+                file_name=file_name,
+                mime=mime_type or "application/octet-stream",
+                key=f"{key_prefix}_{idx}_{file_name}",
+            )
+        except Exception as artifact_error:
+            logger.debug("Chat artifact render error for %s: %s", artifact_path, artifact_error)
 
 
 # ── Emotion detection ────────────────────────────────────────────────────────
@@ -605,7 +631,7 @@ _SOURCE_COLORS = {
     "dashboard": "#e91e8c",
     "unknown": "#888",
 }
-_CONV_PATH = Path(__file__).parent.parent.parent.parent.parent / "data" / "hub_conversations.json"
+_CONV_PATH = migrate_legacy_runtime_state_file("hub_conversations.json")
 
 
 import threading as _threading
@@ -1087,8 +1113,7 @@ def _render_pa_chat(pa: dict) -> None:
     def _job_notifications_fragment() -> None:
         """Poll octa_job_notifications.json and inject completions as chat messages."""
         import json as _json
-        from pathlib import Path as _Path
-        _nf = _Path(__file__).resolve().parents[4] / "data" / "octa_job_notifications.json"
+        _nf = migrate_legacy_runtime_state_file("octa_job_notifications.json")
         _sid = f"dashboard_{pa_id}"
         if not _nf.exists():
             return
@@ -1125,9 +1150,14 @@ def _render_pa_chat(pa: dict) -> None:
     # All messages — including live status cards and the final reply — render
     # inside this scrollable box, so the input is never pushed off-screen.
     with st.container(height=560, border=False):
-        for msg in st.session_state[mk("messages")]:
+        for msg_idx, msg in enumerate(st.session_state[mk("messages")]):
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
+                if msg["role"] == "assistant":
+                    _render_chat_artifacts(
+                        msg.get("artifact_paths", []),
+                        key_prefix=f"chat_artifact_{pa_id}_{msg_idx}",
+                    )
 
         # Sentinel anchor — JS below scrollIntoViews this to auto-scroll bottom
         st.markdown(
@@ -1376,6 +1406,7 @@ def _render_pa_chat(pa: dict) -> None:
             time.perf_counter() - _t_turn,
         )
 
+        _artifact_paths = []
         if _result_status == "auth_error":
             _result_ph.markdown(
                 "🔑 **Gmail authorization required.** "
@@ -1389,29 +1420,10 @@ def _render_pa_chat(pa: dict) -> None:
             _result_ph.markdown(reply)
             _save_msg = reply
 
-            # ── File artifact download button ─────────────────────────────────
-            # Executors that produce downloadable files return a "file_path" key.
-            # Present a download button directly inside the chat for instant access.
             _artifact_path = (result or {}).get("file_path", "")
-            if _artifact_path:
-                try:
-                    import mimetypes as _mimetypes
-                    if os.path.isfile(_artifact_path):
-                        _fname = os.path.basename(_artifact_path)
-                        with open(_artifact_path, "rb") as _fh:
-                            _fdata = _fh.read()
-                        _mime, _ = _mimetypes.guess_type(_artifact_path)
-                        _mime = _mime or "application/octet-stream"
-                        st.download_button(
-                            label=f"⬇️ Download {_fname}",
-                            data=_fdata,
-                            file_name=_fname,
-                            mime=_mime,
-                            key=f"dl_{pa_id}_{len(st.session_state[mk('messages')])}",
-                        )
-                        _save_msg += f"\n\n📎 File produced: `{_fname}`"
-                except Exception as _dl_err:
-                    logger.debug("Download button render error: %s", _dl_err)
+            if _artifact_path and os.path.isfile(_artifact_path):
+                _artifact_paths.append(_artifact_path)
+                _save_msg += f"\n\n📎 File produced: `{os.path.basename(_artifact_path)}`"
 
         # ── Gap-6: store search_paths so ConversationStateTracker can read ──
         # The hub path already stores search_paths per message; mirror that here
@@ -1421,6 +1433,8 @@ def _render_pa_chat(pa: dict) -> None:
         _msg_entry: dict = {"role": "assistant", "content": _save_msg}
         if _found_paths:
             _msg_entry["search_paths"] = _found_paths
+        if _artifact_paths:
+            _msg_entry["artifact_paths"] = _artifact_paths
         st.session_state[mk("messages")].append(_msg_entry)
         _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
         st.session_state[mk("processing")] = False
@@ -1499,25 +1513,9 @@ def _render_pa_chat(pa: dict) -> None:
         _fp for sr in run_result.get("steps", [])
         if (_fp := _step_file_path(sr))
     ]
+    _wf_artifacts = [artifact_path for artifact_path in _wf_artifacts if artifact_path and os.path.isfile(artifact_path)]
     for _wf_fp in _wf_artifacts:
-        try:
-            import mimetypes as _mimetypes
-            if os.path.isfile(_wf_fp):
-                _wf_fname = os.path.basename(_wf_fp)
-                with open(_wf_fp, "rb") as _wf_fh:
-                    _wf_fdata = _wf_fh.read()
-                _wf_mime, _ = _mimetypes.guess_type(_wf_fp)
-                _wf_mime = _wf_mime or "application/octet-stream"
-                st.download_button(
-                    label=f"⬇️ Download {_wf_fname}",
-                    data=_wf_fdata,
-                    file_name=_wf_fname,
-                    mime=_wf_mime,
-                    key=f"wfdl_{pa_id}_{_wf_fname}_{len(st.session_state[mk('messages')])}",
-                )
-                final_text += f"\n\n📎 File produced: `{_wf_fname}`"
-        except Exception as _wf_dl_err:
-            logger.debug("Workflow download button error: %s", _wf_dl_err)
+        final_text += f"\n\n📎 File produced: `{os.path.basename(_wf_fp)}`"
 
     # Record to PA-level memory (not skill-level)
     try:
@@ -1550,7 +1548,10 @@ def _render_pa_chat(pa: dict) -> None:
     except Exception as _mem_err:
         logger.debug("PA workflow memory record skipped: %s", _mem_err)
 
-    st.session_state[mk("messages")].append({"role": "assistant", "content": final_text})
+    _wf_msg: dict = {"role": "assistant", "content": final_text}
+    if _wf_artifacts:
+        _wf_msg["artifact_paths"] = _wf_artifacts
+    st.session_state[mk("messages")].append(_wf_msg)
     _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
     logger.info(
         "└─ [PA:%s] Turn END (workflow agents=%s)  status=%s  elapsed=%.2fs",

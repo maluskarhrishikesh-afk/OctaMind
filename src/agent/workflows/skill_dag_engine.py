@@ -67,6 +67,8 @@ import re
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+from src.agent.runtime_paths import get_your_data_dir
+
 logger = logging.getLogger("workflows.skill_dag")
 
 
@@ -264,7 +266,7 @@ def _repair_email_pdf_delivery_plan(
     fetch_step_id = str(fetch_step.get("id", "s1"))
     report_slug = _derive_email_report_slug(fetch_step, user_query)
     report_title = _derive_email_report_title(fetch_step, user_query)
-    report_path = f"~/Downloads/email_summary_{report_slug}.pdf"
+    report_path = str(get_your_data_dir("reports", f"email_summary_{report_slug}.pdf"))
 
     pdf_index = next(
         (idx for idx, step in enumerate(repaired) if step.get("tool") == "write_pdf_report"),

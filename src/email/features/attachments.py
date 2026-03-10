@@ -10,10 +10,12 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from src.agent.runtime_paths import get_your_data_dir
+
 logger = logging.getLogger("email_agent.features.attachments")
 
 # Default download directory
-DEFAULT_DOWNLOAD_DIR = Path.home() / "Downloads" / "Octa Bot_Attachments"
+DEFAULT_DOWNLOAD_DIR = get_your_data_dir("attachments")
 
 
 class AttachmentManager:
@@ -73,7 +75,7 @@ class AttachmentManager:
             message_id: Gmail message ID containing the attachment
             attachment_id: The attachment ID from list_attachments
             filename: Suggested filename (optional)
-            save_path: Directory to save to (defaults to ~/Downloads/Octa Bot_Attachments)
+            save_path: Directory to save to (defaults to <workspace>/your_data/attachments)
         """
         try:
             attachment = self.gmail_service.users().messages().attachments().get(

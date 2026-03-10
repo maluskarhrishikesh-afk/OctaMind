@@ -136,10 +136,10 @@ This creates a durable backlog for improving `skills.md`, `skill_context.md`, an
 
 ### 2. Copy Destination Prompt Fix (`src/agent/ui/files_agent/orchestrator.py`)
 
-**Problem:** When the user named a destination folder (e.g. "copy them to Downloads/qwerty"), the orchestrator passed `"no arguments"` to `collect_files_from_manifest`, discarding the destination. Rule #1 default path was hard-coded to `~/Downloads/OctaMind`.
+**Problem:** When the user named a destination folder (e.g. "copy them to Downloads/qwerty"), the orchestrator passed `"no arguments"` to `collect_files_from_manifest`, discarding the destination. Rule #1 default path was hard-coded to a fixed downloads folder.
 
 **Fix:**
-- Rule #1 default path changed from `home / 'Downloads' / 'OctaMind'` → `data_dir` (`<workspace>/data/`)
+- Rule #1 default path changed from `home / 'Downloads' / 'OctaMind'` → `data_dir` (`<workspace>/your_data/`)
 - Prompt instruction updated: if user names a folder, pass it as the `destination` argument instead of `"no arguments"`
 
 ---
@@ -553,7 +553,7 @@ Completely new agent. No overlap with Calendar or Files agents.
 
 **Registry key:** `habit_tracker`  
 **Service:** `src/habit_tracker/habit_service.py`  
-**Data stores:** `data/habits.json` (definitions), `data/habit_logs.json` (daily logs)  
+**Data stores:** `your_data/habits.json` (definitions), `your_data/habit_logs.json` (daily logs) with legacy fallback from `data/`  
 **No credentials required** for all 8 core tools; Calendar integration requires Calendar auth.
 
 ### Browser Agent � 10 Tools
@@ -587,7 +587,7 @@ Read-only analysis. No buy/sell, no brokerage integration.
 **Service:** `src/stock_market/stock_service.py`  
 **Data source:** `yfinance` (Yahoo Finance public API) � free, no API key required.  
 **No credentials required.** All indicators computed in pure Python (no ML dependencies).  
-**PDF Report Generation:** `generate_full_report(symbol)` runs all 10 analyses and builds a multi-page A4 PDF with cover page, Analyst Quick Snapshot, 7 analysis sections, charts, and risk tables. Output saved to `data/exports/`.
+**PDF Report Generation:** `generate_full_report(symbol)` runs all 10 analyses and builds a multi-page A4 PDF with cover page, Analyst Quick Snapshot, 7 analysis sections, charts, and risk tables. Output saved to `your_data/reports/`.
 
 ### LinkedIn Agent � 17 Tools
 Fully implemented service + LLM orchestrator. Registered in agent_registry, agent_manager, and dashboard skill cards.

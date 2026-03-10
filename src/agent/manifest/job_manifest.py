@@ -5,7 +5,7 @@ Stores long-running background tasks (full-disk file scans, large searches,
 heavy report generation) so the user can be notified when they complete
 without blocking the chat.
 
-File: <workspace>/data/octa_jobs.json
+File: <workspace>/your_data/octa_jobs.json
 Schema version: 1
 
 Public API:
@@ -27,10 +27,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.agent.runtime_paths import get_runtime_state_dir, migrate_legacy_runtime_state_file
+
 logger = logging.getLogger("job_manifest")
 
-_MANIFEST_DIR = Path(__file__).resolve().parents[3] / "data"
-_JOBS_FILE = _MANIFEST_DIR / "octa_jobs.json"
+_MANIFEST_DIR = get_runtime_state_dir(create=True)
+_JOBS_FILE = migrate_legacy_runtime_state_file("octa_jobs.json")
 _MAX_JOBS = 200  # keep only last N jobs to prevent unbounded growth
 
 

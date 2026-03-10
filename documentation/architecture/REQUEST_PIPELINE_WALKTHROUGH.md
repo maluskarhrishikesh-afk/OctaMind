@@ -48,7 +48,7 @@ User Message
 │         │   Returns an enriched query string with a JSON block      │
 │                                                                     │
 │  Step 3 │ read_context()  — Context Manifest reader                 │
-│         │   Loads data/octa_context.json if <60 min old             │
+│         │   Loads your_data/octa_context.json if <60 min old        │
 │         │   Contains: agent, topic, resolved_entities, awaiting     │
 │                                                                     │
 │  Step 4 │ classify_and_route()  — Unified Intent Classifier         │
@@ -66,10 +66,10 @@ User Message
 
 | File | Written by | Read by | Purpose |
 |---|---|---|---|
-| `data/octa_context.json` | Agent orchestrators (after tool results) | `_dispatch` + agent orchestrators | Cross-turn context: found files, listed emails, etc. |
+| `your_data/octa_context.json` | Agent orchestrators (after tool results) | `_dispatch` + agent orchestrators | Cross-turn context: found files, listed emails, etc. |
 | `data/octa_manifest.txt` | Files agent (`search_files` tool) | Files agent (`collect_files_from_manifest`) | Full list of file paths from the last search |
-| `data/octa_context_history.jsonl` | `write_context()` | Audit/debug only | Append-only history of every context write |
-| `data/hub_conversations.json` | HubProcessor | HubProcessor | Full turn history per session |
+| `your_data/octa_context_history.jsonl` | `write_context()` | Audit/debug only | Append-only history of every context write |
+| `your_data/hub_conversations.json` | HubProcessor | HubProcessor | Full turn history per session |
 
 ---
 
@@ -115,7 +115,7 @@ Are there any payslips on my computer?
 
 ### Step 3 — Context Manifest Read
 
-`read_context()` opens `data/octa_context.json`.
+`read_context()` opens `your_data/octa_context.json`.
 
 → Either the file does not exist (first run) or it has expired.  
 **`_active_ctx = None`**
@@ -436,7 +436,7 @@ new search.
   {
     "id":          "zip1",
     "agent":       "files",
-    "instruction": "Zip the folder C:\\Hrishikesh\\Neo\\Payslips into an archive. Save the zip at C:\\Users\\malus\\Downloads\\Payslips.zip",
+    "instruction": "Zip the folder C:\\Hrishikesh\\Neo\\Payslips into an archive. Save the zip at C:\\Hrishikesh\\OctaMind\\your_data\\archives\\Payslips.zip",
     "depends_on":  [],
     "description": "Zip payslips folder"
   },
@@ -467,7 +467,7 @@ Before calling the agent, `_resolve_instruction()` substitutes tokens:
 **Resolved instruction:**
 ```
 Zip the folder C:\Hrishikesh\Neo\Payslips into an archive.
-Save the zip at C:\Users\malus\Downloads\Payslips.zip
+Save the zip at C:\Hrishikesh\OctaMind\your_data\archives\Payslips.zip
 ```
 
 `run_skill_react(skill_name="files", user_query=resolved_instruction)`
@@ -481,7 +481,7 @@ Save the zip at C:\Users\malus\Downloads\Payslips.zip
     "tool": "zip_folder",
     "kwargs": {
       "folder_path": "C:\\Hrishikesh\\Neo\\Payslips",
-      "output_path": "C:\\Users\\malus\\Downloads\\Payslips.zip"
+      "output_path": "C:\\Hrishikesh\\OctaMind\\your_data\\archives\\Payslips.zip"
     }
   }
 }
@@ -491,7 +491,7 @@ Save the zip at C:\Users\malus\Downloads\Payslips.zip
 ```json
 {
   "status":    "success",
-  "file_path": "C:\\Users\\malus\\Downloads\\Payslips.zip",
+  "file_path": "C:\\Hrishikesh\\OctaMind\\your_data\\archives\\Payslips.zip",
   "size_mb":   0.7,
   "files_in":  3
 }
@@ -510,7 +510,7 @@ Save the zip at C:\Users\malus\Downloads\Payslips.zip
 ```python
 {
   "text":      "✅ Created Payslips.zip (0.7 MB, 3 files)",
-  "artifacts": {"file_path": "C:\\Users\\malus\\Downloads\\Payslips.zip"}
+  "artifacts": {"file_path": "C:\\Hrishikesh\\OctaMind\\your_data\\archives\\Payslips.zip"}
 }
 ```
 
@@ -520,7 +520,7 @@ Save the zip at C:\Users\malus\Downloads\Payslips.zip
 
 **Resolved instruction:**
 ```
-Send C:\Users\malus\Downloads\Payslips.zip as an attachment to hrishikesh@example.com
+Send C:\Hrishikesh\OctaMind\your_data\archives\Payslips.zip as an attachment to hrishikesh@example.com
 with subject "Payslips"
 ```
 
@@ -537,7 +537,7 @@ with subject "Payslips"
       "to":          "hrishikesh@example.com",
       "subject":     "Payslips",
       "message":     "Please find attached your payslip files.",
-      "attachments": ["C:\\Users\\malus\\Downloads\\Payslips.zip"]
+      "attachments": ["C:\\Hrishikesh\\OctaMind\\your_data\\archives\\Payslips.zip"]
     }
   }
 }
@@ -682,7 +682,7 @@ class IntentResult:
     is_fresh_task:       bool  # category == "fresh_task"
 ```
 
-### 5.2 Context Manifest (`data/octa_context.json`) — Keyed Store
+### 5.2 Context Manifest (`your_data/octa_context.json`) — Keyed Store
 
 > **Updated (schema v2):** The file now stores one entry per agent so that an
 > email search and a file search can coexist without overwriting each other.
@@ -767,7 +767,7 @@ natural-language descriptions.
   {
     "id":          "zip1",
     "agent":       "files",
-    "instruction": "Zip C:\\Hrishikesh\\Neo\\Payslips into C:\\Users\\malus\\Downloads\\Payslips.zip",
+    "instruction": "Zip C:\\Hrishikesh\\Neo\\Payslips into C:\\Hrishikesh\\OctaMind\\your_data\\archives\\Payslips.zip",
     "depends_on":  [],
     "description": "Zip payslips folder"
   },

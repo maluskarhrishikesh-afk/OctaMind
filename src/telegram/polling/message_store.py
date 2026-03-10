@@ -49,13 +49,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.agent.runtime_paths import get_runtime_state_path, migrate_legacy_runtime_state_file
+
 logger = logging.getLogger("telegram_agent")
 
 # Per-PA pollers set TELEGRAM_DATA_FILE so each PA has its own message store.
 _DATA_PATH = Path(
     os.environ.get(
         "TELEGRAM_DATA_FILE",
-        str(Path(__file__).parent.parent.parent.parent / "data" / "telegram_messages.json"),
+        str(get_runtime_state_path("telegram_messages.json", create_parent=True)),
     )
 )
 _lock = threading.Lock()
@@ -73,10 +75,12 @@ def _load() -> Dict[str, Any]:
 
 
 def _save(data: Dict[str, Any]) -> None:
-    _DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _DATA_PATH.with_suffix(".tmp")
+    default_store = get_runtime_state_path("telegram_messages.json", create_parent=True)
+    target = migrate_legacy_runtime_state_file("telegram_messages.json") if _DATA_PATH == default_store else _DATA_PATH
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(_DATA_PATH)
+    tmp.replace(target)
 
 
 # ── Offset management ─────────────────────────────────────────────────────────

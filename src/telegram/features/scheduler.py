@@ -16,11 +16,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
+
 logger = logging.getLogger("telegram_agent")
 
-_SCHEDULED_PATH = (
-    Path(__file__).parent.parent.parent.parent / "data" / "telegram_scheduled.json"
-)
+_SCHEDULED_PATH = migrate_legacy_runtime_state_file("telegram_scheduled.json")
 _lock = threading.Lock()
 _scheduler_started = False
 

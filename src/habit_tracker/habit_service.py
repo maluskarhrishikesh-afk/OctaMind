@@ -2,8 +2,8 @@
 Habit & Health Tracker Service
 
 Data storage:
-  data/habits.json      — habit definitions (name, frequency, target_time, active, ...)
-  data/habit_logs.json  — daily completion logs (habit_id, date, completed, notes)
+    your_data/habits.json      — habit definitions (name, frequency, target_time, active, ...)
+    your_data/habit_logs.json  — daily completion logs (habit_id, date, completed, notes)
 """
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.agent.runtime_paths import get_runtime_state_dir, migrate_legacy_runtime_state_file
+
 _ROOT       = Path(__file__).parent.parent.parent  # project root
-_DATA_DIR   = _ROOT / "data"
-_HABITS_FILE = _DATA_DIR / "habits.json"
-_LOGS_FILE   = _DATA_DIR / "habit_logs.json"
+_DATA_DIR   = get_runtime_state_dir(create=True)
+_HABITS_FILE = migrate_legacy_runtime_state_file("habits.json")
+_LOGS_FILE   = migrate_legacy_runtime_state_file("habit_logs.json")
 
 
 # ── I/O helpers ───────────────────────────────────────────────────────────────

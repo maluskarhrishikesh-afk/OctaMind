@@ -16,17 +16,17 @@ These are generated artifacts or transient runtime outputs and are safe to remov
 - `dist/`
 - `data/.last_context_prune`
 - `data/octa_manifest_1.txt`
-- files under `data/exports/`
+- files under `your_data/`
 - files under `data/calendar_exports/`
 - disposable packaging leftovers accidentally copied into `data/` such as `cacerts.txt` and `entry_points.txt`
 
-These should be treated as clutter, not canonical source.
+These should be treated as generated artifacts, not canonical source.
 
 ---
 
 ## Live State: Do Not Delete Blindly
 
-The following `data/` files are operational state for the Personal Assistant and should not be removed as part of generic cleanup:
+Canonical runtime state is now split between `your_data/` and legacy `data/` compatibility files. The following files should not be removed as part of generic cleanup:
 
 - `assistants.json`
 - `action_items.json`
@@ -42,6 +42,8 @@ The following `data/` files are operational state for the Personal Assistant and
 - `telegram_scheduled.json`
 - `whatsapp_scheduled.json`
 - per-agent PA state such as `tg_pa_*.json`
+
+For the migrated set above, prefer checking `your_data/` first. Legacy `data/` copies may still exist on older installs and are migrated forward on first use.
 
 If these need pruning, the cleanup should be feature-aware and age-aware, not a blind delete.
 

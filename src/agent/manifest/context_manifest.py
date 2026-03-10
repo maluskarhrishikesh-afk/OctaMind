@@ -20,7 +20,7 @@ manifest and prepends a structured context block to the query, so the LLM
 receives both the user's bare follow-up AND the fully-resolved context it needs
 to execute without asking again.
 
-File location: <workspace>/data/octa_context.json  (resolved at runtime relative to this file)
+File location: <workspace>/your_data/octa_context.json  (migrated from legacy data/ on first use)
 Format:        JSON, human-readable, UTF-8, overwritten on each new write.
 TTL:           60 minutes by default (configurable; stale context auto-discarded).
 
@@ -58,6 +58,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from src.agent.runtime_paths import get_runtime_state_dir, migrate_legacy_runtime_state_file
+
 logger = logging.getLogger("agent.manifest.context")
 
 # ---------------------------------------------------------------------------
@@ -70,10 +72,10 @@ logger = logging.getLogger("agent.manifest.context")
 # ---------------------------------------------------------------------------
 
 _WORKSPACE_ROOT       = Path(__file__).resolve().parents[3]
-_MANIFEST_DIR         = _WORKSPACE_ROOT / "data"
-_CONTEXT_FILE         = _MANIFEST_DIR / "octa_context.json"
-_CONTEXT_HISTORY_FILE = _MANIFEST_DIR / "octa_context_history.jsonl"   # append-only audit log
-_PRUNE_STAMP_FILE     = _MANIFEST_DIR / ".last_context_prune"
+_MANIFEST_DIR         = get_runtime_state_dir(create=True)
+_CONTEXT_FILE         = migrate_legacy_runtime_state_file("octa_context.json")
+_CONTEXT_HISTORY_FILE = migrate_legacy_runtime_state_file("octa_context_history.jsonl")   # append-only audit log
+_PRUNE_STAMP_FILE     = migrate_legacy_runtime_state_file(".last_context_prune")
 _DEFAULT_TTL          = 60   # minutes — live context window
 _AUDIT_TTL_DAYS       = 30   # days  — how long audit entries are kept
 
@@ -121,7 +123,7 @@ _AWAITING_INSTRUCTIONS: Dict[str, str] = {
         "     destination=str(<Keyword_path>).\n"
         "  5. Single word after 'to' (e.g. 'to qwerty') → "
         "     destination=str(Downloads / 'qwerty').\n"
-        "  6. No destination at all → use default workspace data folder.\n"
+        "  6. No destination at all → use default workspace your_data folder.\n"
         "Pass destination= to collect_files_from_manifest(). NEVER leave it empty when "
         "the user named a folder."
     ),
@@ -172,7 +174,7 @@ def write_context(
     scope: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Persist resolved context to <workspace>/data/octa_context.json.
+    Persist resolved context to <workspace>/your_data/octa_context.json.
 
     Call this immediately after any agent action that produces data the user
     will need to reference in their next turn ("2 PM", "the first one", etc.).

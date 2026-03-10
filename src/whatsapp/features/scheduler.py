@@ -17,14 +17,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
+
 logger = logging.getLogger("whatsapp_agent")
 
-_SCHEDULED_PATH = (
-    Path(__file__).parent.parent.parent.parent / "data" / "whatsapp_scheduled.json"
-)
-_AUTO_REPLY_PATH = (
-    Path(__file__).parent.parent.parent.parent / "data" / "whatsapp_auto_reply.json"
-)
+_SCHEDULED_PATH = migrate_legacy_runtime_state_file("whatsapp_scheduled.json")
+_AUTO_REPLY_PATH = migrate_legacy_runtime_state_file("whatsapp_auto_reply.json")
 _lock = threading.Lock()
 _scheduler_started = False
 

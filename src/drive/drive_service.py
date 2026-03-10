@@ -28,6 +28,8 @@ from typing import Any, Dict, List, Optional
 
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
+from src.agent.runtime_paths import get_your_data_dir
+
 from .drive_auth import get_drive_service
 
 logger = logging.getLogger("drive_agent.drive_service")
@@ -284,7 +286,7 @@ def download_file(
 
     Args:
         file_id:     The Drive file ID.
-        destination: Local directory or file path (defaults to current directory).
+        destination: Local directory or file path (defaults to <workspace>/your_data/drive_downloads).
 
     Returns:
         Dict with status and local path.
@@ -296,7 +298,7 @@ def download_file(
         file_name = meta.get("name", file_id)
         mime = meta.get("mimeType", "")
 
-        dest_dir = Path(destination) if destination else Path.cwd()
+        dest_dir = Path(destination) if destination else get_your_data_dir("drive_downloads", create=True)
         if dest_dir.is_dir():
             dest_path = dest_dir / file_name
         else:
@@ -838,8 +840,8 @@ def convert_document(
     Args:
         file_id:       Drive file ID of a Google Workspace document.
         output_format: Target format: 'pdf', 'docx', 'xlsx', 'pptx', 'csv', 'txt', 'html'.
-        save_path:     Local path to save the exported file.  If empty, saves to the
-                       user's Downloads folder.
+        save_path:     Local path to save the exported file.  If empty, saves to
+                       <workspace>/your_data/drive_exports.
 
     Returns:
         Dict with file_path of the downloaded export.
@@ -858,9 +860,8 @@ def convert_document(
         meta = svc.files().get(fileId=file_id, fields="id,name").execute()
         base_name = os.path.splitext(meta.get("name", file_id))[0]
         if not save_path:
-            dl = Path.home() / "Downloads"
-            dl.mkdir(exist_ok=True)
-            save_path = str(dl / f"{base_name}.{fmt}")
+            export_dir = get_your_data_dir("drive_exports", create=True)
+            save_path = str(export_dir / f"{base_name}.{fmt}")
 
         request = svc.files().export_media(fileId=file_id, mimeType=mime)
         buf = io.BytesIO()

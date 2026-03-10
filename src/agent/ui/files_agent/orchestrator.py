@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from src.agent.runtime_paths import get_your_data_dir
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 
@@ -26,7 +27,7 @@ def _build_skill_context() -> str:
     downloads = home / "Downloads"
     desktop   = home / "Desktop"
     documents = home / "Documents"
-    data_dir  = Path(__file__).resolve().parents[4] / "data"
+    data_dir  = get_your_data_dir()
 
     # Detect Windows drive roots so the LLM knows about C:\-level folders
     drive_root_note = ""

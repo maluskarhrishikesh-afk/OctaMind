@@ -1,4 +1,4 @@
-# WhatsApp Agent — Setup & Testing Guide
+# WhatsApp Agent ï¿½ Setup & Testing Guide
 
 This guide walks you through setting up the Octa Bot WhatsApp Agent from
 scratch using the **Meta WhatsApp Cloud API** (the official Business API).
@@ -8,15 +8,15 @@ scratch using the **Meta WhatsApp Cloud API** (the official Business API).
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
-2. [Step 1 — Create a Meta Developer App](#step-1--create-a-meta-developer-app)
-3. [Step 2 — Get Your Credentials](#step-2--get-your-credentials)
-4. [Step 3 — Configure Octa Bot](#step-3--configure-Octa Bot)
-5. [Step 4 — Install Python Dependencies](#step-4--install-python-dependencies)
-6. [Step 5 — Start the Webhook Server](#step-5--start-the-webhook-server)
-7. [Step 6 — Expose the Webhook with ngrok](#step-6--expose-the-webhook-with-ngrok)
-8. [Step 7 — Register the Webhook in Meta Console](#step-7--register-the-webhook-in-meta-console)
-9. [Step 8 — Create a WhatsApp Agent in Octa Bot](#step-8--create-a-whatsapp-agent-in-Octa Bot)
-10. [Step 9 — Add Test Recipients](#step-9--add-test-recipients)
+2. [Step 1 ï¿½ Create a Meta Developer App](#step-1--create-a-meta-developer-app)
+3. [Step 2 ï¿½ Get Your Credentials](#step-2--get-your-credentials)
+4. [Step 3 ï¿½ Configure Octa Bot](#step-3--configure-Octa Bot)
+5. [Step 4 ï¿½ Install Python Dependencies](#step-4--install-python-dependencies)
+6. [Step 5 ï¿½ Start the Webhook Server](#step-5--start-the-webhook-server)
+7. [Step 6 ï¿½ Expose the Webhook with ngrok](#step-6--expose-the-webhook-with-ngrok)
+8. [Step 7 ï¿½ Register the Webhook in Meta Console](#step-7--register-the-webhook-in-meta-console)
+9. [Step 8 ï¿½ Create a WhatsApp Agent in Octa Bot](#step-8--create-a-whatsapp-agent-in-Octa Bot)
+10. [Step 9 ï¿½ Add Test Recipients](#step-9--add-test-recipients)
 11. [Testing Each Tool Category](#testing-each-tool-category)
 12. [Production Migration (Optional)](#production-migration-optional)
 13. [Troubleshooting](#troubleshooting)
@@ -27,14 +27,14 @@ scratch using the **Meta WhatsApp Cloud API** (the official Business API).
 
 ```
 Your Phone (WhatsApp)
-        ¦  sends message
+        ï¿½  sends message
         ?
   Meta Cloud API ----------? Webhook POST ----------? FastAPI receiver
   (graph.facebook.com)        to ngrok URL             (port 9001)
-                                                              ¦
+                                                              ï¿½
                                                     writes to data/
                                                     whatsapp_messages.json
-                                                              ¦
+                                                              ï¿½
                                                               ?
   Meta Cloud API ?---- Octa Bot Agent ?---- WhatsApp Agent UI
   (sends messages)      (reads store)         (Streamlit, port 850x)
@@ -48,7 +48,7 @@ Your Phone (WhatsApp)
 
 ---
 
-## Step 1 — Create a Meta Developer App
+## Step 1 ï¿½ Create a Meta Developer App
 
 1. Go to [developers.facebook.com](https://developers.facebook.com) and log in with your Facebook account.
 
@@ -62,11 +62,11 @@ Your Phone (WhatsApp)
 
 6. Accept the Terms of Service when prompted.
 
-You now have a WhatsApp Business Platform app.  Meta automatically provisions a **test phone number** for you — this is free and has a limit of 5 recipient numbers.
+You now have a WhatsApp Business Platform app.  Meta automatically provisions a **test phone number** for you ï¿½ this is free and has a limit of 5 recipient numbers.
 
 ---
 
-## Step 2 — Get Your Credentials
+## Step 2 ï¿½ Get Your Credentials
 
 ### 2a. Access Token
 
@@ -80,7 +80,7 @@ You now have a WhatsApp Business Platform app.  Meta automatically provisions a 
    > - Generate a token with scope `whatsapp_business_messaging` and `whatsapp_business_management`
    > - This token is permanent (does not expire)
 
-3. Copy the access token — this is your `WHATSAPP_ACCESS_TOKEN`.
+3. Copy the access token ï¿½ this is your `WHATSAPP_ACCESS_TOKEN`.
 
 ### 2b. Phone Number ID
 
@@ -88,7 +88,7 @@ You now have a WhatsApp Business Platform app.  Meta automatically provisions a 
 
 2. The **Phone number ID** is shown below the phone number (it's a long numeric string like `123456789012345`).
 
-3. Copy it — this is your `WHATSAPP_PHONE_NUMBER_ID`.
+3. Copy it ï¿½ this is your `WHATSAPP_PHONE_NUMBER_ID`.
 
 ### 2c. Verify Token (you create this)
 
@@ -96,7 +96,7 @@ Make up any secret string to use as your webhook verify token (example: `Octa Bo
 
 ---
 
-## Step 3 — Configure Octa Bot
+## Step 3 ï¿½ Configure Octa Bot
 
 Open `config/settings.json` and fill in the `whatsapp` section:
 
@@ -115,12 +115,12 @@ Open `config/settings.json` and fill in the `whatsapp` section:
 |-------|-------------|
 | `access_token` | Your Meta access token (permanent system user token recommended) |
 | `phone_number_id` | The Phone Number ID from WhatsApp ? API Setup (NOT the phone number itself) |
-| `verify_token` | Any secret string you choose — must match what you put in Meta console |
+| `verify_token` | Any secret string you choose ï¿½ must match what you put in Meta console |
 | `webhook_port` | Port for the local webhook receiver (default 9001) |
 
 ---
 
-## Step 4 — Install Python Dependencies
+## Step 4 ï¿½ Install Python Dependencies
 
 The WhatsApp agent requires two additional packages:
 
@@ -133,13 +133,13 @@ source .venv/bin/activate       # macOS/Linux
 pip install fastapi uvicorn requests python-dateutil
 ```
 
-> `fastapi` + `uvicorn` — webhook receiver  
-> `requests` — Meta Cloud API calls  
-> `python-dateutil` — natural language date parsing for scheduler  
+> `fastapi` + `uvicorn` ï¿½ webhook receiver  
+> `requests` ï¿½ Meta Cloud API calls  
+> `python-dateutil` ï¿½ natural language date parsing for scheduler  
 
 ---
 
-## Step 5 — Start the Webhook Server
+## Step 5 ï¿½ Start the Webhook Server
 
 The webhook server receives inbound messages from Meta.  Start it in a separate terminal:
 
@@ -159,7 +159,7 @@ Verify it's running: http://localhost:9001/health should return `{"status": "hea
 
 ---
 
-## Step 6 — Expose the Webhook with ngrok
+## Step 6 ï¿½ Expose the Webhook with ngrok
 
 Meta requires a **public HTTPS URL** for the webhook.  Use ngrok to create a tunnel:
 
@@ -173,13 +173,13 @@ You'll see output like:
 Forwarding  https://abc123def456.ngrok-free.app  ->  http://localhost:9001
 ```
 
-Copy the HTTPS URL (e.g. `https://abc123def456.ngrok-free.app`) — you'll need it in the next step.
+Copy the HTTPS URL (e.g. `https://abc123def456.ngrok-free.app`) ï¿½ you'll need it in the next step.
 
 > ?? **ngrok free tier** resets the URL every time you restart.  For persistent URLs, use ngrok's paid plan or deploy the webhook to a cloud server.
 
 ---
 
-## Step 7 — Register the Webhook in Meta Console
+## Step 7 ï¿½ Register the Webhook in Meta Console
 
 1. In your Meta app dashboard, go to **WhatsApp ? Configuration**.
 
@@ -199,7 +199,7 @@ Copy the HTTPS URL (e.g. `https://abc123def456.ngrok-free.app`) — you'll need it
 
 ---
 
-## Step 8 — Create a WhatsApp Agent in Octa Bot
+## Step 8 ï¿½ Create a WhatsApp Agent in Octa Bot
 
 1. Start the Octa Bot Agent Hub:
    ```bash
@@ -219,7 +219,7 @@ Copy the HTTPS URL (e.g. `https://abc123def456.ngrok-free.app`) — you'll need it
 
 ---
 
-## Step 9 — Add Test Recipients
+## Step 9 ï¿½ Add Test Recipients
 
 The Meta sandbox allows you to send messages to up to **5 registered test phone numbers**.
 
@@ -229,7 +229,7 @@ The Meta sandbox allows you to send messages to up to **5 registered test phone 
 
 3. Add up to 5 phone numbers (these must be real WhatsApp accounts).
 
-4. Each number will receive a verification code — they must opt in.
+4. Each number will receive a verification code ï¿½ they must opt in.
 
 5. Once registered, you can send messages to these numbers via Octa Bot.
 
@@ -438,7 +438,7 @@ To send to any WhatsApp number (not just 5 test recipients):
 | `WhatsApp credentials not configured` banner | `access_token` or `phone_number_id` missing in settings.json | Fill in both fields |
 | Webhook verification fails | Verify token mismatch | Check `verify_token` matches in settings.json AND Meta console |
 | Messages not received | Webhook not running or not reachable | Ensure `uvicorn` is running and ngrok is active |
-| `RuntimeError: WhatsApp API error` | Invalid access token | Token expired or wrong — regenerate in Meta console |
+| `RuntimeError: WhatsApp API error` | Invalid access token | Token expired or wrong ï¿½ regenerate in Meta console |
 | `Could not parse send_time` | Unusual date format | Use ISO format: `2025-12-25 09:00` or simple phrases: `tomorrow 9am` |
 | Outbound message succeeds but not delivered | Recipient not in test list | Add recipient to test numbers (Step 9) |
 | `fastapi is not installed` | Missing dependency | Run `pip install fastapi uvicorn` |
@@ -447,7 +447,7 @@ To send to any WhatsApp number (not just 5 test recipients):
 ### Checking the webhook is working
 
 1. Send a WhatsApp message **to** your Meta test number from your phone.
-2. Check the webhook server terminal — you should see:
+2. Check the webhook server terminal ï¿½ you should see:
    ```
    INFO: Inbound WhatsApp: from=919876543210 type=text body=Hello...
    ```
@@ -458,6 +458,6 @@ To send to any WhatsApp number (not just 5 test recipients):
 
 - Webhook server: console output (uvicorn)
 - WhatsApp agent: `whatsapp_agent.log` in the project root
-- Message store: `data/whatsapp_messages.json`
-- Scheduled messages: `data/whatsapp_scheduled.json`
-- Auto-reply config: `data/whatsapp_auto_reply.json`
+- Message store: `your_data/whatsapp_messages.json`
+- Scheduled messages: `your_data/whatsapp_scheduled.json`
+- Auto-reply config: `your_data/whatsapp_auto_reply.json`

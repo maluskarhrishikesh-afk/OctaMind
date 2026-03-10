@@ -47,13 +47,16 @@ config/drive_token.json
 config/calendar_token.json
 config/settings.json
 
-# ── Runtime data (user-specific, potentially sensitive) ───────────────────────
-# This directory holds all live application data including:
-#   - assistants.json      → Telegram bot tokens, channel configs
-#   - *_messages.json      → private message histories
-#   - habits/links/etc.    → personal user data
-#   - exports/             → user data exports (contacts, analysis PDFs, reports)
+# ── Legacy runtime data (user-specific, potentially sensitive) ───────────────
+# Older installs may still have state under data/.
+# Canonical generated artifacts and selected runtime state now live under your_data/.
 data/
+
+# ── Generated user artifacts (workspace-local outputs) ────────────────────────
+# All user-facing artifacts now default to your_data/ for cross-platform behavior.
+# Keep the folder README committed, but ignore generated contents.
+your_data/*
+!your_data/README.md
 
 # Agent registry & runtime state (machine-specific, may contain tokens)
 agents.json

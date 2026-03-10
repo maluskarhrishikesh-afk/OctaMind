@@ -72,14 +72,14 @@ def _notify_user(session_id: str, pa_id: str, message: str) -> None:
 
 def _write_dashboard_notification(session_id: str, message: str) -> None:
     """
-    Append a completion notification to data/octa_job_notifications.json
+    Append a completion notification to your_data/octa_job_notifications.json
     so the PA dashboard can show it on next auto-refresh.
     """
     import json as _json
-    from pathlib import Path as _Path
     from datetime import datetime as _dt, timezone as _tz
+    from src.agent.runtime_paths import migrate_legacy_runtime_state_file
 
-    notify_file = _Path(__file__).resolve().parents[3] / "data" / "octa_job_notifications.json"
+    notify_file = migrate_legacy_runtime_state_file("octa_job_notifications.json")
     try:
         existing: list = []
         if notify_file.exists():

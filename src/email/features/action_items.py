@@ -8,14 +8,14 @@ import json
 import logging
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, List, Optional
+
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
 
 logger = logging.getLogger("email_agent.features.action_items")
 
 # Persistent task storage
-_TASKS_FILE = Path(__file__).parent.parent.parent.parent / \
-    "data" / "action_items.json"
+_TASKS_FILE = migrate_legacy_runtime_state_file("action_items.json")
 
 
 def _load_tasks() -> List[Dict]:

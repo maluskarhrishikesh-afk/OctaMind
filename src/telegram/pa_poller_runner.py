@@ -67,7 +67,9 @@ def main() -> None:
     if persona:
         os.environ["TELEGRAM_AUTO_REPLY_PERSONA"] = persona
     # Per-PA message store so chats don't mix across assistants
-    data_file = str(_ROOT / "data" / f"tg_{pa_id}.json")
+    from src.agent.runtime_paths import get_runtime_state_path
+
+    data_file = str(get_runtime_state_path(f"tg_{pa_id}.json", create_parent=True))
     os.environ["TELEGRAM_DATA_FILE"] = data_file
 
     logger.info("=== Telegram Poller for PA: %s (%s) ===", pa["name"], pa_id)

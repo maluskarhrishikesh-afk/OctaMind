@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
 
+from src.agent.runtime_paths import get_your_data_dir
+
 from ..files_service import resolve_path, _fmt_size
 
 logger = logging.getLogger("files_agent")
@@ -88,7 +90,7 @@ def zip_folder(
 
     Args:
         folder_path: Path to the folder to zip.
-        output_path: Destination .zip path. Defaults to Downloads/<folder>.zip.
+        output_path: Destination .zip path. Defaults to <workspace>/your_data/archives/<folder>.zip.
 
     Accepts ``path``, ``folder``, ``source_path``, and ``source`` as aliases
     for ``folder_path`` so small LLM kwarg-naming mistakes don't break the plan.
@@ -106,12 +108,8 @@ def zip_folder(
         if output_path:
             out_str = output_path
         else:
-            # Default to Downloads so the zip is always written to a writable
-            # user location — placing it next to the source folder fails when
-            # the source is under C:\Windows\, C:\Program Files\, etc.
-            downloads = Path.home() / "Downloads"
-            downloads.mkdir(parents=True, exist_ok=True)
-            out_str = str(downloads / (folder.name + ".zip"))
+            archive_dir = get_your_data_dir("archives", create=True)
+            out_str = str(archive_dir / (folder.name + ".zip"))
 
         return zip_files([folder_path], out_str)
     except Exception as exc:

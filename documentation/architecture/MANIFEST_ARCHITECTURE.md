@@ -125,7 +125,7 @@ the last one left off.
 ┌────────────────────────▼────────────────────────────────┐
 │                      STATE LAYER                        │
 │                                                         │
-│   Manifest Files  (~/Downloads/OctaMind/)               │
+│   Manifest Files  (<workspace>/your_data/)              │
 │   • Stores WHAT was found / resolved / decided          │
 │   • Deterministic — no inference needed to read it      │
 │   • Survives process restarts                           │
@@ -218,7 +218,7 @@ Session state extracts *linguistic entities* from natural language (`Conversatio
 
 ### 4.1 Context Manifest — Conversational State
 
-**File:** `<workspace>/data/octa_context.json`
+**File:** `<workspace>/your_data/octa_context.json`
 
 **Purpose:** Store resolved entities and pending intent from the current
 conversation so the next turn has full context without re-asking the user.
@@ -344,7 +344,7 @@ can copy/move/zip all of them — not just the few that fit in the LLM reply.
 **Format:** Plain text, one absolute path per line.
 ```
 C:\Users\malus\Pictures\family\birthday.jpg
-C:\Users\malus\Downloads\wallpaper.png
+C:\Hrishikesh\OctaMind\your_data\wallpaper.png
 C:\Users\malus\Documents\scan_001.tiff
 ...
 ```
@@ -393,7 +393,7 @@ a single "undo" command, and reviewed via the audit history.
 [
   {
     "type":        "copy",
-    "destination": "C:\\Users\\malus\\Downloads\\qwerty",
+    "destination": "C:\\Hrishikesh\\OctaMind\\your_data\\qwerty",
     "count":       802,
     "timestamp":   "2026-03-06T14:05:22",
     "undone":      false
@@ -428,7 +428,7 @@ a single "undo" command, and reviewed via the audit history.
 
 ### 4.4 Job Manifest — Background Tasks
 
-**File:** `<workspace>/data/octa_jobs.json`  
+**File:** `<workspace>/your_data/octa_jobs.json`  
 **Status:** ✅ LIVE (Phase 3 complete — March 2026)
 
 **Purpose:** Long-running tasks (scanning all drives, generating a large
@@ -448,7 +448,7 @@ for status at any time, even from a different session.
       "status": "running",
       "progress_pct": 67,
       "progress_detail": "Scanned 312 of 467 folders",
-      "result_manifest": "~/Downloads/OctaMind/octa_manifest.txt",
+      "result_manifest": "<workspace>/your_data/octa_manifest.txt",
       "started_by": "pa_7ea1659c",
       "estimated_done_at": "2026-03-05T14:06:00"
     }
@@ -521,7 +521,7 @@ immediately. The background worker updates progress. The user polls status.
 
 ### 4.5 Workflow Manifest — Multi-Step Pipelines
 
-**File:** `~/Downloads/OctaMind/octa_workflow_{id}.json`  
+**File:** `<workspace>/your_data/octa_workflow_{id}.json`  
 **Status:** 🔲 PLANNED
 
 **Purpose:** When a task spans multiple agents and can fail midway, the
@@ -546,7 +546,7 @@ the failure point — not from the beginning.
     {
       "stage": "extract_text",
       "status": "completed",
-      "output_dir": "~/Downloads/OctaMind/extracted/",
+      "output_dir": "<workspace>/your_data/extracted/",
       "completed_at": "2026-03-05T15:03:45"
     },
     {
@@ -576,7 +576,7 @@ the failure point — not from the beginning.
 
 ### 4.6 Index Manifest — Local File Search Engine
 
-**File:** `~/Downloads/OctaMind/octa_index.json`  
+**File:** `<workspace>/your_data/octa_index.json`  
 **Status:** 🔲 PLANNED
 
 **Purpose:** An incremental, hash-based index of the entire file system.
@@ -796,7 +796,7 @@ Resolves the calendar / email / files "follow-up ambiguity" class of bugs.
 - Explicit `save_context` LLM tool in all 4 agents for edge cases auto-wrap misses
 - 6 `awaiting` types with per-type LLM instructions:
   - `time_selection`, `event_selection`, `email_action`, `file_action`, `drive_file_action`, `confirmation`
-- TTL: 60 minutes (configurable). Context file: `~/Downloads/OctaMind/octa_context.json`
+- TTL: 60 minutes (configurable). Context file: `<workspace>/your_data/octa_context.json`
 
 **Architecture (dual-layer reliability):**
 - **Layer 1 'auto-wrap'**: listing tools in orchestrators call `auto_save_*` as passthrough — context written WITHOUT LLM involvement. Guaranteed on every relevant call.

@@ -39,7 +39,7 @@ For requests like *"summarise the last 5 emails from X"* or *"give me a report o
 | Step | Action |
 |------|--------|
 | 1. Fetch | `fetch_emails_to_markdown(query="from:X", max_results=N)` — one call, all bodies |
-| 2. Write PDF | `write_pdf_report(path="C:/Users/malus/Downloads/email_summary_<sender>.pdf", title="...", content={s1.report_content})` |
+| 2. Write PDF | `write_pdf_report(path="<workspace>/your_data/reports/email_summary_<sender>.pdf", title="...", content={s1.report_content})` |
 | 3. Deliver | If user said *"email it"* → `send_email_with_attachment`; otherwise → `deliver_file(path)` |
 
 **PDF content structure:**
