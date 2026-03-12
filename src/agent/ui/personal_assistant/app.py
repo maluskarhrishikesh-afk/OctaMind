@@ -14,7 +14,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import streamlit as st
@@ -639,6 +639,164 @@ import threading as _threading
 _dashboard_chat_lock = _threading.Lock()
 
 
+def _channel_badge_html(source: str) -> str:
+    """Render a compact channel pill for non-dashboard messages."""
+    normalized = str(source or "dashboard").strip().lower()
+    palette = {
+        "dashboard": ("Dashboard", "#1d4ed8", "#dbeafe"),
+        "telegram": ("Telegram", "#0284c7", "#e0f2fe"),
+        "whatsapp": ("WhatsApp", "#16a34a", "#dcfce7"),
+        "api": ("API", "#7c3aed", "#ede9fe"),
+    }
+    label, bg, fg = palette.get(normalized, (normalized.title(), "#475569", "#e2e8f0"))
+    return (
+        f"<div style='margin-bottom:0.35rem;'>"
+        f"<span style='display:inline-flex;align-items:center;gap:0.35rem;"
+        f"padding:0.18rem 0.55rem;border-radius:999px;background:{bg};color:{fg};"
+        f"font-size:0.72rem;font-weight:700;letter-spacing:0.02em;'>"
+        f"{label}</span></div>"
+    )
+
+
+def _chat_container_height(message_count: int, embedded_mode: bool, processing: bool) -> int:
+    """Return a tighter adaptive chat viewport height to avoid large empty gaps."""
+    max_height = 460 if embedded_mode else 560
+    min_height = 170 if embedded_mode else 320
+    estimated = 120 + min(message_count, 8) * 72
+    if processing:
+        estimated += 120
+    return max(min_height, min(max_height, estimated))
+
+
+def _normalize_dashboard_message(message: dict, default_source: str = "dashboard") -> dict | None:
+    """Normalize a persisted chat message into the dashboard message shape."""
+    role = str(message.get("role", "assistant"))
+    content = str(message.get("content", "")).strip()
+    if not content:
+        return None
+
+    normalized = {
+        "role": role,
+        "content": content,
+        "channel_source": str(message.get("channel_source") or default_source),
+    }
+    artifact_paths = message.get("artifact_paths")
+    if isinstance(artifact_paths, list) and artifact_paths:
+        normalized["artifact_paths"] = artifact_paths
+    ts = message.get("ts")
+    if ts:
+        normalized["ts"] = str(ts)
+    return normalized
+
+
+def _dashboard_message_fingerprint(message: dict) -> tuple:
+    """Build a stable fingerprint for merge/dedupe across dashboard + channel history."""
+    return (
+        str(message.get("role", "assistant")),
+        str(message.get("content", "")),
+        str(message.get("channel_source", "dashboard")),
+        str(message.get("ts", "")),
+        tuple(message.get("artifact_paths", []) or []),
+    )
+
+
+def _merge_dashboard_history(existing_messages: list[dict], new_messages: list[dict]) -> list[dict]:
+    """Merge persisted and in-memory dashboard history without dropping mirrored channel turns."""
+    merged: list[dict] = []
+    seen: set[tuple] = set()
+
+    for raw_message in [*existing_messages, *new_messages]:
+        normalized = _normalize_dashboard_message(raw_message)
+        if not normalized:
+            continue
+        fingerprint = _dashboard_message_fingerprint(normalized)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        merged.append(normalized)
+
+    return merged
+
+
+def _load_pa_telegram_chat_ids(pa_id: str) -> set[str]:
+    """Load Telegram chat ids seen by the PA-specific poller runtime file."""
+    from src.agent.runtime_paths import get_runtime_state_path
+
+    tg_path = get_runtime_state_path(f"tg_{pa_id}.json")
+    if not tg_path.exists():
+        return set()
+
+    try:
+        data = _json.loads(tg_path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+
+    chat_ids: set[str] = set()
+    for entry in data.get("messages") or []:
+        chat_id = entry.get("chat_id")
+        if chat_id is not None:
+            chat_ids.add(str(chat_id))
+    return chat_ids
+
+
+def _load_dashboard_chat(pa_id: str) -> list[dict]:
+    """Load unified dashboard + linked channel history for a Personal Assistant."""
+    session_id = f"dashboard_{pa_id}"
+    if not _CONV_PATH.exists():
+        return []
+
+    try:
+        data = _json.loads(_CONV_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    telegram_chat_ids = _load_pa_telegram_chat_ids(pa_id)
+    sessions = data.get("sessions") or {}
+    restored: list[dict] = []
+
+    for current_session_id, session in sessions.items():
+        session = session or {}
+        session_source = str(session.get("source") or "dashboard")
+        session_agent_id = str(session.get("agent_id") or "").strip()
+        include_session = current_session_id == session_id or session_agent_id == pa_id
+
+        if not include_session and session_source == "telegram" and current_session_id.startswith("telegram_"):
+            chat_id = current_session_id.removeprefix("telegram_")
+            include_session = chat_id in telegram_chat_ids
+
+        if not include_session:
+            continue
+
+        for message in session.get("messages") or []:
+            entry = _normalize_dashboard_message(message, default_source=session_source)
+            if entry:
+                restored.append(entry)
+
+    restored.sort(key=lambda item: str(item.get("ts") or ""))
+
+    merged: list[dict] = []
+    seen: set[tuple] = set()
+    for item in restored:
+        fingerprint = _dashboard_message_fingerprint(item)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        merged.append(item)
+    return merged
+
+
+def _append_chat_message(pa_id: str, state_key: str, role: str, content: str, **extras) -> None:
+    """Append a chat message with stable metadata so unified history can merge correctly."""
+    entry = {
+        "role": role,
+        "content": content,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    entry.update(extras)
+    st.session_state[state_key].append(entry)
+    _persist_dashboard_chat(pa_id, st.session_state[state_key])
+
+
 def _persist_dashboard_chat(pa_id: str, messages: list) -> None:
     """
     Write the current Dashboard chat session to hub_conversations.json so
@@ -650,10 +808,6 @@ def _persist_dashboard_chat(pa_id: str, messages: list) -> None:
 
     session_id = f"dashboard_{pa_id}"
     now_iso = datetime.now(_tz.utc).isoformat()
-    history = [
-        {"role": m["role"], "content": str(m["content"])[:500], "ts": now_iso}
-        for m in messages
-    ]
     try:
         with _dashboard_chat_lock:
             data: dict = {}
@@ -663,6 +817,18 @@ def _persist_dashboard_chat(pa_id: str, messages: list) -> None:
                 except Exception:  # noqa: BLE001
                     data = {}
             sessions = data.setdefault("sessions", {})
+            existing_session = sessions.get(session_id) or {}
+            existing_history = list(existing_session.get("messages") or [])
+            new_history = []
+            for message in messages:
+                if not isinstance(message, dict):
+                    continue
+                entry = _normalize_dashboard_message(message)
+                if not entry:
+                    continue
+                entry["ts"] = str(message.get("ts") or now_iso)
+                new_history.append(entry)
+            history = _merge_dashboard_history(existing_history, new_history)
             sessions[session_id] = {
                 "source": "dashboard",
                 "session_id": session_id,
@@ -1051,6 +1217,7 @@ def _render_pa_chat(pa: dict) -> None:
     pa_id   = pa["id"]
     pa_name = pa["name"]
     pa_skills = set(pa.get("skills", []))
+    embedded_mode = str(st.query_params.get("embedded", "")).strip().lower() in {"1", "true", "yes", "on"}
 
     mk = lambda key: _pa_k(pa_id, key)
 
@@ -1072,15 +1239,19 @@ def _render_pa_chat(pa: dict) -> None:
 
     # ── Session state (per PA) ────────────────────────────────────────────────
     if mk("messages") not in st.session_state:
-        st.session_state[mk("messages")] = [{
-            "role": "assistant",
-            "content": (
-                f"👋 Hey! I'm **{pa_name}**, your personal AI assistant. "
-                "I'm ready to work — just tell me what you need! ⚡\n\n"
-                "💡 *Try something like: \"Check my emails\", \"What's on my calendar?\", "
-                "or \"Organise my downloads folder\".*"
-            ),
-        }]
+        restored_messages = _load_dashboard_chat(pa_id)
+        if restored_messages:
+            st.session_state[mk("messages")] = restored_messages
+        else:
+            st.session_state[mk("messages")] = [{
+                "role": "assistant",
+                "content": (
+                    f"👋 Hey! I'm **{pa_name}**, your personal AI assistant. "
+                    "I'm ready to work — just tell me what you need! ⚡\n\n"
+                    "💡 *Try something like: \"Check my emails\", \"What's on my calendar?\", "
+                    "or \"Organise my downloads folder\".*"
+                ),
+            }]
     if mk("processing") not in st.session_state:
         st.session_state[mk("processing")] = False
     if mk("command") not in st.session_state:
@@ -1137,7 +1308,7 @@ def _render_pa_chat(pa: dict) -> None:
         _changed = False
         for entry in _unread:
             _msg_text = entry.get("message", "✅ Background task complete.")
-            st.session_state[_msgs_key].append({"role": "assistant", "content": _msg_text})
+            _append_chat_message(pa_id, _msgs_key, "assistant", _msg_text)
             _changed = True
         # Trigger a full-app rerun so the new messages appear in the chat
         if _changed:
@@ -1145,13 +1316,107 @@ def _render_pa_chat(pa: dict) -> None:
 
     _job_notifications_fragment()
 
-    # ── Scrollable chat history area ──────────────────────────────────────────
-    # Fixed-height container keeps the chat input permanently visible below.
-    # All messages — including live status cards and the final reply — render
-    # inside this scrollable box, so the input is never pushed off-screen.
-    with st.container(height=560, border=False):
+    @st.fragment(run_every=2)
+    def _channel_sync_fragment() -> None:
+        """Refresh visible chat when mirrored channel messages arrive."""
+        if st.session_state[mk("processing")]:
+            return
+        persisted = _load_dashboard_chat(pa_id)
+        current = st.session_state.get(mk("messages"), [])
+        if not persisted or persisted == current:
+            return
+        st.session_state[mk("messages")] = persisted
+        st.rerun()
+
+    _channel_sync_fragment()
+
+    if embedded_mode:
+        _events_port = os.environ.get("PA_EVENTS_PORT", "").strip()
+        if _events_port:
+            try:
+                from src.agent.ui.personal_assistant.live_sync import ensure_live_sync_server
+
+                ensure_live_sync_server(int(_events_port))
+                import streamlit.components.v1 as _components
+
+                _components.html(
+                    f"""
+                    <script>
+                    (function() {{
+                        var sourceUrl = "http://127.0.0.1:{_events_port}/events?pa_id={pa_id}";
+                        if (window.__octaLiveSyncSource) {{
+                            window.__octaLiveSyncSource.close();
+                        }}
+                        var source = new EventSource(sourceUrl);
+                        window.__octaLiveSyncSource = source;
+                        source.addEventListener("chat-update", function() {{
+                            window.location.reload();
+                        }});
+                        window.addEventListener("beforeunload", function() {{
+                            source.close();
+                        }});
+                    }})();
+                    </script>
+                    """,
+                    height=0,
+                )
+            except Exception as exc:
+                logger.debug("Live sync bootstrap skipped: %s", exc)
+
+    try:
+        import streamlit.components.v1 as _components
+
+        _components.html(
+            f"""
+            <script>
+            (function() {{
+                function getHistoryNode() {{
+                    return document.querySelector('.st-key-chat_history_{pa_id}')
+                        || document.querySelector('[data-testid="stVerticalBlockBorderWrapper"].st-key-chat_history_{pa_id}')
+                        || document.querySelector('[class*="st-key-chat_history_{pa_id}"]');
+                }}
+                function scrollToBottom() {{
+                    var history = getHistoryNode();
+                    if (history) {{
+                        history.scrollTop = history.scrollHeight;
+                        var inner = history.querySelector('[data-testid="stVerticalBlock"]');
+                        if (inner) {{
+                            inner.scrollTop = inner.scrollHeight;
+                        }}
+                        return;
+                    }}
+                    var anchor = document.getElementById("chat-bottom-{pa_id}");
+                    if (anchor) {{
+                        anchor.scrollIntoView({{behavior: "instant", block: "end"}});
+                    }}
+                }}
+                scrollToBottom();
+                setTimeout(scrollToBottom, 40);
+                setTimeout(scrollToBottom, 180);
+                if (!window.__octaChatBottomObserver_{pa_id}) {{
+                    var observer = new MutationObserver(function() {{
+                        scrollToBottom();
+                    }});
+                    var historyNode = getHistoryNode() || document.body;
+                    observer.observe(historyNode, {{ childList: true, subtree: true }});
+                    window.__octaChatBottomObserver_{pa_id} = observer;
+                }}
+            }})();
+            </script>
+            """,
+            height=0,
+        )
+    except Exception:
+        pass
+
+    def _render_message_stream() -> tuple:
+        _card_placeholder = None
+        _result_placeholder = None
         for msg_idx, msg in enumerate(st.session_state[mk("messages")]):
             with st.chat_message(msg["role"]):
+                channel_source = str(msg.get("channel_source") or "dashboard")
+                if channel_source not in {"", "dashboard"}:
+                    st.markdown(_channel_badge_html(channel_source), unsafe_allow_html=True)
                 st.markdown(msg["content"])
                 if msg["role"] == "assistant":
                     _render_chat_artifacts(
@@ -1159,66 +1424,141 @@ def _render_pa_chat(pa: dict) -> None:
                         key_prefix=f"chat_artifact_{pa_id}_{msg_idx}",
                     )
 
-        # Sentinel anchor — JS below scrollIntoViews this to auto-scroll bottom
         st.markdown(
             f'<div id="chat-bottom-{pa_id}"></div>',
             unsafe_allow_html=True,
         )
 
-        # Pre-create the two live placeholders INSIDE the container (and inside
-        # a chat_message bubble) so status cards and the reply appear in-line
-        # with the conversation, not below the input bar.
-        _card_ph = None
-        _result_ph = None
         if _is_processing:
             with st.chat_message("assistant"):
-                _card_ph = st.empty()   # status card (thinking/planning/executing/done)
-                _result_ph = st.empty() # final reply text
+                _card_placeholder = st.empty()
+                _result_placeholder = st.empty()
+        return _card_placeholder, _result_placeholder
 
-    # ── Auto-scroll the chat container to the bottom (ChatGPT style) ─────────
-    try:
-        import streamlit.components.v1 as _components
-        _components.html(
-            f"""<script>
-            (function() {{
-                var anchor = window.parent.document.getElementById("chat-bottom-{pa_id}");
-                if (anchor) {{
-                    // scrollIntoView with block:"end" scrolls the overflow container, not page
-                    anchor.scrollIntoView({{behavior: "instant", block: "end"}});
-                }} else {{
-                    // Fallback: scroll all overflow-auto containers to bottom
-                    var scrollables = window.parent.document.querySelectorAll(
-                        '[data-testid="stVerticalBlockBorderWrapper"] > div'
-                    );
-                    scrollables.forEach(function(el) {{
-                        if (el.scrollHeight > el.clientHeight) {{
-                            el.scrollTop = el.scrollHeight;
-                        }}
-                    }});
-                }}
-            }})();
-            </script>""",
-            height=0,
+    if embedded_mode:
+        st.markdown(
+            f"""
+            <style>
+            .st-key-chat_shell_{pa_id} {{
+                flex: 1 1 auto;
+                min-height: 0;
+            }}
+            .st-key-chat_shell_{pa_id} > div,
+            .st-key-chat_shell_{pa_id} > div[data-testid="stVerticalBlock"] {{
+                min-height: 0;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+            }}
+            .st-key-chat_history_{pa_id} {{
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow-y: auto;
+                overflow-x: hidden;
+                padding-right: 0.3rem;
+                padding-bottom: 0.35rem;
+                scroll-behavior: smooth;
+            }}
+            .st-key-chat_history_{pa_id} > div,
+            .st-key-chat_history_{pa_id} > div[data-testid="stVerticalBlock"] {{
+                min-height: min-content;
+            }}
+            .st-key-chat_composer_{pa_id} {{
+                flex: 0 0 auto;
+                position: relative;
+                padding-top: 0.45rem;
+                margin-top: auto;
+                background: linear-gradient(180deg, rgba(15,23,42,0) 0%, rgba(15,23,42,0.94) 20%, rgba(15,23,42,1) 100%);
+                z-index: 35;
+            }}
+            .st-key-chat_composer_{pa_id} form {{
+                background: rgba(15,23,42,0.72);
+                border: 1px solid rgba(99,102,241,0.16);
+                border-radius: 22px;
+                padding: 0.35rem 0.35rem 0.35rem 0.85rem;
+                box-shadow: 0 18px 40px rgba(2,6,23,0.28);
+                backdrop-filter: blur(14px);
+            }}
+            .st-key-chat_composer_{pa_id} input {{
+                border-radius: 18px !important;
+                min-height: 3.1rem !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: transparent !important;
+                color: #e2e8f0 !important;
+                font-size: 0.98rem !important;
+            }}
+            .st-key-chat_composer_{pa_id} button {{
+                min-height: 3.1rem !important;
+                min-width: 3.1rem !important;
+                width: 3.1rem !important;
+                border-radius: 999px !important;
+                padding: 0 !important;
+                font-size: 1.25rem !important;
+                line-height: 1 !important;
+                box-shadow: 0 10px 24px rgba(79,70,229,0.28) !important;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
         )
-    except Exception:
-        pass  # Non-critical — auto-scroll is cosmetic only
+        with st.container(key=f"chat_shell_{pa_id}"):
+            with st.container(key=f"chat_history_{pa_id}"):
+                _card_ph, _result_ph = _render_message_stream()
+            with st.container(key=f"chat_composer_{pa_id}"):
+                with st.form(key=f"chat_form_{pa_id}", clear_on_submit=True, enter_to_submit=True):
+                    _input_cols = st.columns([8.8, 1.2])
+                    with _input_cols[0]:
+                        user_input = st.text_input(
+                            "Message",
+                            value="",
+                            placeholder=(
+                                f"Ask {pa_name}..." if not st.session_state[mk("processing")] else "Processing..."
+                            ),
+                            label_visibility="collapsed",
+                            disabled=st.session_state[mk("processing")],
+                            key=f"chat_text_input_{pa_id}",
+                        )
+                    with _input_cols[1]:
+                        submitted = st.form_submit_button(
+                            "↑",
+                            use_container_width=True,
+                            type="primary",
+                            disabled=st.session_state[mk("processing")],
+                        )
+                if submitted:
+                    user_input = (user_input or "").strip()
+                    if not user_input:
+                        st.toast("Type a message first.", icon="✍️")
+                    else:
+                        _append_chat_message(pa_id, mk("messages"), "user", user_input)
+                        st.session_state[mk("command")] = user_input
+                        st.session_state[mk("processing")] = True
+                        st.rerun()
+    else:
+        # ── Scrollable chat history area ──────────────────────────────────────
+        _chat_height = _chat_container_height(
+            len(st.session_state.get(mk("messages"), [])),
+            embedded_mode,
+            _is_processing,
+        )
+        with st.container(height=_chat_height, border=False):
+            _card_ph, _result_ph = _render_message_stream()
 
-    # ── Chat input — placed AFTER the container ───────────────────────────────
-    # Streamlit positions chat_input at the bottom of the viewport when it is
-    # not nested inside a scrollable container.  This gives a true fixed-bottom
-    # input bar without any JS injection.
-    user_input = st.chat_input(
-        f"Ask {pa_name}…" if not st.session_state[mk("processing")] else "⏳ Processing…",
-        key=f"chat_input_{pa_id}",
-    )
-    if user_input:
-        if st.session_state[mk("processing")]:
-            st.toast("⏳ Still thinking — please wait for the current response.", icon="⏳")
-        else:
-            st.session_state[mk("messages")].append({"role": "user", "content": user_input})
-            st.session_state[mk("command")] = user_input
-            st.session_state[mk("processing")] = True
-            st.rerun()
+    if not embedded_mode:
+        user_input = st.chat_input(
+            f"Ask {pa_name}…" if not st.session_state[mk("processing")] else "⏳ Processing…",
+            key=f"chat_input_{pa_id}",
+        )
+        if user_input:
+            if st.session_state[mk("processing")]:
+                st.toast("⏳ Still thinking — please wait for the current response.", icon="⏳")
+            else:
+                _append_chat_message(pa_id, mk("messages"), "user", user_input)
+                st.session_state[mk("command")] = user_input
+                st.session_state[mk("processing")] = True
+                st.rerun()
 
     # ── Process pending command ───────────────────────────────────────────────
     if not _is_processing:
@@ -1303,8 +1643,7 @@ def _render_pa_chat(pa: dict) -> None:
                 "- *'Find the project report and send it to my email'*"
             )
             _result_ph.markdown(_clarify_msg)
-            st.session_state[mk("messages")].append({"role": "assistant", "content": _clarify_msg})
-            _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+            _append_chat_message(pa_id, mk("messages"), "assistant", _clarify_msg)
             st.session_state[mk("processing")] = False
             st.rerun()
         # No pronoun reference either — treat as conversational
@@ -1321,10 +1660,10 @@ def _render_pa_chat(pa: dict) -> None:
             _no_skill_reply = (
                 f"⚠️ This request needs the {_m_str} skill{_sfx}, "
                 f"which {_verb} not enabled for **{pa_name}**.\n\n"
-                f"Go to the **Configure** tab → **Skills** to enable it."
+                f"Open **Configure** for this assistant from the Dashboard, or use this assistant's **Configure** tab → **Skills** to enable it."
             )
             _result_ph.markdown(_no_skill_reply)
-            st.session_state[mk("messages")].append({"role": "assistant", "content": _no_skill_reply})
+            _append_chat_message(pa_id, mk("messages"), "assistant", _no_skill_reply)
             st.session_state[mk("processing")] = False
             st.rerun()
         agents_needed = filtered
@@ -1340,8 +1679,7 @@ def _render_pa_chat(pa: dict) -> None:
         logger.info("└─ [PA:%s] Turn END (conversational)  elapsed=%.2fs", pa_name, time.perf_counter() - _t_turn)
         _card_ph.markdown(_status_card("✅ Done", [], "complete"), unsafe_allow_html=True)
         _result_ph.markdown(reply)
-        st.session_state[mk("messages")].append({"role": "assistant", "content": reply})
-        _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+        _append_chat_message(pa_id, mk("messages"), "assistant", reply)
         st.session_state[mk("processing")] = False
         st.rerun()
 
@@ -1435,8 +1773,7 @@ def _render_pa_chat(pa: dict) -> None:
             _msg_entry["search_paths"] = _found_paths
         if _artifact_paths:
             _msg_entry["artifact_paths"] = _artifact_paths
-        st.session_state[mk("messages")].append(_msg_entry)
-        _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+        _append_chat_message(pa_id, mk("messages"), "assistant", _save_msg, **{k: v for k, v in _msg_entry.items() if k not in {"role", "content"}})
         st.session_state[mk("processing")] = False
         st.rerun()
 
@@ -1459,8 +1796,8 @@ def _render_pa_chat(pa: dict) -> None:
         unsafe_allow_html=True)
 
     try:
-        # Enrich the command with structured Session State (last_found_paths,
-        # last_found_folder, dates, etc.) so the DAG planner can resolve context
+        # Enrich the command with structured Session State (bundle dir,
+        # file path, dates, etc.) so the DAG planner can resolve context
         # references like "them", "those files", "the folder" correctly.
         _enriched_for_workflow = _inject_conversation_context(
             command, st.session_state.get(mk("messages"), [])
@@ -1551,8 +1888,7 @@ def _render_pa_chat(pa: dict) -> None:
     _wf_msg: dict = {"role": "assistant", "content": final_text}
     if _wf_artifacts:
         _wf_msg["artifact_paths"] = _wf_artifacts
-    st.session_state[mk("messages")].append(_wf_msg)
-    _persist_dashboard_chat(pa_id, st.session_state[mk("messages")])
+    _append_chat_message(pa_id, mk("messages"), "assistant", final_text, artifact_paths=_wf_artifacts)
     logger.info(
         "└─ [PA:%s] Turn END (workflow agents=%s)  status=%s  elapsed=%.2fs",
         pa_name, agents_needed, run_result.get("status", "error"),
@@ -1906,6 +2242,7 @@ def _render_pa_configure(pa: dict) -> None:
 def main() -> None:
     logger.debug("=== MULTI-AGENT MAIN() CALLED ===")
     agent_id = os.getenv("AGENT_ID", "_collective_memory_")
+    embedded_mode = str(st.query_params.get("embedded", "")).strip().lower() in {"1", "true", "yes", "on"}
 
     # ── Single-PA mode: launched by process_manager for a specific PA ─────────
     pa_id_filter = os.getenv("PA_ID", "").strip()
@@ -1936,8 +2273,50 @@ def main() -> None:
     _start_browser_watchdog(agent_id)
     inject_agent_css(accent_hex="#7c3aed", accent_rgb="124,58,237")
 
-    # ── Single-PA mode: Chat + Live Channels + Configure tabs ─────────────────
+    # ── Single-PA mode: embedded dashboard chat or full standalone workspace ──
     if single_pa:
+        if embedded_mode:
+            st.markdown(
+                """
+                <style>
+                html, body, [data-testid="stAppViewContainer"], section.main {
+                    height: 100dvh;
+                    overflow: hidden !important;
+                }
+                header[data-testid="stHeader"],
+                [data-testid="stToolbar"],
+                [data-testid="stDecoration"],
+                [data-testid="stStatusWidget"],
+                #MainMenu {
+                    display: none !important;
+                }
+                .block-container {
+                    padding-top: 0.9rem !important;
+                    padding-bottom: 0.6rem !important;
+                    padding-left: 0.9rem !important;
+                    padding-right: 0.9rem !important;
+                    max-width: none !important;
+                    min-height: 100dvh !important;
+                    height: 100dvh !important;
+                    display: flex !important;
+                    flex-direction: column !important;
+                    overflow: hidden !important;
+                }
+                .block-container > div[data-testid="stVerticalBlock"] {
+                    flex: 1 1 auto !important;
+                    min-height: 0 !important;
+                    overflow: hidden !important;
+                }
+                div[data-testid="stVerticalBlockBorderWrapper"] {
+                    margin-bottom: 0 !important;
+                }
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
+            _render_pa_chat(single_pa)
+            return
+
         st.markdown(
             f"""
             <div style="background:linear-gradient(135deg, rgba(124,58,237,0.18) 0%, rgba(139,92,246,0.12) 100%);

@@ -3,6 +3,7 @@
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
 Last updated: 2026-03-08 (Session 7 — repo hygiene cleanup, persistent JSON error registry, runtime clutter policy)  
+Last updated: 2026-03-12 (Session 8 — dashboard-embedded PA workspace, unified Telegram/dashboard history, embedded chat-shell layout fix)  
 Last updated: 2026-03-07 (Session 6 — 6 pipeline architecture gaps fixed: trigger_keywords routing, keyed context store, scope field, auto-write context safety net, clear-after-delivery, search_paths in Dashboard messages)  
 Previous: 2026-03-06 (Session 5 — Calendar local timezone fix; copy destination Rule #1 fix; operation history stack with 30-day undo + list_file_operations tool; context audit history with 30-day auto-prune)  
 Previous: 2026-03-02 (Session 4 — Calendar year bug fixed; "send here" routing fixed; enriched scheduling context now propagated to agent execution; search_by_name sorts non-.lnk first; search_file_all_drives skips .lnk; skill_dag .id example fixed to .path; server restart still required)  
@@ -13,16 +14,50 @@ Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine cau
 
 ---
 
+## ✅ 2026-03-12 Session 8 — Embedded PA Workspace + Unified Chat History
+
+### 1. Dashboard-embedded Personal Assistant workspace
+
+**Problem:** Opening a Personal Assistant chat through the dashboard created a split experience and made navigation/history feel separate from the main hub.
+
+**Fix:**
+- The dashboard now opens each PA inside an embedded workspace instead of sending the user to a detached page.
+- Sidebar navigation owns Home / Back and section jumps.
+- PA cards now support direct Start Assistant, Open Chat, Configure, Telegram bot control, and Delete actions from the main dashboard.
+
+### 2. Unified Dashboard + Telegram conversation history
+
+**Problem:** Dashboard chat and Telegram chat were persisted as separate sessions, so reopening a PA did not always show the full conversation thread in one place.
+
+**Fix:**
+- Dashboard sessions are persisted under `dashboard_<pa_id>`.
+- Telegram sessions remain under `telegram_<chat_id>`.
+- The PA chat loader now merges the dashboard session with Telegram sessions linked to the same PA, including fallback mapping from `your_data/tg_<pa_id>.json`.
+- External channel turns are mirrored back into the dashboard session so the embedded workspace remains the canonical view.
+
+### 3. Embedded chat-shell ownership fix
+
+**Problem:** The embedded PA chat had competing layout layers claiming full viewport height, which could push the composer out of view and create a large gap between the last message and the input area.
+
+**Fix:**
+- Embedded mode now gives viewport ownership to the outer page shell only once.
+- The inner chat shell fills that container instead of claiming a second viewport height.
+- The transcript container owns scrolling.
+- The composer is rendered as the final flex child of the shell instead of a second sticky viewport layer.
+- The dashboard iframe runs with internal scrolling disabled so the transcript scrollbar is the only scroll surface inside the embedded chat.
+
+---
+
 ## ✅ 2026-03-08 Session 7 — Repository Hygiene + Persistent Error Registry
 
 ### 1. Safe runtime clutter cleanup policy
 
-**Problem:** The workspace accumulated generated artifacts in `data/`, root caches, and build directories. There was no written policy separating disposable clutter from live assistant state.
+**Problem:** The workspace accumulated generated artifacts in runtime folders, root caches, and build directories. There was no written policy separating disposable clutter from live assistant state.
 
 **Fix:**
 - Added [documentation/reference/REPO_HYGIENE.md](documentation/reference/REPO_HYGIENE.md)
 - Documented safe-to-delete targets such as `__pycache__/`, `.pytest_cache/`, `build/`, `dist/`, generated exports, transient prune stamps, and duplicate manifests
-- Explicitly documented which `data/` JSON files are live state and must not be deleted blindly
+- Explicitly documented which `your_data/` JSON files are live state and must not be deleted blindly
 
 ### 2. Persistent JSON error registry
 
@@ -149,7 +184,7 @@ This creates a durable backlog for improving `skills.md`, `skill_context.md`, an
 **Problem:** `last_operation.json` stored only a single entry — every new operation overwrote the previous one, making multi-step undo impossible and erasing the audit trail.
 
 **New architecture:**
-- `_OP_HISTORY_FILE` → `<workspace>/data/operation_history.json` (JSON array, newest first)
+- `_OP_HISTORY_FILE` → `<workspace>/your_data/operation_history.json` (JSON array, newest first)
 - `_OP_HISTORY_TTL_DAYS = 30` — entries older than 30 days pruned automatically
 - `_log_operation(op_type, destination, count)` — pushes to front; auto-prunes on every write
 - `undo_last_file_operation() → dict` — finds most-recent non-undone entry, deletes destination folder, marks `undone: true` + `undone_at` timestamp; entry kept for audit
@@ -457,7 +492,7 @@ All tools described in WHATSAPP_SETUP.md are implemented and wired to the Meta W
 | Analytics | get_message_stats, get_response_time, get_activity_report, get_top_senders | ? |
 | Cross-agent | forward_to_email, share_drive_file | ? |
 
-**Webhook server:** FastAPI + uvicorn on port 9001; inbound messages stored in `data/whatsapp_messages.json`.  
+**Webhook server:** FastAPI + uvicorn on port 9001; inbound messages stored in `your_data/whatsapp_messages.json`.  
 **Credentials:** Configured in `config/settings.json["whatsapp"]` � `access_token` + `phone_number_id` required.  
 **Setup:** Full guide at `documentation/WHATSAPP_SETUP.md`.
 
@@ -475,7 +510,7 @@ All tools described in TOOL_REFERENCE.md are implemented and wired to the Telegr
 | AI smart features | summarize_chat, detect_urgent_messages, draft_message, translate_message, sentiment_analysis, extract_action_items | ? |
 | Cross-agent | forward_to_email, share_drive_file | ? |
 
-**Polling:** Background thread runs `getUpdates` long-poll loop; messages stored in `data/telegram_messages.json`.  
+**Polling:** Background thread runs `getUpdates` long-poll loop; messages stored in `your_data/telegram_messages.json`.  
 **Credentials:** `TELEGRAM_BOT_TOKEN` env var or `config/settings.json["telegram"]["bot_token"]` � get token from **@BotFather**.  
 **Composite IDs:** All stored messages are addressed as `"chat_id:message_id"` (e.g. `"1001:5"`).  
 **Auto-responder (2026-03-02):** `auto_responder.py` rewritten — typing indicator, `⏳ Thinking…` placeholder edited in real-time, `/reset` (clear history), `/agents` (list skills), long-message splitting at 4000 chars, file-artifact delivery via `send_document_file()` multipart upload.
@@ -538,7 +573,7 @@ Approval-driven organisation with archival policies. No credentials required.
 | App data | cleanup_app_data | ? |
 
 **Registry key:** `file_organizer`  
-**Data stores:** `data/organizer_pending_plans.json`, `data/organizer_archival_policies.json`  
+**Data stores:** `your_data/organizer_pending_plans.json`, `your_data/organizer_archival_policies.json`  
 **Safety:** Never calls `apply_plan` without explicit user confirmation; all destructive ops default to `dry_run=True`.
 
 ### Habit & Health Tracker Agent � 9 Tools

@@ -4,157 +4,441 @@ Octa Bot Agent Hub — main Streamlit entry point.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 
 import streamlit as st
+import streamlit.components.v1 as components
 
-from src.agent.core.process_manager import cleanup_stale, get_agent_status
 from src.agent.core.agent_manager import get_agent_manager
-
-from src.agent.ui.dashboard.helpers import _logo_b64, _logo_icon
-from src.agent.ui.dashboard.styles import inject_css
-from src.agent.ui.dashboard.create_form import show_create_agent_form
+from src.agent.core.process_manager import cleanup_stale, get_agent_status
 from src.agent.ui.dashboard.agent_card import show_agent_card
 from src.agent.ui.dashboard.configure_panel import show_configure_panel
+from src.agent.ui.dashboard.create_form import show_create_agent_form
+from src.agent.ui.dashboard.helpers import _logo_b64, _logo_icon
 from src.agent.ui.dashboard.log_viewer import show_log_viewer
+from src.agent.ui.dashboard.styles import inject_css
 
 logger = logging.getLogger("Octa Bot.dashboard")
 
-# ---------------------------------------------------------------------------
-# One-time application startup (runs once per Streamlit worker process).
-# A module-level flag ensures this block does NOT re-execute on every
-# Streamlit hot-reload / page interaction.
-# ---------------------------------------------------------------------------
-_APP_INITIALIZED: bool = False
+_PA_SKILL_EXCLUDED_TYPES = {"telegram", "whatsapp", "custom"}
+_APP_INITIALIZED = False
+_NAV_STATE_KEYS = (
+    "show_create_form",
+    "configure_agent_id",
+    "configure_pa_id",
+    "show_log_viewer",
+    "show_create_pa_panel",
+    "active_pa_id",
+    "active_pa_url",
+    "dashboard_scroll_target",
+)
 
 
 def _startup() -> None:
-    """
-    Bootstrap tasks that must run exactly once when the app process starts:
-      1. Ensure _collective_memory_ memory files exist (creates them if absent).
-      2. Start the global consolidation background thread.
-    """
+    """Run one-time process startup hooks for the dashboard."""
     global _APP_INITIALIZED
     if _APP_INITIALIZED:
         return
     _APP_INITIALIZED = True
 
-    # 1 — Ensure multi-agent memory is ready from the very first launch
     try:
-        from src.agent.memory.agent_memory import get_agent_memory, MULTI_AGENT_ID
-        get_agent_memory(MULTI_AGENT_ID)   # triggers _ensure_memory_files_exist()
+        from src.agent.memory.agent_memory import MULTI_AGENT_ID, get_agent_memory
+
+        get_agent_memory(MULTI_AGENT_ID)
         logger.info("[startup] Multi-agent memory initialised.")
     except Exception as exc:
-        logger.error(f"[startup] Failed to init multi-agent memory: {exc}")
+        logger.error("[startup] Failed to init multi-agent memory: %s", exc)
 
-    # 2 — Start the 30-minute smart consolidation background thread
-    #     (dirty-check gated: only runs when new interactions exist)
     try:
         from src.agent.memory.consolidation_runner import get_consolidation_runner
+
         runner = get_consolidation_runner()
         runner.start()
-        logger.info("[startup] ConsolidationRunner (30-min smart) started.")
+        logger.info("[startup] ConsolidationRunner started.")
     except Exception as exc:
-        logger.error(f"[startup] Failed to start ConsolidationRunner: {exc}")
+        logger.error("[startup] Failed to start ConsolidationRunner: %s", exc)
 
 
-_startup()   # execute at import time (once per process)
+_startup()
 
 
-@st.dialog("🤖 Create Personal Assistant", width="large")
-def _create_pa_dialog() -> None:
-    """Dialog to create a new Personal Assistant with selected skills + channels."""
-    # ── Skill catalogue with plain-language descriptions ─────────────────
-    _SKILL_META = {
-        "email": {
-            "icon": "📧",
-            "title": "Email",
-            "description": "Read, send & organise your Gmail inbox. Get smart summaries, set follow-up reminders, and search emails by anything.",
-        },
-        "drive": {
-            "icon": "📁",
-            "title": "Google Drive",
-            "description": "Browse and manage your Google Drive. Upload, share, organize folders, and find any file instantly.",
-        },
-        "files": {
-            "icon": "🗂️",
-            "title": "Local Files",
-            "description": "Organise your computer's files. Search, sort, zip archives, and analyse what's taking up space.",
-        },
-        "whatsapp": {
-            "icon": "💬",
-            "title": "WhatsApp",
-            "description": "Chat via WhatsApp. Send messages, manage contacts, schedule messages, and get conversation summaries.",
-        },
-        "calendar": {
-            "icon": "📅",
-            "title": "Calendar",
-            "description": "Manage your Google Calendar. Create and update events, find free slots, get daily agendas, and set reminders.",
-        },
-        "scheduler": {
-            "icon": "🧠",
-            "title": "Smart Scheduler",
-            "description": "Intelligent calendar scheduling — finds optimal meeting slots, protects focus time, and resolves calendar conflicts automatically.",
-        },
-        "file_organizer": {
-            "icon": "🗃️",
-            "title": "File Organizer",
-            "description": "Approval-driven file organisation. Scans folders, proposes tidy plans by type or date, and applies them only after your confirmation.",
-        },
-        "habit_tracker": {
-            "icon": "✅",
-            "title": "Habit Tracker",
-            "description": "Build better habits. Track daily completions, monitor streaks, get weekly reports, and receive motivating analytics.",
-        },
-        "browser": {
-            "icon": "🌐",
-            "title": "Web Browser",
-            "description": "Browse any website, search the web, extract article text, find links, download files, and get instant page summaries — all without leaving the app.",
-        },
-        "stock_market": {
-            "icon": "📈",
-            "title": "Stock Market Analysis",
-            "description": "Real-time quotes, technical indicators (RSI, MACD, Bollinger), risk scoring, pattern detection, portfolio analysis, news sentiment, and market overview. Informational only — no buy/sell.",
-        },
-        "linkedin": {
-            "icon": "💼",
-            "title": "LinkedIn",
-            "description": (
-                "Fully manage your LinkedIn page. Publish text, image, and video posts, "
-                "generate AI-written content and AI images, schedule posts for later, "
-                "and track page / post analytics — all from Octa."
-            ),
-        },
-    }
-
+def _get_available_pa_skill_keys(manager) -> list[str]:
+    """Return PA-attachable skills currently present on the dashboard."""
     try:
         from src.agent.workflows.agent_registry import AGENT_REGISTRY
-        all_skill_keys = list(AGENT_REGISTRY.keys())
     except Exception:
-        all_skill_keys = list(_SKILL_META.keys())
+        AGENT_REGISTRY = {}
 
-    # ── Initialise selected_skills in session state ───────────────────────
-    if "create_pa_skills" not in st.session_state:
-        st.session_state.create_pa_skills = set(all_skill_keys)
+    created_skill_types = {
+        str(agent.get("type", "")).strip()
+        for agent in manager.list_agents()
+        if str(agent.get("type", "")).strip()
+        and str(agent.get("type", "")).strip() not in _PA_SKILL_EXCLUDED_TYPES
+    }
 
-    # ── Header ────────────────────────────────────────────────────────────
+    return [
+        key
+        for key in AGENT_REGISTRY.keys()
+        if key in created_skill_types and key not in _PA_SKILL_EXCLUDED_TYPES
+    ]
+
+
+def _current_nav_state() -> dict:
+    """Capture the current dashboard navigation state for back-navigation."""
+    return {key: deepcopy(st.session_state.get(key)) for key in _NAV_STATE_KEYS}
+
+
+def _restore_nav_state(state: dict) -> None:
+    """Restore a previously captured dashboard navigation state."""
+    defaults = {
+        "show_create_form": False,
+        "configure_agent_id": None,
+        "configure_pa_id": None,
+        "show_log_viewer": False,
+        "show_create_pa_panel": False,
+        "active_pa_id": None,
+        "active_pa_url": None,
+        "dashboard_scroll_target": None,
+    }
+    merged = {**defaults, **(state or {})}
+    for key, value in merged.items():
+        st.session_state[key] = value
+
+
+def _push_nav_state() -> None:
+    """Push current dashboard view onto the back stack if it changed."""
+    current = _current_nav_state()
+    history = st.session_state.setdefault("nav_history", [])
+    if not history or history[-1] != current:
+        history.append(current)
+
+
+def _go_home(section: str | None = None, push_history: bool = True) -> None:
+    """Return to the dashboard home and optionally scroll to a section."""
+    if push_history:
+        _push_nav_state()
+    _restore_nav_state({"dashboard_scroll_target": section})
+
+
+def _go_back() -> None:
+    """Go back to the previous dashboard view if one exists."""
+    history = st.session_state.setdefault("nav_history", [])
+    if history:
+        previous = history.pop()
+        _restore_nav_state(previous)
+
+
+def _set_dashboard_scroll_target(section: str) -> None:
+    """Navigate home and scroll to a dashboard section."""
+    _go_home(section=section, push_history=True)
+
+
+def _open_pa_workspace(pa_id: str, url: str | None = None, push_history: bool = True) -> None:
+    """Open a Personal Assistant inside the dashboard workspace."""
+    if push_history:
+        _push_nav_state()
+    st.session_state.active_pa_id = pa_id
+    st.session_state.active_pa_url = url
+    st.session_state.show_create_form = False
+    st.session_state.show_create_pa_panel = False
+    st.session_state.show_log_viewer = False
+    st.session_state.configure_agent_id = None
+    st.session_state.dashboard_scroll_target = None
+
+
+def _close_pa_workspace() -> None:
+    """Return from the embedded assistant workspace back to the dashboard home."""
+    _go_home(push_history=False)
+
+
+def _render_pa_workspace(pa: dict, manager) -> None:
+    """Render the assistant chat UI embedded inside the dashboard."""
+    status = get_agent_status(pa["id"])
+    workspace_url = st.session_state.get("active_pa_url") or (status or {}).get("url")
+    st.session_state.active_pa_url = workspace_url
+
     st.markdown(
-        """
-        <div style="background:linear-gradient(135deg,rgba(99,102,241,0.12) 0%,rgba(139,92,246,0.08) 100%);
-                    border:1px solid rgba(99,102,241,0.25);border-radius:14px;
-                    padding:16px 20px;margin-bottom:20px;">
-            <div style="color:#a5b4fc;font-size:0.875rem;line-height:1.6;">
-                Your Personal Assistant will use the selected skills to help you with various tasks.
-                It remembers your preferences and learns from every interaction.
+        f"""
+        <div id="workspace-toolbar-{pa['id']}" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+                    background:rgba(15,23,42,0.78);border:1px solid rgba(99,102,241,0.18);border-radius:16px;
+                    padding:10px 14px;margin-bottom:12px;backdrop-filter:blur(10px);box-shadow:0 14px 36px rgba(15,23,42,0.22);">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                <div style="font-size:1rem;font-weight:800;color:#f8fafc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🤖 {pa['name']}</div>
+                <span style="background:{'#16a34a' if status else '#475569'};color:#fff;padding:4px 10px;border-radius:999px;font-size:0.72rem;font-weight:700;">{'Running' if status else 'Stopped'}</span>
             </div>
+            <div style="font-size:0.78rem;color:#64748b;">Dashboard workspace</div>
+        </div>
+        <style>
+        .main .block-container {{
+            padding-bottom: 0.75rem !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    action_col1, action_col2, action_col3 = st.columns([1.1, 1.2, 1.2])
+    with action_col1:
+        if st.button("🏠 Home", key=f"home_pa_{pa['id']}", use_container_width=True):
+            _close_pa_workspace()
+            st.rerun()
+    with action_col2:
+        cfg_open = st.session_state.get("configure_pa_id") == pa["id"]
+        cfg_label = "✖ Close Config" if cfg_open else "⚙️ Configure"
+        if st.button(cfg_label, key=f"workspace_cfg_{pa['id']}", use_container_width=True):
+            _push_nav_state()
+            st.session_state.configure_pa_id = None if cfg_open else pa["id"]
+            st.session_state.dashboard_scroll_target = None
+            st.rerun()
+    with action_col3:
+        if status:
+            if st.button("🔄 Refresh Chat", key=f"refresh_pa_{pa['id']}", use_container_width=True):
+                st.rerun()
+        else:
+            if st.button("▶️ Start Assistant", key=f"workspace_start_{pa['id']}", use_container_width=True, type="primary"):
+                from src.agent.core.process_manager import start_agent
+
+                started = start_agent(pa["id"], pa["name"], "personal_assistant")
+                st.session_state.active_pa_url = started.get("url")
+                st.rerun()
+
+    if st.session_state.get("configure_pa_id") == pa["id"]:
+        _render_pa_configure_panel(pa, manager)
+
+    if not workspace_url:
+        st.markdown(
+            "<div style='background:rgba(15,23,42,0.78);border:1px solid rgba(99,102,241,0.22);padding:28px;border-radius:18px;text-align:center;'>"
+            "<div style='font-size:1.05rem;font-weight:800;color:#e2e8f0;'>Assistant is not running yet</div>"
+            "<div style='color:#64748b;font-size:0.9rem;margin-top:8px;'>Start the assistant to load chat inside this dashboard workspace.</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    if "?" in workspace_url:
+        embedded_url = f"{workspace_url}&embedded=1"
+    else:
+        embedded_url = f"{workspace_url}?embedded=1"
+
+    st.markdown(
+        f"<div id='workspace-frame-wrap-{pa['id']}' style='background:rgba(15,23,42,0.75);border:1px solid rgba(99,102,241,0.18);border-radius:20px;padding:8px;box-shadow:0 18px 48px rgba(15,23,42,0.28);overflow:hidden;'></div>",
+        unsafe_allow_html=True,
+    )
+    components.iframe(embedded_url, height=780, scrolling=False)
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            function applyWorkspaceLayout() {{
+                var parentDoc = window.parent.document;
+                var frame = Array.from(parentDoc.querySelectorAll('iframe')).find(function(node) {{
+                    return (node.src || '').indexOf('{embedded_url}') !== -1;
+                }});
+                var wrap = parentDoc.getElementById('workspace-frame-wrap-{pa['id']}');
+                var toolbar = parentDoc.getElementById('workspace-toolbar-{pa['id']}');
+                if (!frame || !wrap) {{
+                    return;
+                }}
+                if (frame.parentElement !== wrap) {{
+                    wrap.appendChild(frame);
+                }}
+                var top = wrap.getBoundingClientRect().top;
+                var available = Math.max(520, window.parent.innerHeight - top - 18);
+                frame.style.width = '100%';
+                frame.style.height = available + 'px';
+                frame.style.border = '0';
+                frame.style.borderRadius = '16px';
+                frame.setAttribute('height', String(available));
+                wrap.style.height = available + 'px';
+                wrap.style.overflow = 'hidden';
+                if (toolbar) {{
+                    toolbar.style.position = 'sticky';
+                    toolbar.style.top = '0';
+                    toolbar.style.zIndex = '20';
+                }}
+                var appContainer = parentDoc.querySelector('[data-testid="stAppViewContainer"]');
+                if (appContainer) {{
+                    appContainer.style.overflowY = 'hidden';
+                }}
+                window.parent.scrollTo({{ top: 0, behavior: 'instant' }});
+            }}
+            applyWorkspaceLayout();
+            window.parent.addEventListener('resize', applyWorkspaceLayout);
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _render_pa_configure_panel(pa: dict, manager) -> None:
+    """Inline dashboard configure panel for a Personal Assistant."""
+    from src.agent.hub.pa_manager import load_assistants, update_assistant
+
+    fresh = next((item for item in load_assistants() if item["id"] == pa["id"]), pa)
+
+    try:
+        from src.agent.hub.channel_registry import CHANNEL_REGISTRY
+    except Exception as exc:
+        st.error(f"Could not load channel registry: {exc}")
+        return
+
+    available_skills = _get_available_pa_skill_keys(manager)
+    current_skills = [skill for skill in fresh.get("skills", []) if skill not in _PA_SKILL_EXCLUDED_TYPES]
+    skill_options = list(dict.fromkeys(current_skills + available_skills))
+    channel_options = ["dashboard", "telegram"]
+    telegram_cfg = (fresh.get("config") or {}).get("telegram", {})
+
+    st.markdown(
+        f"""
+        <div style="background:linear-gradient(135deg,rgba(124,58,237,0.12) 0%,rgba(99,102,241,0.08) 100%);
+                    border:1px solid rgba(124,58,237,0.28);border-radius:16px;padding:18px 20px;margin:16px 0 20px 0;">
+            <div style="font-size:1.2rem;font-weight:800;color:#e2e8f0;">⚙️ Configure Personal Assistant</div>
+            <div style="color:#a5b4fc;font-size:0.9rem;margin-top:4px;">{fresh['name']}</div>
+            <div style="color:#64748b;font-size:0.82rem;margin-top:8px;">Enable or disable attached skills and update Telegram settings directly from the Dashboard.</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # ── Assistant Name ────────────────────────────────────────────────────
+    if not skill_options:
+        st.warning("No Dashboard skills are available yet. Add a skill first, then attach it to this assistant.")
+
+    with st.form(f"dashboard_configure_pa_{fresh['id']}"):
+        new_name = st.text_input("Assistant Name", value=fresh["name"])
+        new_skills = st.multiselect(
+            "Skills",
+            options=skill_options,
+            default=[skill for skill in current_skills if skill in skill_options],
+            help="Only skills currently available on the Dashboard can be attached here.",
+        )
+        new_channels = st.multiselect(
+            "Channels",
+            options=channel_options,
+            default=[channel for channel in fresh.get("channels", []) if channel in channel_options] or ["dashboard", "telegram"],
+            format_func=lambda channel: f"{CHANNEL_REGISTRY[channel].icon} {CHANNEL_REGISTRY[channel].display_name}" if channel in CHANNEL_REGISTRY else channel.title(),
+        )
+        new_token = st.text_input(
+            "Telegram Bot Token",
+            value=telegram_cfg.get("bot_token", ""),
+            placeholder="1234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            type="password",
+        )
+        new_auto_reply = st.checkbox("Telegram auto-reply enabled", value=telegram_cfg.get("auto_reply", True))
+
+        save_col, cancel_col = st.columns([3, 1])
+        with save_col:
+            save_clicked = st.form_submit_button("💾 Save Changes", type="primary", use_container_width=True)
+        with cancel_col:
+            cancel_clicked = st.form_submit_button("Cancel", use_container_width=True)
+
+        if cancel_clicked:
+            st.session_state.configure_pa_id = None
+            st.rerun()
+
+        if save_clicked:
+            if not new_name.strip():
+                st.error("Assistant name cannot be empty.")
+            elif not new_skills:
+                st.error("Attach at least one skill.")
+            elif "telegram" in new_channels and not new_token.strip():
+                st.error("Telegram requires a bot token.")
+            else:
+                config = dict(fresh.get("config") or {})
+                telegram = dict(config.get("telegram") or {})
+                if new_token.strip():
+                    telegram["bot_token"] = new_token.strip()
+                    telegram["auto_reply"] = new_auto_reply
+                    config["telegram"] = telegram
+                elif "telegram" in config:
+                    del config["telegram"]
+
+                update_assistant(
+                    fresh["id"],
+                    name=new_name.strip(),
+                    skills=new_skills,
+                    channels=new_channels,
+                    config=config,
+                )
+                st.session_state.configure_pa_id = None
+                st.toast(f"Updated {new_name.strip()}.", icon="✅")
+                st.rerun()
+
+
+def _render_create_pa_panel(manager) -> None:
+    """Inline panel to create a Personal Assistant."""
+    skill_meta = {
+        "email": {
+            "icon": "📧",
+            "title": "Email",
+            "description": "Read, send, search, and organize Gmail.",
+        },
+        "drive": {
+            "icon": "📁",
+            "title": "Google Drive",
+            "description": "Browse, upload, and manage Drive files.",
+        },
+        "files": {
+            "icon": "🗂️",
+            "title": "Local Files",
+            "description": "Search, organize, and inspect local files.",
+        },
+        "calendar": {
+            "icon": "📅",
+            "title": "Calendar",
+            "description": "View agendas, create events, and manage reminders.",
+        },
+        "scheduler": {
+            "icon": "🧠",
+            "title": "Smart Scheduler",
+            "description": "Find slots, protect focus time, and resolve conflicts.",
+        },
+        "file_organizer": {
+            "icon": "🗃️",
+            "title": "File Organizer",
+            "description": "Propose and apply tidy file organization plans.",
+        },
+        "habit_tracker": {
+            "icon": "✅",
+            "title": "Habit Tracker",
+            "description": "Track habits, streaks, and progress reports.",
+        },
+        "browser": {
+            "icon": "🌐",
+            "title": "Web Browser",
+            "description": "Browse websites, search, and summarize pages.",
+        },
+        "stock_market": {
+            "icon": "📈",
+            "title": "Stock Market Analysis",
+            "description": "Quotes, indicators, sentiment, and portfolio insights.",
+        },
+        "linkedin": {
+            "icon": "💼",
+            "title": "LinkedIn",
+            "description": "Create posts, schedule content, and track analytics.",
+        },
+    }
+
+    available_skill_keys = _get_available_pa_skill_keys(manager)
+    if "create_pa_skills" not in st.session_state:
+        st.session_state.create_pa_skills = set()
+    else:
+        st.session_state.create_pa_skills &= set(available_skill_keys)
+
     st.markdown(
-        "<p style='color:#94a3b8;font-size:0.78rem;font-weight:700;text-transform:uppercase;"
-        "letter-spacing:0.08em;margin-bottom:6px;'>ASSISTANT NAME</p>",
+        """
+        <div style="background:linear-gradient(135deg,rgba(99,102,241,0.12) 0%,rgba(139,92,246,0.08) 100%);
+                    border:1px solid rgba(99,102,241,0.25);border-radius:16px;padding:18px 20px;margin:18px 0 20px 0;">
+            <div style="font-size:1.2rem;font-weight:800;color:#e2e8f0;">🤖 Create Personal Assistant</div>
+            <div style="color:#94a3b8;font-size:0.84rem;margin-top:4px;">Only skills currently added to this Dashboard are available here.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        "<p style='color:#94a3b8;font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;'>ASSISTANT NAME</p>",
         unsafe_allow_html=True,
     )
     pa_name = st.text_input(
@@ -163,61 +447,53 @@ def _create_pa_dialog() -> None:
         label_visibility="collapsed",
     )
 
-    # ── Skills ────────────────────────────────────────────────────────────
     st.markdown(
-        "<p style='color:#94a3b8;font-size:0.78rem;font-weight:700;text-transform:uppercase;"
-        "letter-spacing:0.08em;margin:18px 0 10px 0;'>SKILLS  <span style=\"color:#475569;font-weight:500;font-size:0.72rem;text-transform:none;\">"
-        "— choose what your assistant can do</span></p>",
+        "<p style='color:#94a3b8;font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin:18px 0 10px 0;'>SKILLS</p>"
+        "<div style='color:#64748b;font-size:0.82rem;margin-bottom:12px;'>Start with zero selected skills and enable only what this assistant should use.</div>",
         unsafe_allow_html=True,
     )
-    skill_cols = st.columns(2)
-    for i, key in enumerate(all_skill_keys):
-        meta = _SKILL_META.get(key, {"icon": "🔧", "title": key.capitalize(), "description": f"Use the {key} skill."})
-        is_on = key in st.session_state.create_pa_skills
-        with skill_cols[i % 2]:
-            border_col = "rgba(99,102,241,0.6)" if is_on else "rgba(255,255,255,0.08)"
-            bg_col = "rgba(99,102,241,0.10)" if is_on else "rgba(255,255,255,0.03)"
-            title_col = "#a5b4fc" if is_on else "#64748b"
-            check = "✓ " if is_on else ""
-            st.markdown(
-                f"""
-                <div style="background:{bg_col};border:1.5px solid {border_col};border-radius:12px;
-                            padding:12px 14px;margin-bottom:6px;">
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                        <span style="font-size:1.3rem;">{meta['icon']}</span>
-                        <span style="font-weight:700;color:{title_col};font-size:0.9rem;">{check}{meta['title']}</span>
+
+    if not available_skill_keys:
+        st.warning("No Dashboard skills are available yet. Add at least one skill from 'Add Agent / Skill' before creating a Personal Assistant.")
+    else:
+        cols = st.columns(2)
+        for idx, key in enumerate(available_skill_keys):
+            meta = skill_meta.get(key, {"icon": "🔧", "title": key.capitalize(), "description": f"Use the {key} skill."})
+            enabled = key in st.session_state.create_pa_skills
+            border = "rgba(99,102,241,0.6)" if enabled else "rgba(255,255,255,0.08)"
+            bg = "rgba(99,102,241,0.10)" if enabled else "rgba(255,255,255,0.03)"
+            title_color = "#a5b4fc" if enabled else "#cbd5e1"
+            with cols[idx % 2]:
+                st.markdown(
+                    f"""
+                    <div style="background:{bg};border:1.5px solid {border};border-radius:12px;padding:12px 14px;margin-bottom:6px;min-height:104px;">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                            <span style="font-size:1.3rem;">{meta['icon']}</span>
+                            <span style="font-weight:700;color:{title_color};font-size:0.9rem;">{meta['title']}</span>
+                        </div>
+                        <div style="color:#64748b;font-size:0.78rem;line-height:1.45;">{meta['description']}</div>
                     </div>
-                    <div style="color:#475569;font-size:0.78rem;line-height:1.45;">{meta['description']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            btn_label = "✓ Enabled" if is_on else "Enable"
-            btn_type = "primary" if is_on else "secondary"
-            if st.button(btn_label, key=f"pa_skill_{key}", use_container_width=True, type=btn_type):
-                if is_on:
-                    st.session_state.create_pa_skills.discard(key)
-                else:
-                    st.session_state.create_pa_skills.add(key)
-                st.rerun()
+                    """,
+                    unsafe_allow_html=True,
+                )
+                label = "✓ Enabled" if enabled else "Enable"
+                btn_type = "primary" if enabled else "secondary"
+                if st.button(label, key=f"pa_skill_{key}", type=btn_type, use_container_width=True):
+                    if enabled:
+                        st.session_state.create_pa_skills.discard(key)
+                    else:
+                        st.session_state.create_pa_skills.add(key)
+                    st.rerun()
 
     selected_skills = list(st.session_state.create_pa_skills)
 
-    # ── Channels (simplified — Dashboard always on, Telegram optional) ───
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
     st.divider()
     st.markdown(
-        "<p style='color:#94a3b8;font-size:0.78rem;font-weight:700;text-transform:uppercase;"
-        "letter-spacing:0.08em;margin-bottom:12px;'>TELEGRAM BOT  "
-        "<span style='color:#f87171;font-size:0.82rem;'>★ required</span></p>",
+        "<p style='color:#94a3b8;font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px;'>TELEGRAM BOT <span style='color:#f87171;font-size:0.82rem;'>★ required</span></p>",
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<div style='color:#64748b;font-size:0.82rem;margin-bottom:10px;'>"
-        "Create a Telegram bot via <b style='color:#94a3b8;'>@BotFather</b> (free), "
-        "copy the token it gives you, and paste it below. "
-        "This is how you'll chat with your assistant on your phone."
-        "</div>",
+        "<div style='color:#64748b;font-size:0.82rem;margin-bottom:10px;'>Create a bot with <b style='color:#94a3b8;'>@BotFather</b>, then paste the token below so you can chat with this assistant from Telegram.</div>",
         unsafe_allow_html=True,
     )
     tg_token = st.text_input(
@@ -227,118 +503,94 @@ def _create_pa_dialog() -> None:
         label_visibility="collapsed",
     )
 
-    # ── Action buttons ────────────────────────────────────────────────────
-    st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
     col_save, col_cancel = st.columns([3, 1])
     with col_save:
         if st.button("✨ Create Assistant", type="primary", use_container_width=True):
             if not pa_name.strip():
-                st.error("⚠️ Please give your assistant a name.")
+                st.error("Please give your assistant a name.")
+            elif not available_skill_keys:
+                st.error("Add at least one Dashboard skill first, then create the assistant.")
             elif not selected_skills:
-                st.error("⚠️ Enable at least one skill so your assistant can help you.")
+                st.error("Enable at least one skill so your assistant can help you.")
             elif not tg_token.strip():
-                st.error("⚠️ A Telegram Bot Token is required — get one free from @BotFather on Telegram.")
+                st.error("A Telegram Bot Token is required. Get one from @BotFather.")
             else:
-                from src.agent.hub.pa_manager import create_assistant
                 from src.agent.core.process_manager import start_agent
-                selected_channels = ["dashboard", "telegram"]
-                cfg = {"telegram": {"bot_token": tg_token.strip(), "auto_reply": True}}
-                new_pa = create_assistant(pa_name.strip(), selected_skills, selected_channels, config=cfg)
+                from src.agent.hub.pa_manager import create_assistant
+
+                config = {"telegram": {"bot_token": tg_token.strip(), "auto_reply": True}}
+                new_pa = create_assistant(pa_name.strip(), selected_skills, ["dashboard", "telegram"], config=config)
                 try:
                     start_agent(new_pa["id"], new_pa["name"], "personal_assistant")
                 except Exception:
                     pass
                 try:
                     from src.telegram.pa_poller_manager import start_pa_poller
+
                     start_pa_poller(new_pa["id"])
-                except Exception as _tge:
-                    st.warning(f"⚠️ Assistant created but Telegram bot failed to start: {_tge}")
-                # Clean up session state
-                if "create_pa_skills" in st.session_state:
-                    del st.session_state["create_pa_skills"]
-                st.toast(f"✅ **{new_pa['name']}** is ready! Reload the page to open its Chat window.", icon="✅")
+                except Exception as exc:
+                    st.warning(f"Assistant created but Telegram bot failed to start: {exc}")
+
+                st.session_state.pop("create_pa_skills", None)
+                st.session_state.show_create_pa_panel = False
+                st.toast(f"{new_pa['name']} is ready.", icon="✅")
                 st.rerun()
     with col_cancel:
         if st.button("Cancel", use_container_width=True):
-            if "create_pa_skills" in st.session_state:
-                del st.session_state["create_pa_skills"]
+            st.session_state.pop("create_pa_skills", None)
+            st.session_state.show_create_pa_panel = False
             st.rerun()
 
 
 def _show_pa_card(pa: dict) -> None:
     """Render a single Personal Assistant card on the dashboard."""
     from src.agent.core.process_manager import start_agent, stop_agent
-    from src.agent.hub.pa_manager import delete_assistant
+    from src.agent.hub.pa_manager import delete_assistant, update_assistant
 
-    pa_id   = pa["id"]
+    pa_id = pa["id"]
     pa_name = pa["name"]
-    skills   = pa.get("skills", [])
-    channels = pa.get("channels", [])
-
-    # ── Gather status ──────────────────────────────────────────────────────
-    status     = get_agent_status(pa_id)
+    skills = pa.get("skills", [])
+    status = get_agent_status(pa_id)
     is_running = status is not None
 
     tg_token = (pa.get("config") or {}).get("telegram", {}).get("bot_token", "").strip()
-    start_pa_poller = stop_pa_poller = None
     try:
         from src.telegram.pa_poller_manager import get_pa_poller_status, start_pa_poller, stop_pa_poller
+
         tg_running = get_pa_poller_status(pa_id) is not None
     except Exception:
+        start_pa_poller = None
+        stop_pa_poller = None
         tg_running = False
 
-    # ── Visual variables ───────────────────────────────────────────────────
-    pa_badge_color  = "#16a34a" if is_running else "#6b7280"
-    pa_badge_label  = "● Running" if is_running else "● Stopped"
-    tg_badge_color  = "#229ED9" if tg_running else "#6b7280"
-    tg_badge_label  = "✈️ Bot Running" if tg_running else "✈️ Bot Stopped"
-
+    status_badge = "● Running" if is_running else "● Stopped"
+    status_color = "#16a34a" if is_running else "#6b7280"
+    tg_badge = "✈️ Bot Running" if tg_running else "✈️ Bot Stopped"
+    tg_color = "#229ED9" if tg_running else "#6b7280"
     skill_tags = " ".join(
-        f"<span style='background:rgba(124,58,237,0.18);color:#a78bfa;"
-        f"padding:2px 8px;border-radius:10px;font-size:0.73rem;font-weight:600;margin:2px;'>{s}</span>"
-        for s in skills[:6]
+        f"<span style='background:rgba(124,58,237,0.18);color:#c4b5fd;padding:2px 8px;border-radius:10px;font-size:0.73rem;font-weight:600;margin:2px;display:inline-block;'>{skill}</span>"
+        for skill in skills[:6]
     )
 
-    # ── Card HTML ──────────────────────────────────────────────────────────
-    glow = "0 0 20px rgba(124,58,237,0.45)" if is_running else "0 4px 14px rgba(0,0,0,0.22)"
     st.markdown(
         f"""
-        <div style="background:linear-gradient(135deg,#1a1a2e 0%,{'#1e0a3c' if is_running else '#16213e'} 100%);
-                    padding:18px 20px 14px;border-radius:14px;
-                    border:1.5px solid rgba(124,58,237,{'0.6' if is_running else '0.35'});
-                    margin-bottom:4px;box-shadow:{glow};position:relative;overflow:hidden;">
-          <!-- bg glow -->
-          <div style="position:absolute;top:-20px;right:-20px;width:110px;height:110px;
-                      background:radial-gradient(circle,rgba(124,58,237,0.10) 0%,transparent 70%);
-                      border-radius:50%;pointer-events:none;"></div>
-          <div style="position:relative;z-index:1;">
-            <!-- Row 1: name + PA status badge + Telegram badge -->
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-              <span style="font-size:1.15rem;font-weight:800;
-                           background:linear-gradient(135deg,#a78bfa 0%,#7c3aed 100%);
-                           -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-                           background-clip:text;flex:1;min-width:100px;">🤖 {pa_name}</span>
-              <span style="background:{pa_badge_color};color:#fff;padding:3px 10px;
-                           border-radius:20px;font-size:0.74rem;font-weight:700;white-space:nowrap;">{pa_badge_label}</span>
-              <span style="background:{'rgba(34,158,217,0.25)' if tg_running else 'rgba(107,114,128,0.2)'};
-                           color:{'#229ED9' if tg_running else '#9ca3af'};padding:3px 10px;
-                           border-radius:20px;font-size:0.74rem;font-weight:700;white-space:nowrap;
-                           border:1px solid {'rgba(34,158,217,0.4)' if tg_running else 'rgba(107,114,128,0.25)'};">{tg_badge_label}</span>
+        <div style="background:linear-gradient(135deg,#111827 0%,#1f2937 100%);padding:18px 20px 14px;border-radius:14px;border:1px solid rgba(124,58,237,0.28);margin-bottom:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <div style="font-size:1.1rem;font-weight:800;color:#f8fafc;">🤖 {pa_name}</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <span style="background:{status_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;">{status_badge}</span>
+                    <span style="background:{tg_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;">{tg_badge}</span>
+                </div>
             </div>
-            <!-- Row 2: skills -->
-            <div style="font-size:0.78rem;color:#6b7280;font-weight:600;
-                        margin-bottom:6px;letter-spacing:0.04em;">SKILLS</div>
-            <div style="margin-bottom:4px;">{skill_tags if skill_tags else "<span style='color:#4b5563;font-size:0.78rem;'>none</span>"}</div>
-          </div>
+            <div style="font-size:0.76rem;color:#64748b;font-weight:700;letter-spacing:0.06em;margin-bottom:6px;">SKILLS</div>
+            <div style="margin-bottom:6px;">{skill_tags or "<span style='color:#64748b;font-size:0.8rem;'>No skills</span>"}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    # ── No-token warning with inline quick-set ──────────────────────────────
-    pa_url = (status or {}).get("url", "") if is_running else ""
     if not tg_token:
-        with st.expander("⚠️ No Telegram token — click to add one", expanded=False):
+        with st.expander("Add Telegram token", expanded=False):
             quick_token = st.text_input(
                 "Paste your Bot Token from @BotFather",
                 placeholder="1234567890:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -346,91 +598,80 @@ def _show_pa_card(pa: dict) -> None:
                 key=f"quick_token_{pa_id}",
                 label_visibility="collapsed",
             )
-            if st.button("💾 Save Token", key=f"save_token_{pa_id}", type="primary"):
+            if st.button("Save Token", key=f"save_token_{pa_id}", type="primary"):
                 if quick_token.strip():
-                    from src.agent.hub.pa_manager import update_assistant
-                    cfg = dict(pa.get("config") or {})
-                    tg = dict(cfg.get("telegram") or {})
-                    tg["bot_token"] = quick_token.strip()
-                    tg.setdefault("auto_reply", True)
-                    cfg["telegram"] = tg
-                    update_assistant(pa_id, config=cfg)
+                    config = dict(pa.get("config") or {})
+                    telegram = dict(config.get("telegram") or {})
+                    telegram["bot_token"] = quick_token.strip()
+                    telegram.setdefault("auto_reply", True)
+                    config["telegram"] = telegram
+                    update_assistant(pa_id, config=config)
                     st.rerun()
                 else:
                     st.warning("Token cannot be empty.")
 
-    # ── Action buttons ──────────────────────────────────────────────────────
-    # When PA is running: [Open Chat] [▶️ Start Bot?] [Stop PA] [🗑️]
-    # When PA is stopped: [Start PA]                            [🗑️]
-    if is_running:
-        show_start_bot = bool(tg_token and not tg_running and start_pa_poller)
-        if show_start_bot:
-            c1, c2, c3, c4 = st.columns([2, 1.6, 1.5, 0.8])
-        else:
-            c1, c3, c4 = st.columns([2, 1.5, 0.8])
-            c2 = None
-
-        with c1:
-            if pa_url:
-                st.link_button("🚀 Open Chat", url=pa_url, type="primary", use_container_width=True)
-            else:
-                st.button("🚀 Open", key=f"open_pa_{pa_id}", disabled=True, use_container_width=True)
-
-        if c2 is not None:
-            with c2:
-                if st.button("✈️ Start Bot", key=f"start_bot_{pa_id}", use_container_width=True, type="primary"):
-                    try:
-                        start_pa_poller(pa_id)
-                        st.rerun()
-                    except Exception as _tge:
-                        st.error(f"Bot failed to start: {_tge}")
-
-        with c3:
-            if st.button("⏹️ Stop PA", key=f"stop_pa_{pa_id}", use_container_width=True):
-                with st.spinner(f"Stopping {pa_name}…"):
-                    if tg_running and stop_pa_poller:
-                        try:
-                            stop_pa_poller(pa_id)
-                        except Exception:
-                            pass
-                    stop_agent(pa_id)
+    col1, col2, col3, col4, col5 = st.columns([1.2, 1.05, 1.05, 0.52, 0.52])
+    with col1:
+        if is_running:
+            if st.button("⏹️ Stop Assistant", key=f"stop_pa_{pa_id}", use_container_width=True):
+                stop_agent(pa_id)
+                if st.session_state.get("active_pa_id") == pa_id:
+                    st.session_state.active_pa_url = None
                 st.rerun()
-
-    else:
-        c1, c4 = st.columns([3, 0.8])
-        with c1:
-            if st.button("▶️ Start PA", key=f"start_pa_{pa_id}", type="primary", use_container_width=True):
-                with st.spinner(f"Launching {pa_name}…"):
-                    try:
-                        info = start_agent(pa_id, pa_name, "personal_assistant")
-                        if tg_token and start_pa_poller:
-                            try:
-                                start_pa_poller(pa_id)
-                            except Exception as _tge:
-                                st.warning(f"PA started but bot failed to launch: {_tge}")
-                        st.toast(f"✅ Started on port {info['port']}", icon="✅")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(str(e))
-
-    with c4:
-        if st.button("🗑️", key=f"del_pa_{pa_id}", use_container_width=True,
-                     help=f"Delete {pa_name}"):
-            with st.spinner(f"Deleting {pa_name}…"):
-                try:
-                    if tg_running and stop_pa_poller:
-                        stop_pa_poller(pa_id)
-                except Exception:
-                    pass
-                try:
-                    if is_running:
-                        stop_agent(pa_id)
-                except Exception:
-                    pass
-                delete_assistant(pa_id)
+        else:
+            if st.button("▶️ Start Assistant", key=f"start_pa_{pa_id}", use_container_width=True, type="primary"):
+                started = start_agent(pa_id, pa_name, "personal_assistant")
+                _open_pa_workspace(pa_id, started.get("url"))
+                st.rerun()
+    with col2:
+        if is_running and status and status.get("url"):
+            if st.button("💬 Open Chat", key=f"open_chat_{pa_id}", use_container_width=True):
+                _open_pa_workspace(pa_id, status["url"])
+                st.rerun()
+        else:
+            st.button("💬 Open Chat", key=f"disabled_chat_{pa_id}", use_container_width=True, disabled=True)
+    with col3:
+        if tg_token and start_pa_poller and stop_pa_poller:
+            if tg_running:
+                if st.button("✈️ Stop Bot", key=f"stop_tg_{pa_id}", use_container_width=True):
+                    stop_pa_poller(pa_id)
+                    st.rerun()
+            else:
+                if st.button("✈️ Start Bot", key=f"start_tg_{pa_id}", use_container_width=True):
+                    start_pa_poller(pa_id)
+                    st.rerun()
+        else:
+            st.button("✈️ Start Bot", key=f"disabled_tg_{pa_id}", use_container_width=True, disabled=True)
+    with col4:
+        is_configuring = st.session_state.get("configure_pa_id") == pa_id
+        cfg_label = "✖" if is_configuring else "⚙️"
+        cfg_help = "Close configure" if is_configuring else "Configure assistant"
+        if st.button(cfg_label, key=f"configure_pa_{pa_id}", use_container_width=True, help=cfg_help):
+            _push_nav_state()
+            st.session_state.configure_pa_id = None if is_configuring else pa_id
+            st.session_state.configure_agent_id = None
+            st.session_state.dashboard_scroll_target = None
             st.rerun()
-
-    st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
+    with col5:
+        confirm_key = f"confirm_delete_pa_{pa_id}"
+        if not st.session_state.get(confirm_key, False):
+            if st.button("🗑️", key=f"delete_pa_{pa_id}", use_container_width=True, help="Delete assistant"):
+                st.session_state[confirm_key] = True
+                st.rerun()
+        else:
+            if st.button("⚠️ Confirm", key=f"confirm_pa_{pa_id}", use_container_width=True, type="primary"):
+                try:
+                    stop_agent(pa_id)
+                except Exception:
+                    pass
+                if stop_pa_poller:
+                    try:
+                        stop_pa_poller(pa_id)
+                    except Exception:
+                        pass
+                delete_assistant(pa_id)
+                st.session_state[confirm_key] = False
+                st.rerun()
 
 
 def main() -> None:
@@ -442,33 +683,42 @@ def main() -> None:
     )
 
     inject_css()
-
-    # Garbage-collect terminated processes on each load
     cleanup_stale()
 
     if "show_create_form" not in st.session_state:
         st.session_state.show_create_form = False
     if "configure_agent_id" not in st.session_state:
         st.session_state.configure_agent_id = None
+    if "configure_pa_id" not in st.session_state:
+        st.session_state.configure_pa_id = None
     if "show_log_viewer" not in st.session_state:
         st.session_state.show_log_viewer = False
+    if "show_create_pa_panel" not in st.session_state:
+        st.session_state.show_create_pa_panel = False
+    if "active_pa_id" not in st.session_state:
+        st.session_state.active_pa_id = None
+    if "active_pa_url" not in st.session_state:
+        st.session_state.active_pa_url = None
+    if "nav_history" not in st.session_state:
+        st.session_state.nav_history = []
+    if "dashboard_scroll_target" not in st.session_state:
+        st.session_state.dashboard_scroll_target = None
 
     manager = get_agent_manager()
     agents = manager.list_agents()
 
-    # ── Sidebar ───────────────────────────────────────────────────────────────
+    from src.agent.hub.pa_manager import load_assistants
+
+    assistants = load_assistants()
+    skill_count = sum(1 for agent in agents if agent["type"] not in {"telegram", "whatsapp"})
+
     with st.sidebar:
-        # Logo / branding
         st.markdown(
             f"""
-            <div style="display:flex;align-items:center;gap:10px;padding:8px 0 16px 0;
-                        border-bottom:1px solid rgba(99,102,241,0.2);margin-bottom:16px;">
+            <div style="display:flex;align-items:center;gap:10px;padding:8px 0 16px 0;border-bottom:1px solid rgba(99,102,241,0.2);margin-bottom:16px;">
                 <img src="{_logo_b64()}" style="width:34px;height:34px;border-radius:8px;object-fit:cover;">
                 <div>
-                    <div style="font-size:1.05rem;font-weight:800;
-                                background:linear-gradient(135deg,#e91e8c 0%,#a5b4fc 100%);
-                                -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-                                background-clip:text;line-height:1.1;">Octa Bot</div>
+                    <div style="font-size:1.05rem;font-weight:800;background:linear-gradient(135deg,#e91e8c 0%,#a5b4fc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.1;">Octa Bot</div>
                     <div style="font-size:0.68rem;color:#475569;font-weight:500;letter-spacing:0.05em;">AGENT HUB</div>
                 </div>
             </div>
@@ -476,152 +726,116 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
-        # ── Primary action ────────────────────────────────────────────────
-        if st.button("🤖  Create Personal Assistant", use_container_width=True, type="primary"):
-            _create_pa_dialog()
+        nav_col1, nav_col2 = st.columns(2)
+        with nav_col1:
+            if st.button("⌂", key="sidebar_home", use_container_width=True, help="Go to Dashboard home"):
+                _go_home(section=None, push_history=True)
+                st.rerun()
+        with nav_col2:
+            back_disabled = not bool(st.session_state.get("nav_history"))
+            if st.button("←", key="sidebar_back", use_container_width=True, help="Go back", disabled=back_disabled):
+                _go_back()
+                st.rerun()
 
-        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-        if st.button("➕  Add Agent / Skill", use_container_width=True):
-            st.session_state.show_create_form = True
-            st.session_state.show_log_viewer = False
+        st.markdown(
+            "<p style='font-size:0.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:0.08em;margin:14px 0 8px 0;'>Jump To</p>",
+            unsafe_allow_html=True,
+        )
+        if st.button("Personal Assistants", key="jump_assistants", use_container_width=True):
+            _set_dashboard_scroll_target("assistants-section")
             st.rerun()
-
-        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
-
-        logs_btn_type = "primary" if st.session_state.show_log_viewer else "secondary"
-        if st.button("📊  Log Analyser", use_container_width=True, type=logs_btn_type):
-            st.session_state.show_log_viewer = not st.session_state.show_log_viewer
-            st.session_state.show_create_form = False
+        if st.button("Skills", key="jump_skills", use_container_width=True):
+            _set_dashboard_scroll_target("skills-section")
+            st.rerun()
+        if st.button("Channels", key="jump_channels", use_container_width=True):
+            _set_dashboard_scroll_target("channels-section")
             st.rerun()
 
         st.divider()
 
-        # ── Your Assistants — live status ─────────────────────────────────
-        from src.agent.hub.pa_manager import load_assistants as _load_pa
-        _all_pas = _load_pa()
+        if st.button("🤖  Create Personal Assistant", use_container_width=True, type="primary"):
+            _push_nav_state()
+            st.session_state.show_create_pa_panel = True
+            st.session_state.show_create_form = False
+            st.session_state.show_log_viewer = False
+            st.session_state.configure_agent_id = None
+            st.session_state.configure_pa_id = None
+            st.session_state.active_pa_id = None
+            st.session_state.active_pa_url = None
+            st.session_state.dashboard_scroll_target = None
+            st.rerun()
 
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        if st.button("➕  Add Agent / Skill", use_container_width=True):
+            _push_nav_state()
+            st.session_state.show_create_form = True
+            st.session_state.show_create_pa_panel = False
+            st.session_state.show_log_viewer = False
+            st.session_state.configure_agent_id = None
+            st.session_state.configure_pa_id = None
+            st.session_state.active_pa_id = None
+            st.session_state.active_pa_url = None
+            st.session_state.dashboard_scroll_target = None
+            st.rerun()
+
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        logs_btn_type = "primary" if st.session_state.show_log_viewer else "secondary"
+        if st.button("📊  Log Analyser", use_container_width=True, type=logs_btn_type):
+            _push_nav_state()
+            st.session_state.show_log_viewer = not st.session_state.show_log_viewer
+            st.session_state.show_create_form = False
+            st.session_state.show_create_pa_panel = False
+            st.session_state.configure_agent_id = None
+            st.session_state.configure_pa_id = None
+            st.session_state.active_pa_id = None
+            st.session_state.active_pa_url = None
+            st.session_state.dashboard_scroll_target = None
+            st.rerun()
+
+        st.divider()
         st.markdown(
-            "<p style='font-size:0.72rem;font-weight:700;color:#475569;text-transform:uppercase;"
-            "letter-spacing:0.08em;margin:0 0 10px 0;'>YOUR ASSISTANTS</p>",
+            "<p style='font-size:0.72rem;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:0.08em;margin:0 0 10px 0;'>YOUR ASSISTANTS</p>",
             unsafe_allow_html=True,
         )
-        if _all_pas:
-            for _pa in _all_pas:
-                _status = get_agent_status(_pa["id"])
-                _running = _status is not None
-                _dot_col = "#22c55e" if _running else "#6b7280"
-                _state_label = "Running" if _running else "Stopped"
-                try:
-                    from src.telegram.pa_poller_manager import get_pa_poller_status as _gps2
-                    _tg_running = _gps2(_pa["id"]) is not None
-                    _tg_dot = "✈️" if _tg_running else ""
-                except Exception:
-                    _tg_dot = ""
+        if assistants:
+            for assistant in assistants:
+                status = get_agent_status(assistant["id"])
+                running = status is not None
+                dot_color = "#22c55e" if running else "#6b7280"
+                state_label = "Running" if running else "Stopped"
                 st.markdown(
-                    f"""
-                    <div style="display:flex;align-items:center;justify-content:space-between;
-                                padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;
-                                border:1px solid rgba(255,255,255,0.06);margin-bottom:6px;">
-                        <div style="overflow:hidden;flex:1;min-width:0;">
-                            <div style="font-size:0.84rem;font-weight:600;color:#e2e8f0;
-                                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                                {_tg_dot} {_pa['name']}
-                            </div>
-                            <div style="font-size:0.72rem;color:#475569;">{', '.join(_pa.get('skills',[]))[:28]}</div>
-                        </div>
-                        <span style="background:{_dot_col};color:#fff;padding:2px 8px;
-                                     border-radius:10px;font-size:0.68rem;font-weight:700;
-                                     white-space:nowrap;margin-left:6px;">{_state_label}</span>
-                    </div>
-                    """,
+                    f"<div style='display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:8px;border:1px solid rgba(255,255,255,0.06);margin-bottom:6px;'><div style='overflow:hidden;flex:1;min-width:0;'><div style='font-size:0.84rem;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{assistant['name']}</div><div style='font-size:0.72rem;color:#475569;'>{', '.join(assistant.get('skills', []))[:28]}</div></div><span style='background:{dot_color};color:#fff;padding:2px 8px;border-radius:10px;font-size:0.68rem;font-weight:700;white-space:nowrap;margin-left:6px;'>{state_label}</span></div>",
                     unsafe_allow_html=True,
                 )
         else:
             st.markdown(
-                "<div style='color:#475569;font-size:0.82rem;text-align:center;padding:12px 8px;"
-                "background:rgba(255,255,255,0.02);border-radius:8px;border:1px dashed rgba(255,255,255,0.08);'>"
-                "No assistants yet.<br>Create one above ↑</div>",
+                "<div style='color:#475569;font-size:0.82rem;text-align:center;padding:12px 8px;background:rgba(255,255,255,0.02);border-radius:8px;border:1px dashed rgba(255,255,255,0.08);'>No assistants yet.<br>Create one above ↑</div>",
                 unsafe_allow_html=True,
             )
 
         st.divider()
-
-        # ── Skills & system stats ─────────────────────────────────────────
-        _CH_TYPES_SIDE = {"telegram", "whatsapp"}
-        skill_count = sum(1 for a in agents if a["type"] not in _CH_TYPES_SIDE)
-        pa_count = len(_all_pas)
-        _running_pas = sum(1 for _pa in _all_pas if get_agent_status(_pa["id"]) is not None)
-
+        running_pas = sum(1 for assistant in assistants if get_agent_status(assistant["id"]) is not None)
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(
-                f"<div style='text-align:center;padding:10px 6px;background:rgba(233,30,140,0.06);"
-                f"border:1px solid rgba(233,30,140,0.2);border-radius:10px;'>"
-                f"<div style='font-size:1.5rem;font-weight:800;color:#e91e8c;line-height:1;'>{skill_count}</div>"
-                f"<div style='font-size:0.7rem;color:#475569;margin-top:2px;font-weight:600;text-transform:uppercase;"
-                f"letter-spacing:0.04em;'>Skills</div></div>",
+                f"<div style='text-align:center;padding:10px 6px;background:rgba(233,30,140,0.06);border:1px solid rgba(233,30,140,0.2);border-radius:10px;'><div style='font-size:1.5rem;font-weight:800;color:#e91e8c;line-height:1;'>{skill_count}</div><div style='font-size:0.7rem;color:#475569;margin-top:2px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;'>Skills</div></div>",
                 unsafe_allow_html=True,
             )
         with col2:
             st.markdown(
-                f"<div style='text-align:center;padding:10px 6px;background:rgba(34,197,94,0.06);"
-                f"border:1px solid rgba(34,197,94,0.2);border-radius:10px;'>"
-                f"<div style='font-size:1.5rem;font-weight:800;color:#22c55e;line-height:1;'>{_running_pas}/{pa_count}</div>"
-                f"<div style='font-size:0.7rem;color:#475569;margin-top:2px;font-weight:600;text-transform:uppercase;"
-                f"letter-spacing:0.04em;'>Active</div></div>",
+                f"<div style='text-align:center;padding:10px 6px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:10px;'><div style='font-size:1.5rem;font-weight:800;color:#22c55e;line-height:1;'>{running_pas}/{len(assistants)}</div><div style='font-size:0.7rem;color:#475569;margin-top:2px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;'>Active</div></div>",
                 unsafe_allow_html=True,
             )
 
-        st.divider()
-
-        # ── How it works ──────────────────────────────────────────────────
-        st.markdown(
-            "<p style='font-size:0.72rem;font-weight:700;color:#475569;text-transform:uppercase;"
-            "letter-spacing:0.08em;margin:0 0 12px 0;'>HOW IT WORKS</p>",
-            unsafe_allow_html=True,
-        )
-        _steps = [
-            ("1️⃣", "Create Assistant", "Give your PA a name & role"),
-            ("2️⃣", "Enable Skills", "Email, Drive, Files and more"),
-            ("3️⃣", "Connect Telegram", "Chat from your phone anywhere"),
-            ("4️⃣", "Start Chatting", "Dashboard or Telegram — anytime"),
-        ]
-        for _icon, _title, _desc in _steps:
-            st.markdown(
-                f"""<div style='
-                    display:flex;gap:10px;align-items:flex-start;
-                    background:rgba(255,255,255,0.03);
-                    border:1px solid rgba(255,255,255,0.06);
-                    border-radius:10px;padding:9px 11px;margin-bottom:6px;
-                    transition:border 0.2s;'>
-                    <span style='font-size:1.2rem;line-height:1.4;flex-shrink:0;'>{_icon}</span>
-                    <div>
-                      <div style='font-size:0.8rem;font-weight:700;color:#c4b5fd;
-                                  line-height:1.2;margin-bottom:2px;'>{_title}</div>
-                      <div style='font-size:0.74rem;color:#64748b;line-height:1.3;'>{_desc}</div>
-                    </div>
-                </div>""",
-                unsafe_allow_html=True,
-            )
-
-    # ── Main area ─────────────────────────────────────────────────────────────
     st.markdown(
         f"""
-        <div style="background:linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 50%,rgba(233,30,140,0.06) 100%);
-                    border:1px solid rgba(99,102,241,0.25);padding:28px 28px 22px;border-radius:20px;
-                    margin-bottom:28px;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(99,102,241,0.12);">
+        <div style="background:linear-gradient(135deg, rgba(99,102,241,0.12) 0%, rgba(139,92,246,0.08) 50%, rgba(233,30,140,0.06) 100%);border:1px solid rgba(99,102,241,0.25);padding:28px 28px 22px;border-radius:20px;margin-bottom:28px;backdrop-filter:blur(10px);box-shadow:0 8px 32px rgba(99,102,241,0.12);">
             <div style="display:flex;align-items:center;gap:16px;margin-bottom:10px;">
-              <img src="{_logo_b64()}" style="width:60px;height:60px;border-radius:14px;object-fit:cover;
-                                              box-shadow:0 4px 16px rgba(99,102,241,0.35);">
-              <div>
-                <div style="font-size:2.2rem;font-weight:900;background:linear-gradient(135deg, #e91e8c 0%, #a5b4fc 100%);
-                           -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-                           line-height:1.1;">Octa Bot</div>
-                <div style="font-size:0.95rem;color:#64748b;margin-top:4px;font-weight:500;">
-                  Your AI-powered hub — one place to manage all your digital life
+                <img src="{_logo_b64()}" style="width:60px;height:60px;border-radius:14px;object-fit:cover;box-shadow:0 4px 16px rgba(99,102,241,0.35);">
+                <div>
+                    <div style="font-size:2.2rem;font-weight:900;background:linear-gradient(135deg,#e91e8c 0%,#a5b4fc 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;line-height:1.1;">Octa Bot</div>
+                    <div style="font-size:0.95rem;color:#64748b;margin-top:4px;font-weight:500;">Your AI-powered hub — one place to manage all your digital life</div>
                 </div>
-              </div>
             </div>
         </div>
         """,
@@ -632,278 +846,148 @@ def main() -> None:
         show_log_viewer()
         return
 
+    active_pa = next((assistant for assistant in assistants if assistant["id"] == st.session_state.active_pa_id), None)
+    if st.session_state.active_pa_id and not active_pa:
+        _close_pa_workspace()
+        st.rerun()
+
+    if active_pa:
+        _render_pa_workspace(active_pa, manager)
+        return
+
+    if st.session_state.show_create_pa_panel:
+        _render_create_pa_panel(manager)
+
     if st.session_state.show_create_form:
         show_create_agent_form()
-        return
 
-    # Show configure panel if an agent is being configured
-    cfg_id = st.session_state.get("configure_agent_id")
-    if cfg_id:
-        cfg_agent = next((a for a in agents if a["id"] == cfg_id), None)
-        if cfg_agent:
-            show_configure_panel(cfg_agent)
-            st.divider()
+    cfg_agent = next((agent for agent in agents if agent["id"] == st.session_state.configure_agent_id), None)
+    if cfg_agent:
+        show_configure_panel(cfg_agent)
 
-    if not agents:
-        st.markdown(
-            """
-            <div style="background:linear-gradient(135deg, rgba(233,30,140,0.1) 0%, rgba(156,39,176,0.05) 100%);
-                       border:1px solid rgba(233,30,140,0.2);padding:40px 32px;border-radius:16px;
-                       text-align:center;margin:32px 0;">
-                <div style="font-size:3rem;margin-bottom:16px;">👋</div>
-                <div style="font-size:1.6rem;font-weight:700;color:#e91e8c;margin-bottom:12px;">
-                  Welcome to Octa Bot!
-                </div>
-                <div style="font-size:1rem;color:#a8dadc;margin-bottom:8px;">
-                  You don't have any agents yet. Let's create your first one!
-                </div>
-                <div style="color:#888;font-size:0.95rem;margin-top:20px;">
-                  Available Agent Types:
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    cfg_pa = next((assistant for assistant in assistants if assistant["id"] == st.session_state.configure_pa_id), None)
+    if cfg_pa:
+        _render_pa_configure_panel(cfg_pa, manager)
 
-        cols = st.columns(4)
-        agent_types = manager.get_agent_types()
-        _CHANNEL_SKIP = {"telegram", "whatsapp"}
-        skill_items = [(k, v) for k, v in agent_types.items() if k not in _CHANNEL_SKIP]
-        for idx, (key, info) in enumerate(skill_items):
-            with cols[idx % 4]:
-                st.markdown(
-                    f"""
-                    <div style="background:rgba(233,30,140,0.08);border:1px solid rgba(233,30,140,0.2);
-                               padding:20px 16px;border-radius:12px;text-align:center;">
-                        <div style="font-size:2.5rem;margin-bottom:10px;">{info['icon']}</div>
-                        <div style="font-weight:700;color:#e91e8c;margin-bottom:6px;">{info['name']}</div>
-                        <div style="font-size:0.85rem;color:#888;">{info['description']}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-        st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col2:
-            if st.button("✨ Create Your First Agent", type="primary", use_container_width=True):
-                st.session_state.show_create_form = True
-                st.rerun()
-        return
-
-    # ── Search / filter ───────────────────────────────────────────────────────
+    st.markdown("<div id='skills-section'></div>", unsafe_allow_html=True)
     st.markdown(
-        "<div style='font-size:1.1rem;font-weight:700;color:#94a3b8;margin:24px 0 14px 0;text-transform:uppercase;letter-spacing:0.06em;'>🧩 Skills</div>",
+        "<div style='font-size:1.1rem;font-weight:700;color:#94a3b8;margin:16px 0 8px 0;text-transform:uppercase;letter-spacing:0.06em;'>🧩 Skills</div>"
+        "<div style='color:#64748b;font-size:0.82rem;margin-bottom:12px;'>These skills are available to assign to Personal Assistants.</div>",
         unsafe_allow_html=True,
     )
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        search = st.text_input(
-            "🔍 Search agents",
-            placeholder="Search by name or type...",
-            label_visibility="collapsed"
-        )
-    with col2:
-        _CHANNEL_TYPES_FILTER = {"telegram", "whatsapp"}
-        skill_type_keys = [k for k in manager.get_agent_types().keys() if k not in _CHANNEL_TYPES_FILTER]
-        filter_type = st.selectbox(
-            "Filter by type",
-            ["All"] + skill_type_keys,
-            label_visibility="collapsed"
-        )
+    search_col, filter_col = st.columns([2, 1])
+    with search_col:
+        search = st.text_input("Search skills", placeholder="Search by name or type", label_visibility="collapsed")
+    with filter_col:
+        filter_types = [key for key in manager.get_agent_types().keys() if key not in {"telegram", "whatsapp"}]
+        filter_type = st.selectbox("Filter by type", ["All"] + filter_types, label_visibility="collapsed")
 
-    # Exclude channel-type agents from the skill agents grid
-    _CH_TYPES = {"telegram", "whatsapp"}
-    agents_display = [a for a in agents if a["type"] not in _CH_TYPES]
-
-    filtered = agents_display
+    visible_agents = [agent for agent in agents if agent["type"] not in {"telegram", "whatsapp"}]
     if search:
-        filtered = [a for a in filtered
-                    if search.lower() in a["name"].lower()
-                    or search.lower() in a["type"].lower()]
+        query = search.lower()
+        visible_agents = [
+            agent
+            for agent in visible_agents
+            if query in agent["name"].lower() or query in agent["type"].lower()
+        ]
     if filter_type != "All":
-        filtered = [a for a in filtered if a["type"] == filter_type]
+        visible_agents = [agent for agent in visible_agents if agent["type"] == filter_type]
 
     st.markdown(
-        f"<div style='color:#64748b;font-size:0.85rem;margin:16px 0 20px 0;'>Showing {len(filtered)} of {len(agents_display)} skill(s)</div>",
+        f"<div style='color:#64748b;font-size:0.85rem;margin:16px 0 20px 0;'>Showing {len(visible_agents)} of {skill_count} skill(s)</div>",
         unsafe_allow_html=True,
     )
 
-    if not filtered:
+    if visible_agents:
+        cols = st.columns(4)
+        for idx, agent in enumerate(visible_agents):
+            with cols[idx % 4]:
+                show_agent_card(agent)
+    else:
         st.markdown(
-            """
-            <div style="background:rgba(255, 107, 107, 0.1);border:1px solid rgba(255, 107, 107, 0.2);
-                       padding:20px;border-radius:12px;text-align:center;">
-                <div style="color:#ff6b6b;font-weight:600;">⚠️ No agents match your filters</div>
-                <div style="color:#888;font-size:0.9rem;margin-top:6px;">
-                  Try adjusting your search terms or filters.
-                </div>
-            </div>
-            """,
+            "<div style='background:rgba(255,107,107,0.1);border:1px solid rgba(255,107,107,0.2);padding:20px;border-radius:12px;text-align:center;'><div style='color:#ff6b6b;font-weight:600;'>No skills match your filters</div><div style='color:#888;font-size:0.9rem;margin-top:6px;'>Try adjusting your search terms or filters.</div></div>",
             unsafe_allow_html=True,
         )
-        return
 
-    cols = st.columns(4)
-    for idx, agent in enumerate(filtered):
-        with cols[idx % 4]:
-            show_agent_card(agent)
-    # ── Channels ────────────────────────────────────────────────────────────────────
     st.divider()
+    st.markdown("<div id='channels-section'></div>", unsafe_allow_html=True)
     st.markdown(
-        "<div style='font-size:1.1rem;font-weight:700;color:#94a3b8;margin:16px 0 10px 0;text-transform:uppercase;letter-spacing:0.06em;'>📡 Channels</div>"
-        "<div style='color:#475569;font-size:0.84rem;margin-bottom:16px;'>"
-        "How your assistant communicates with you. Dashboard is always available. "
-        "Configure Telegram via each Assistant's bot token."
-        "</div>",
+        "<div style='font-size:1.1rem;font-weight:700;color:#94a3b8;margin:16px 0 8px 0;text-transform:uppercase;letter-spacing:0.06em;'>📡 Channels</div>"
+        "<div style='color:#64748b;font-size:0.82rem;margin-bottom:12px;'>Dashboard is always on. Telegram bots are managed per assistant.</div>",
         unsafe_allow_html=True,
     )
+
     try:
         from src.agent.hub.channel_registry import CHANNEL_REGISTRY
-        ch_cols = st.columns(2)
-        for idx, (ch_name, ch) in enumerate(CHANNEL_REGISTRY.items()):
-            with ch_cols[idx % 2]:
-                running = ch.is_running()
+        from src.telegram.pa_poller_manager import get_pa_poller_status
 
-                # ── Telegram — managed per-PA, show aggregate info ──────────
-                if ch_name == "telegram":
-                    try:
-                        from src.agent.hub.pa_manager import load_assistants as _lpas
-                        from src.telegram.pa_poller_manager import get_pa_poller_status as _gps
-                        all_pas = _lpas()
-                        bot_count = sum(1 for _p in all_pas if _gps(_p["id"]) is not None)
-                    except Exception:
-                        bot_count = 0
-                        all_pas = []
-                    tg_bg     = "rgba(34,158,217,0.08)"  if running else "rgba(255,255,255,0.03)"
-                    tg_border = "rgba(34,158,217,0.35)" if running else "rgba(255,255,255,0.1)"
-                    bot_label = (
-                        f"<span style='background:#229ED9;color:#fff;padding:3px 10px;"
-                        f"border-radius:12px;font-size:0.76rem;font-weight:600'>"
-                        f"✈️ {bot_count} bot{'s' if bot_count != 1 else ''} running</span>"
-                        if running else
-                        "<span style='background:#4b5563;color:#fff;padding:3px 10px;"
-                        "border-radius:12px;font-size:0.76rem;font-weight:600'>✈️ No bots running</span>"
-                    )
-                    st.markdown(
-                        f"<div style='background:{tg_bg};border:1.5px solid {tg_border};"
-                        f"padding:16px 18px;border-radius:12px;margin-bottom:4px;'>"
-                        f"<div style='display:flex;align-items:center;justify-content:space-between;'>"
-                        f"<div style='font-size:1.5rem'>{ch.icon}</div>{bot_label}</div>"
-                        f"<div style='font-size:1rem;font-weight:700;color:#e2e8f0;margin:8px 0 4px'>{ch.display_name}</div>"
-                        f"<div style='font-size:0.82rem;color:#94a3b8;margin-bottom:8px;'>{ch.description}</div>"
-                        f"<div style='font-size:0.78rem;color:#a8dadc;background:rgba(168,218,220,0.08);"
-                        f"padding:6px 10px;border-radius:8px;border-left:3px solid #a8dadc;'>"
-                        f"⬇️ Start / Stop individual bots via the <b>PA cards</b> below</div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
-                    continue
+        dashboard_col, telegram_col = st.columns(2)
+        dashboard_channel = CHANNEL_REGISTRY.get("dashboard")
+        telegram_channel = CHANNEL_REGISTRY.get("telegram")
+        bot_count = sum(1 for assistant in assistants if get_pa_poller_status(assistant["id"]) is not None)
 
-                # ── Dashboard — always-on, show status only, no stop button ──
-                if ch_name == "dashboard":
-                    try:
-                        s = ch.status()
-                        detail = f" · Port {s.port}" if s.port else (f" · {s.detail}" if s.detail else "")
-                    except Exception:
-                        detail = ""
-                    st.markdown(
-                        f"<div style='background:rgba(22,163,74,0.08);border:1.5px solid rgba(22,163,74,0.35);"
-                        f"padding:16px 18px 10px;border-radius:12px;margin-bottom:4px;'>"
-                        f"<div style='display:flex;align-items:center;justify-content:space-between;'>"
-                        f"<div style='font-size:1.5rem'>{ch.icon}</div>"
-                        f"<span style='background:#16a34a;color:#fff;padding:3px 10px;"
-                        f"border-radius:12px;font-size:0.76rem;font-weight:600'>● Always Running</span></div>"
-                        f"<div style='font-size:1rem;font-weight:700;color:#e2e8f0;margin:8px 0 4px'>"
-                        f"{ch.display_name}{detail}</div>"
-                        f"<div style='font-size:0.82rem;color:#94a3b8'>{ch.description}</div>"
-                        f"</div>",
-                        unsafe_allow_html=True,
-                    )
-                    st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
-                    continue
-
-                # ── Dashboard / API — show card + Start/Stop button ─────────
-                bg    = "rgba(22,163,74,0.08)"  if running else "rgba(255,255,255,0.03)"
-                border= "rgba(22,163,74,0.35)" if running else "rgba(255,255,255,0.1)"
-                badge = (
-                    "<span style='background:#16a34a;color:#fff;padding:3px 10px;"
-                    "border-radius:12px;font-size:0.76rem;font-weight:600'>● Running</span>"
-                    if running else
-                    "<span style='background:#4b5563;color:#fff;padding:3px 10px;"
-                    "border-radius:12px;font-size:0.76rem;font-weight:600'>● Stopped</span>"
-                )
+        with dashboard_col:
+            if dashboard_channel is not None:
                 try:
-                    s = ch.status()
-                    detail = f" · Port {s.port}" if s.port else (f" · {s.detail}" if s.detail else "")
+                    dashboard_status = dashboard_channel.status()
+                    detail = f"Port {dashboard_status.port}" if dashboard_status.port else (dashboard_status.detail or "Always available")
                 except Exception:
-                    detail = ""
+                    detail = "Always available"
                 st.markdown(
-                    f"<div style='background:{bg};border:1.5px solid {border};"
-                    f"padding:16px 18px 10px;border-radius:12px;margin-bottom:4px;'>"
-                    f"<div style='display:flex;align-items:center;justify-content:space-between;'>"
-                    f"<div style='font-size:1.5rem'>{ch.icon}</div>{badge}</div>"
-                    f"<div style='font-size:1rem;font-weight:700;color:#e2e8f0;margin:8px 0 4px'>"
-                    f"{ch.display_name}{detail}</div>"
-                    f"<div style='font-size:0.82rem;color:#94a3b8'>{ch.description}</div>"
-                    f"</div>",
+                    f"<div style='background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.28);padding:14px 16px;border-radius:12px;'><div style='display:flex;align-items:center;justify-content:space-between;gap:12px;'><div><div style='font-size:1rem;font-weight:700;color:#e2e8f0;'>{dashboard_channel.icon} {dashboard_channel.display_name}</div><div style='font-size:0.8rem;color:#94a3b8;margin-top:4px;'>Streamlit web dashboard</div></div><span style='background:#16a34a;color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;'>● {detail}</span></div></div>",
                     unsafe_allow_html=True,
                 )
-                btn_c1, btn_c2 = st.columns(2)
-                with btn_c1:
-                    if not running:
-                        if st.button(
-                            f"▶️ Start {ch.display_name}", key=f"ch_start_{ch_name}",
-                            use_container_width=True, type="primary",
-                        ):
-                            try:
-                                ch.start()
-                                st.rerun()
-                            except Exception as _se:
-                                st.error(str(_se))
-                with btn_c2:
-                    if running:
-                        if st.button(
-                            f"⏹️ Stop {ch.display_name}", key=f"ch_stop_{ch_name}",
-                            use_container_width=True,
-                        ):
-                            try:
-                                ch.stop()
-                                st.rerun()
-                            except Exception as _se:
-                                st.error(str(_se))
-                st.markdown("<div style='margin-bottom:12px'></div>", unsafe_allow_html=True)
-    except Exception as _ce:
-        st.warning(f"Could not load channel registry: {_ce}")
-    # ── Personal Assistants ───────────────────────────────────────────────────
+
+        with telegram_col:
+            if telegram_channel is not None:
+                badge_color = "#229ED9" if bot_count else "#4b5563"
+                state = f"{bot_count} bot{'s' if bot_count != 1 else ''} running" if bot_count else "No bots running"
+                st.markdown(
+                    f"<div style='background:rgba(34,158,217,0.08);border:1px solid rgba(34,158,217,0.24);padding:14px 16px;border-radius:12px;'><div style='display:flex;align-items:center;justify-content:space-between;gap:12px;'><div><div style='font-size:1rem;font-weight:700;color:#e2e8f0;'>{telegram_channel.icon} {telegram_channel.display_name}</div><div style='font-size:0.8rem;color:#94a3b8;margin-top:4px;'>Managed from each PA card</div></div><span style='background:{badge_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;'>✈️ {state}</span></div></div>",
+                    unsafe_allow_html=True,
+                )
+    except Exception as exc:
+        st.warning(f"Could not load channel registry: {exc}")
+
     st.divider()
+    st.markdown("<div id='assistants-section'></div>", unsafe_allow_html=True)
     st.markdown(
         "<div style='font-size:1.1rem;font-weight:700;color:#94a3b8;margin:16px 0 10px 0;text-transform:uppercase;letter-spacing:0.06em;'>🤖 Personal Assistants</div>"
-        "<div style='color:#475569;font-size:0.84rem;margin-bottom:16px;'>"
-        "Your AI assistants — each with their own memory, skills, and Telegram bot."
-        "</div>",
+        "<div style='color:#475569;font-size:0.84rem;margin-bottom:16px;'>Your AI assistants, each with their own memory, skills, and Telegram bot.</div>",
         unsafe_allow_html=True,
     )
-    try:
-        from src.agent.hub.pa_manager import load_assistants as _load_pas
-        assistants = _load_pas()
-        if assistants:
-            pa_cols = st.columns(2)
-            for idx, pa in enumerate(assistants):
-                with pa_cols[idx % 2]:
-                    _show_pa_card(pa)
-        else:
-            st.markdown(
-                "<div style='background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);"
-                "padding:20px;border-radius:12px;text-align:center;color:#a78bfa;'>"
-                "No personal assistants yet. Click <b>🤖 Create Personal Assistant</b> in the sidebar to get started."
-                "</div>",
-                unsafe_allow_html=True,
-            )
-    except Exception as _e:
-        st.warning(f"Could not load personal assistants: {_e}")
+    if assistants:
+        cols = st.columns(2)
+        for idx, assistant in enumerate(assistants):
+            with cols[idx % 2]:
+                _show_pa_card(assistant)
+    else:
+        st.markdown(
+            "<div style='background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.2);padding:20px;border-radius:12px;text-align:center;color:#a78bfa;'>No personal assistants yet. Click <b>🤖 Create Personal Assistant</b> in the sidebar to get started.</div>",
+            unsafe_allow_html=True,
+        )
+
+    scroll_target = st.session_state.get("dashboard_scroll_target")
+    if scroll_target:
+        components.html(
+            f"""
+            <script>
+            (function() {{
+                var docs = [window.parent.document, document];
+                for (var i = 0; i < docs.length; i++) {{
+                    var el = docs[i].getElementById("{scroll_target}");
+                    if (el) {{
+                        el.scrollIntoView({{behavior: "smooth", block: "start"}});
+                        break;
+                    }}
+                }}
+            }})();
+            </script>
+            """,
+            height=0,
+        )
+        st.session_state.dashboard_scroll_target = None
 
 
 if __name__ == "__main__":

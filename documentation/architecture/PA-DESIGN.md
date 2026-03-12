@@ -1,4 +1,4 @@
-# Octa Bot — Personal Assistant Design
+# Octa Bot ï¿½ Personal Assistant Design
 
 *Last Updated: February 24, 2026*
 
@@ -6,13 +6,13 @@
 
 ## Core Philosophy
 
-Octa Bot is a **Personal Assistant (PA)** — not a collection of independent chatbots.
+Octa Bot is a **Personal Assistant (PA)** ï¿½ not a collection of independent chatbots.
 
 The PA has a single identity, a single memory, and a single brain (the Hub). It can be
 reached through different **Channels** (Telegram, WhatsApp, the dashboard, an API) and it
-can perform different tasks through **Skills** (email, Drive, local files, calendar, …).
+can perform different tasks through **Skills** (email, Drive, local files, calendar, ï¿½).
 
-Adding a new Skill or a new Channel should require touching **exactly one file** — its
+Adding a new Skill or a new Channel should require touching **exactly one file** ï¿½ its
 registry entry. Nothing else changes.
 
 ---
@@ -21,25 +21,25 @@ registry entry. Nothing else changes.
 
 ```
 +---------------------------------------------------------------------+
-¦                       Personal Assistant                             ¦
-¦                                                                      ¦
-¦   Identity: "Octa Bot"  ·  memory/_collective_memory_/  ·  LLM client  ¦
+ï¿½                       Personal Assistant                             ï¿½
+ï¿½                                                                      ï¿½
+ï¿½   Identity: "Octa Bot"  ï¿½  memory/_collective_memory_/  ï¿½  LLM client  ï¿½
 +---------------------------------------------------------------------+
-                                ¦
+                                ï¿½
             +-------------------+--------------------+
             ?                   ?                    ?
    +-----------------+  +------------------+  +--------------------+
-   ¦  Skill Registry ¦  ¦ Channel Registry ¦  ¦   HubProcessor     ¦
-   ¦  (what PA can   ¦  ¦ (how users reach ¦  ¦   (brain — routes  ¦
-   ¦   do)           ¦  ¦  the PA)         ¦  ¦   skill dispatch)  ¦
+   ï¿½  Skill Registry ï¿½  ï¿½ Channel Registry ï¿½  ï¿½   HubProcessor     ï¿½
+   ï¿½  (what PA can   ï¿½  ï¿½ (how users reach ï¿½  ï¿½   (brain ï¿½ routes  ï¿½
+   ï¿½   do)           ï¿½  ï¿½  the PA)         ï¿½  ï¿½   skill dispatch)  ï¿½
    +-----------------+  +------------------+  +--------------------+
-            ¦                    ¦
+            ï¿½                    ï¿½
    +--------?--------+  +--------?----------------------------------+
-   ¦ email           ¦  ¦ dashboard  — Streamlit UI (always on)      ¦
-   ¦ drive           ¦  ¦ telegram   — polling bot (background proc) ¦
-   ¦ files           ¦  ¦ whatsapp   — webhook (future)              ¦
-   ¦ calendar (soon) ¦  ¦ api        — FastAPI /hub/chat (always on) ¦
-   ¦ browser (future)¦  ¦ slack      — webhook (future)              ¦
+   ï¿½ email           ï¿½  ï¿½ dashboard  ï¿½ Streamlit UI (always on)      ï¿½
+   ï¿½ drive           ï¿½  ï¿½ telegram   ï¿½ polling bot (background proc) ï¿½
+   ï¿½ files           ï¿½  ï¿½ whatsapp   ï¿½ webhook (future)              ï¿½
+   ï¿½ calendar (soon) ï¿½  ï¿½ api        ï¿½ FastAPI /hub/chat (always on) ï¿½
+   ï¿½ browser (future)ï¿½  ï¿½ slack      ï¿½ webhook (future)              ï¿½
    +-----------------+  +-------------------------------------------+
 ```
 
@@ -59,7 +59,7 @@ execute_with_llm_orchestration(command: str, agent_id: str) -> dict
 ### Adding a new Skill
 
 Add one entry to `AGENT_REGISTRY`. The router, HubProcessor, and workflow planner
-pick it up automatically — zero other changes.
+pick it up automatically ï¿½ zero other changes.
 
 ```python
 "calendar": {
@@ -105,7 +105,7 @@ class BaseChannel(ABC):
 
 1. Create `src/agent/hub/channels/my_channel.py` implementing `BaseChannel`.
 2. Add one entry to `CHANNEL_REGISTRY` in `channel_registry.py`.
-3. That's it — `start.py` will pick it up and start it automatically.
+3. That's it ï¿½ `start.py` will pick it up and start it automatically.
 
 ### Built-in Channels
 
@@ -113,9 +113,9 @@ class BaseChannel(ABC):
 |-------------|------------|-------|----------|----------|--------|
 | `dashboard` | Streamlit  | 8501  | ?       | ?       | ? Built |
 | `api`       | FastAPI    | 8502  | ?       | ?       | ? Built |
-| `telegram`  | Long-poll  | —     | ?       | ?       | ? Built |
+| `telegram`  | Long-poll  | ï¿½     | ?       | ?       | ? Built |
 | `whatsapp`  | Webhook    | 8503  | ?       | ?       | ? Planned |
-| `slack`     | Webhook    | —     | ?       | ?       | ? Planned |
+| `slack`     | Webhook    | ï¿½     | ?       | ?       | ? Planned |
 
 ---
 
@@ -124,16 +124,16 @@ class BaseChannel(ABC):
 **Status: ? Built**
 
 The PA's brain. Receives `(message, session_id, source)` from any channel and
-returns a plain `HubResponse`. No Streamlit, no HTTP — pure Python.
+returns a plain `HubResponse`. No Streamlit, no HTTP ï¿½ pure Python.
 
 ### Dispatch logic
 
 ```
 message arrives
-      ¦
+      ï¿½
       ?
 router.detect_agents_needed(message)
-      ¦
+      ï¿½
       +- None           ? conversational LLM reply (memory-aware)
       +- ["files"]      ? single-skill direct call
       +- ["email"]      ? single-skill direct call
@@ -143,7 +143,7 @@ router.detect_agents_needed(message)
 ### Session history
 
 - Kept in memory (`_SESSION_HISTORY` dict keyed by `session_id`)
-- Persisted to `data/hub_conversations.json` after every turn
+- Persisted to `your_data/hub_conversations.json` after every turn (legacy `data/` file is still read on older installs)
 - Dashboard's **Live Channels** tab reads this file every 5 seconds
 
 ---
@@ -151,7 +151,7 @@ router.detect_agents_needed(message)
 ## Conversation Persistence
 
 ```
-data/
+your_data/
   hub_conversations.json        ? written by HubProcessor (every turn)
   telegram_messages.json        ? written by Telegram poller
 ```
@@ -160,6 +160,15 @@ data/
 ```json
 {
   "sessions": {
+    "dashboard_pa_7ea1659c": {
+      "source": "dashboard",
+      "session_id": "dashboard_pa_7ea1659c",
+      "last_updated": "2026-03-12T11:47:45Z",
+      "messages": [
+        { "role": "user", "content": "...", "ts": "..." },
+        { "role": "assistant", "content": "...", "ts": "..." }
+      ]
+    },
     "telegram_12345": {
       "source": "telegram",
       "session_id": "telegram_12345",
@@ -172,6 +181,12 @@ data/
   }
 }
 ```
+
+Notes:
+- Dashboard chat for a Personal Assistant is persisted as `dashboard_<pa_id>`.
+- Telegram continues to use `telegram_<chat_id>`.
+- The embedded dashboard workspace merges both sources so the PA chat presents a single transcript.
+- If older Telegram sessions do not carry `agent_id`, the loader falls back to `your_data/tg_<pa_id>.json` to map Telegram chat ids back to the PA.
 
 ---
 
@@ -196,9 +211,17 @@ or toggle it from the PA Settings panel in the dashboard.
 | Panel                | Location                   | Status  |
 |----------------------|----------------------------|---------|
 | Agent Hub (overview) | Main dashboard             | ? Built |
-| Multi-Agent Hub Chat | Multi-Agent Hub page tab 1 | ? Built |
-| Live Channels feed   | Multi-Agent Hub page tab 2 | ? Built |
-| PA Settings          | Multi-Agent Hub page tab 3 | ? Built |
+| Embedded PA workspace | Main dashboard workspace  | ? Built |
+| Live Channels feed   | Main dashboard section     | ? Built |
+| PA Settings          | Inline dashboard panel     | ? Built |
+
+### Embedded workspace behavior
+
+- Opening a PA from the dashboard loads the PA Streamlit app inside an iframe with `embedded=1`.
+- The dashboard owns page navigation and iframe sizing.
+- The embedded PA shell owns transcript scrolling.
+- The composer sits as the final flex child in the shell so it remains visible while only the transcript scrolls.
+- Live chat refresh is driven by persisted conversation changes plus a lightweight local event stream.
 
 ---
 
@@ -210,7 +233,7 @@ Requires a `User` model with linked `channel_user_id` per channel.
 
 ### Skill Permissions per Channel
 `delete_files` allowed only from `dashboard`, not from `telegram`.
-Requires an ACL entry per skill × channel.
+Requires an ACL entry per skill ï¿½ channel.
 
 ### WhatsApp Channel
 Requires a WhatsApp Business API webhook.
