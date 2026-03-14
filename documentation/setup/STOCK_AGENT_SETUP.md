@@ -1,6 +1,6 @@
 # Stock Market Analysis Agent Setup Guide
 
-This guide explains how to set up, configure, and test the Stock Market Analysis Agent in Octa Bot.
+This guide explains how to set up, configure, and test the Stock Market Analysis Agent in OctaMind.
 
 > **Important:** This agent is read-only. It has no buy/sell, order placement, or brokerage integration of any kind.
 
@@ -49,7 +49,7 @@ yfinance fetches data from Yahoo Finance's public API endpoints.
 
 ### Python Version
 
-Python 3.9+. (Already required by Octa Bot core.)
+Python 3.9+. (Already required by OctaMind core.)
 
 ---
 
@@ -86,11 +86,11 @@ print(m['market_mood'])
 
 ## Enabling the Stock Market Skill in the UI
 
-1. Open the Octa Bot dashboard (`python start.py` or `streamlit run src/agent/ui/dashboard/app.py`)
-2. Click **"+ Add Agent / Skill"**
-3. In the skill catalogue, locate **?? Stock Market Analysis**
-4. Toggle it on for an existing Personal Assistant, or create a new one
-5. Save - the PA now routes market analysis queries to the Stock Agent
+1. Open the OctaMind dashboard with `python start.py`
+2. Create a Personal Assistant or open an existing one
+3. In the assistant configuration panel, enable **Stock Market Analysis** under **Skills**
+4. Save the changes
+5. Open the assistant workspace - market analysis requests will now route to the Stock Market skill
 
 ---
 

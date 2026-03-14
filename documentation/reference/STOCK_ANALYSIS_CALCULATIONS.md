@@ -1,11 +1,11 @@
-# Stock Analysis — Calculation Methodology
+# Stock Analysis ï¿½ Calculation Methodology
 
-> **Purpose:** This document describes every formula used by Octa Bot's stock market
+> **Purpose:** This document describes every formula used by OctaMind's stock market
 > analysis engine.  All calculations are implemented in pure Python with no third-party
 > statistical library (except `math`).  The intent is to allow domain experts to
 > review, challenge, and improve these formulas.
 >
-> **Ethical notice:** Octa Bot does **not** produce buy/sell recommendations or price
+> **Ethical notice:** OctaMind does **not** produce buy/sell recommendations or price
 > targets.  All outputs are informational only and are not SEBI-registered investment advice.
 
 ---
@@ -26,7 +26,7 @@
    - 2.6 Sortino Ratio
    - 2.7 Calmar Ratio
    - 2.8 Composite Risk Score
-3. [Fundamental Analysis — Warren Buffett Framework](#3-fundamental-analysis--warren-buffett-framework)
+3. [Fundamental Analysis ï¿½ Warren Buffett Framework](#3-fundamental-analysis--warren-buffett-framework)
    - 3.1 Profitability
    - 3.2 Financial Safety
    - 3.3 Valuation Multiples
@@ -56,7 +56,7 @@
 
 ### 1.1 RSI (Relative Strength Index)
 
-The RSI measures the speed and magnitude of recent price changes on a scale of 0–100.
+The RSI measures the speed and magnitude of recent price changes on a scale of 0ï¿½100.
 
 **Period:** 14 bars (days by default)
 
@@ -80,12 +80,12 @@ RSI = 100 - (100 / (1 + RS))
 |-------------|------------|
 | > 70         | Overbought |
 | < 30         | Oversold   |
-| 30 – 70      | Neutral    |
+| 30 ï¿½ 70      | Neutral    |
 
 **Known limitation:** Standard RSI uses Wilder's smoothed averages (EMA-based); this
 implementation uses a simple rolling mean for the 14-period window. This may give slightly
 more reactive readings. A future improvement would use Wilder's smoothing:
-`avg_gain = (prev_avg_gain × 13 + current_gain) / 14`.
+`avg_gain = (prev_avg_gain ï¿½ 13 + current_gain) / 14`.
 
 ---
 
@@ -106,7 +106,7 @@ Histogram     = MACD line - Signal line
 ```
 multiplier = 2 / (span + 1)
 EMA[0]     = close[0]
-EMA[i]     = (close[i] - EMA[i-1]) × multiplier + EMA[i-1]
+EMA[i]     = (close[i] - EMA[i-1]) ï¿½ multiplier + EMA[i-1]
 ```
 
 **Interpretation:**
@@ -122,7 +122,7 @@ EMA[i]     = (close[i] - EMA[i-1]) × multiplier + EMA[i-1]
 
 ### 1.3 Bollinger Bands
 
-Bollinger Bands show volatility by placing bands ±2 standard deviations around a 20-day SMA.
+Bollinger Bands show volatility by placing bands ï¿½2 standard deviations around a 20-day SMA.
 
 **Parameters:** Period = 20, standard deviations = 2
 
@@ -130,8 +130,8 @@ Bollinger Bands show volatility by placing bands ±2 standard deviations around a
 SMA_20        = mean(close[-20:])
 std_20        = population_std(close[-20:])
 
-Upper Band    = SMA_20 + (2 × std_20)
-Lower Band    = SMA_20 - (2 × std_20)
+Upper Band    = SMA_20 + (2 ï¿½ std_20)
+Lower Band    = SMA_20 - (2 ï¿½ std_20)
 Middle Band   = SMA_20
 ```
 
@@ -174,10 +174,10 @@ Signals are noted as "above" or "below" each SMA.
 daily_returns[i] = (close[i] - close[i-1]) / close[i-1]
 
 mean_r   = mean(daily_returns)
-variance = sum((r - mean_r)² for r in daily_returns) / (N - 1)   ? sample variance (N-1)
+variance = sum((r - mean_r)ï¿½ for r in daily_returns) / (N - 1)   ? sample variance (N-1)
 daily_s  = sqrt(variance)
 
-annual_s = daily_s × sqrt(252) × 100      (in %)
+annual_s = daily_s ï¿½ sqrt(252) ï¿½ 100      (in %)
 ```
 
 **Why sample variance (N-1)?** Sample variance is the standard statistical estimator
@@ -194,8 +194,8 @@ Beta measures the stock's sensitivity to broad market (S&P 500 proxied by SPY ET
 ```
 Align stock and SPY daily returns to same length N.
 
-cov(stock, SPY) = sum((stock_r[i] - mean_stock) × (SPY_r[i] - mean_SPY)) / (N - 1)   ? sample
-var(SPY)        = sum((SPY_r[i] - mean_SPY)²) / (N - 1)                               ? sample
+cov(stock, SPY) = sum((stock_r[i] - mean_stock) ï¿½ (SPY_r[i] - mean_SPY)) / (N - 1)   ? sample
+var(SPY)        = sum((SPY_r[i] - mean_SPY)ï¿½) / (N - 1)                               ? sample
 
 Beta = cov / var
 ```
@@ -204,15 +204,15 @@ Beta = cov / var
 |------------|---------------------------------------|
 | > 1.5      | Amplifies market moves; high risk     |
 | 1.0        | Moves in line with market             |
-| 0.5–1.0    | Less volatile than market             |
+| 0.5ï¿½1.0    | Less volatile than market             |
 | < 0        | Inverse relationship (rare)           |
 
 **Beta 60d (Rolling):** Same formula applied to the most recent 60 trading days only.
-Shows how a stock’s market sensitivity has shifted recently vs. the 1-year baseline.
+Shows how a stockï¿½s market sensitivity has shifted recently vs. the 1-year baseline.
 Regime changes (e.g. sector rotation, macro events) are visible here before they show
 in the full-period beta.
 
-**Downside Beta:** Beta computed using only days when SPY’s daily return was negative.
+**Downside Beta:** Beta computed using only days when SPYï¿½s daily return was negative.
 Captures how much the stock amplifies market downturns (tail-risk sensitivity).
 Downside Beta > 1-year Beta implies the stock falls harder than average on bad days.
 Institutional risk models (e.g. BlackRock Aladdin) isolate downside beta for this reason.
@@ -230,16 +230,16 @@ benchmark based on stock country.
 ```
 z95 = 1.645   (95th percentile of standard normal)
 
-VaR_95_parametric = -(mean_r - z95 × daily_s) × 100    (in %)
+VaR_95_parametric = -(mean_r - z95 ï¿½ daily_s) ï¿½ 100    (in %)
 ```
 
 **Historical VaR** (no normality assumption; more robust in fat-tail regimes):
 
 ```
 sorted_returns = sort(daily_returns, ascending)
-idx            = floor(N × 0.05) - 1
+idx            = floor(N ï¿½ 0.05) - 1
 
-VaR_95_historical = -sorted_returns[idx] × 100    (in %)
+VaR_95_historical = -sorted_returns[idx] ï¿½ 100    (in %)
 ```
 
 Both are daily figures: "In 95% of trading days, the loss should not exceed this %."
@@ -257,19 +257,19 @@ Measures return earned per unit of total risk.
 risk_free_annual = 4.5%   (approximate Indian/US short-term rate assumption)
 risk_free_daily  = 0.045 / 252
 
-Sharpe = (mean_daily_return - rf_daily) / daily_s × sqrt(252)
+Sharpe = (mean_daily_return - rf_daily) / daily_s ï¿½ sqrt(252)
 ```
 
 **Clarification:** Sharpe is based on the arithmetic mean daily return annualised
-(µ????? × v252), not the CAGR-style geometric return used in `annual_return_pct`.
+(ï¿½????? ï¿½ v252), not the CAGR-style geometric return used in `annual_return_pct`.
 Geometric annualisation and arithmetic annualisation diverge at higher volatilities;
 the arithmetic form is the standard convention in the Sharpe Ratio definition (Sharpe, 1994).
 
 | Sharpe   | Quality         |
 |----------|-----------------|
 | > 2      | Excellent       |
-| 1–2      | Good            |
-| 0–1      | Adequate        |
+| 1ï¿½2      | Good            |
+| 0ï¿½1      | Adequate        |
 | < 0      | Below risk-free |
 
 **Expert note:** The risk-free rate is hardcoded at 4.5%. This should ideally be updated
@@ -292,7 +292,7 @@ for price in close_prices:
     if drawdown > max_dd:
         max_dd = drawdown
 
-max_drawdown_pct = max_dd × 100
+max_drawdown_pct = max_dd ï¿½ 100
 ```
 
 **Interpretation:** Max drawdown of 30% means if you held from the peak, you would have
@@ -307,8 +307,8 @@ Like Sharpe, but only penalises downside (negative) return volatility.
 ```
 negative_returns = [r for r in daily_returns if r < 0]
 
-downside_var_daily   = sum(r² for r in negative_returns) / total_N
-downside_dev_annual  = sqrt(downside_var_daily) × sqrt(252)
+downside_var_daily   = sum(rï¿½ for r in negative_returns) / total_N
+downside_dev_annual  = sqrt(downside_var_daily) ï¿½ sqrt(252)
 
 annual_excess_return = annual_return/100 - 0.045
 
@@ -319,7 +319,7 @@ Sortino = annual_excess_return / downside_dev_annual
 scales the downside deviation correctly relative to full-period risk.
 
 **Interpretation:** Higher is better. Sortino > Sharpe usually means gains are volatile
-but losses are not — a desirable asymmetry.
+but losses are not ï¿½ a desirable asymmetry.
 
 ---
 
@@ -335,39 +335,39 @@ Calmar = (annual_return / 100) / (max_drawdown_pct / 100)
 | Calmar  | Interpretation      |
 |---------|---------------------|
 | > 3     | Very strong         |
-| 1–3     | Satisfactory        |
+| 1ï¿½3     | Satisfactory        |
 | < 1     | Drawdown exceeds gain |
 
 ---
 
-### 2.8 Composite Risk Score (1–10)
+### 2.8 Composite Risk Score (1ï¿½10)
 
 ```
 vol_score   = clamp(round(annual_s / 5), 1, 10)
               [50% annual volatility ? score 10]
 
-beta_score  = clamp(round(Beta × 3.5), 1, 10)
+beta_score  = clamp(round(Beta ï¿½ 3.5), 1, 10)
 
 var_score   = clamp(round(VaR_95_daily / 1.5), 1, 10)
 
-composite   = 0.40 × vol_score + 0.30 × beta_score + 0.30 × var_score
+composite   = 0.40 ï¿½ vol_score + 0.30 ï¿½ beta_score + 0.30 ï¿½ var_score
 ```
 
 | Score  | Risk Level  |
 |--------|-------------|
 | < 2.5  | Very Low    |
-| 2.5–4  | Low         |
-| 4–6    | Moderate    |
-| 6–8    | High        |
+| 2.5ï¿½4  | Low         |
+| 4ï¿½6    | Moderate    |
+| 6ï¿½8    | High        |
 | = 8    | Very High   |
 
-**Expert review note:** The weighting (40/30/30) and scaling factors (/5, ×3.5, /1.5)
+**Expert review note:** The weighting (40/30/30) and scaling factors (/5, ï¿½3.5, /1.5)
 are calibrated heuristically. An empirical calibration against historical risk events
 across market caps would be valuable.
 
 **On percentile normalization (expert suggestion):** A more rigorous alternative is to
 normalise each metric to its percentile rank over a reference universe (large/mid/small
-cap stocks), then composite as `0.4 × vol_percentile + 0.3 × beta_percentile + 0.3 × var_percentile`.
+cap stocks), then composite as `0.4 ï¿½ vol_percentile + 0.3 ï¿½ beta_percentile + 0.3 ï¿½ var_percentile`.
 This removes arbitrary scaling constants. It is not currently implemented because computing
 universe percentiles requires fetching and caching risk metrics for hundreds of reference
 stocks at query time, which is prohibitive for a real-time single-stock tool. The heuristic
@@ -375,7 +375,7 @@ scaling is a pragmatic approximation; consider this a known limitation for insti
 
 ---
 
-## 3. Fundamental Analysis — Warren Buffett Framework
+## 3. Fundamental Analysis ï¿½ Warren Buffett Framework
 
 **Source file:** `src/stock_market/fundamental_service.py` ? `fundamental_analysis()`
 
@@ -385,13 +385,13 @@ All data fetched from `yfinance Ticker.info`.
 
 | Metric              | Formula / Source                                   |
 |---------------------|----------------------------------------------------|
-| ROE (%)             | `returnOnEquity × 100` from yfinance               |
-| ROA (%)             | `returnOnAssets × 100` from yfinance               |
-| Gross Margin (%)    | `grossMargins × 100` from yfinance                 |
-| Operating Margin (%)| `operatingMargins × 100` from yfinance             |
-| Net Margin (%)      | `profitMargins × 100` from yfinance                |
-| EBITDA Margin (%)   | `ebitda / totalRevenue × 100` (self-computed)      |
-| FCF Yield (%)       | `freeCashflow / marketCap × 100` (self-computed)   |
+| ROE (%)             | `returnOnEquity ï¿½ 100` from yfinance               |
+| ROA (%)             | `returnOnAssets ï¿½ 100` from yfinance               |
+| Gross Margin (%)    | `grossMargins ï¿½ 100` from yfinance                 |
+| Operating Margin (%)| `operatingMargins ï¿½ 100` from yfinance             |
+| Net Margin (%)      | `profitMargins ï¿½ 100` from yfinance                |
+| EBITDA Margin (%)   | `ebitda / totalRevenue ï¿½ 100` (self-computed)      |
+| FCF Yield (%)       | `freeCashflow / marketCap ï¿½ 100` (self-computed)   |
 
 **Note:** yfinance `returnOnEquity` is a decimal (e.g. 0.35 = 35%); multiplied by 100.
 
@@ -406,7 +406,7 @@ All data fetched from `yfinance Ticker.info`.
 | Quick Ratio     | `quickRatio` from yfinance                     |
 
 **Data quality note:** yfinance's `debtToEquity` is inconsistently normalised across
-tickers — sometimes returned as a ratio (1.55) and sometimes as a percentage (155.3).
+tickers ï¿½ sometimes returned as a ratio (1.55) and sometimes as a percentage (155.3).
 The code applies a heuristic: if value > 20, divide by 100. Expert validation welcomed.
 
 ---
@@ -428,8 +428,8 @@ The code applies a heuristic: if value > 20, divide by 100. Expert validation we
 
 | Metric                  | Source                      |
 |-------------------------|-----------------------------|
-| Earnings Growth (YoY %) | `earningsGrowth × 100`      |
-| Revenue Growth (YoY %)  | `revenueGrowth × 100`       |
+| Earnings Growth (YoY %) | `earningsGrowth ï¿½ 100`      |
+| Revenue Growth (YoY %)  | `revenueGrowth ï¿½ 100`       |
 
 **Known limitation:** yfinance growth figures are trailing 12-month YoY, not forward-looking.
 
@@ -439,12 +439,12 @@ The code applies a heuristic: if value > 20, divide by 100. Expert validation we
 
 | Metric             | Formula                                    |
 |--------------------|--------------------------------------------|
-| Dividend Yield (%) | `dividendYield × 100`                      |
-| Payout Ratio (%)   | `payoutRatio × 100`                        |
+| Dividend Yield (%) | `dividendYield ï¿½ 100`                      |
+| Payout Ratio (%)   | `payoutRatio ï¿½ 100`                        |
 
 ---
 
-### 3.6 Moat Score (0–10)
+### 3.6 Moat Score (0ï¿½10)
 
 Economic moat is a qualitative concept (durable competitive advantage) quantified here
 via 5 measurable proxies.  Each signal contributes a maximum of 2 points.
@@ -473,7 +473,7 @@ thresholds better suit Indian market context.
 
 ---
 
-### 3.7 Quality Score (0–10)
+### 3.7 Quality Score (0ï¿½10)
 
 Composite score combining moat, value, and safety.
 
@@ -482,15 +482,15 @@ value_sub_score:
   pe_pts   = 2 if pe < 15 else (1 if pe < 25 else 0)
   peg_pts  = 2 if peg < 1  else (1 if peg < 2  else 0)
   pb_pts   = 2 if pb < 1.5 else (1 if pb < 3   else 0)
-  value_sub_score = (pe_pts + peg_pts + pb_pts) / 6 × 10   ? 0–10
+  value_sub_score = (pe_pts + peg_pts + pb_pts) / 6 ï¿½ 10   ? 0ï¿½10
 
 safety_sub_score:
   cr_pts   = 2 if current_ratio > 2 else (1 if > 1.5 else 0)
   qr_pts   = 2 if quick_ratio   > 1 else (1 if > 0.8 else 0)
   de_pts   = 2 if debt_equity   < 0.3 else (1 if < 0.7 else 0)
-  safety_sub_score = (cr_pts + qr_pts + de_pts) / 6 × 10   ? 0–10
+  safety_sub_score = (cr_pts + qr_pts + de_pts) / 6 ï¿½ 10   ? 0ï¿½10
 
-quality_score = moat_score × 0.50 + value_sub_score × 0.25 + safety_sub_score × 0.25
+quality_score = moat_score ï¿½ 0.50 + value_sub_score ï¿½ 0.25 + safety_sub_score ï¿½ 0.25
 ```
 
 | quality_score | Quality Label |
@@ -505,7 +505,7 @@ quality_score = moat_score × 0.50 + value_sub_score × 0.25 + safety_sub_score × 
 
 **Source file:** `src/stock_market/stock_service.py` ? `sentiment_analysis()`
 
-### 4.1 Sentiment Engine — Two-Tier Architecture
+### 4.1 Sentiment Engine ï¿½ Two-Tier Architecture
 
 **PRIMARY: LLM Classification (OpenAI / configured model)**
 
@@ -525,7 +525,7 @@ Advantages over keywords:
 Numeric score when LLM is used:
 ```
 llm_sign   = +1.0 (Positive) | -1.0 (Negative) | 0.0 (Neutral)
-item_score = llm_sign × confidence
+item_score = llm_sign ï¿½ confidence
 ```
 
 Temperature = 0.0 (deterministic).  Timeout = 20s.  Fails gracefully to keyword fallback.
@@ -570,7 +570,7 @@ is weakly positive but "not good" is strongly negative in financial context.
 
 Words `{"significantly", "sharply", "dramatically", "substantially", "hugely",
 "massively", "enormously", "considerably", "strongly", "greatly"}` appearing within
-2 words before a keyword multiply that keyword's contribution by **1.5×**.
+2 words before a keyword multiply that keyword's contribution by **1.5ï¿½**.
 
 ### 4.5 Recency Decay (both tiers)
 
@@ -580,12 +580,12 @@ Each news item's score is multiplied by a recency weight based on the item's
 | Age (days from now) | Weight |
 |---------------------|--------|
 | = 7                 | 1.00   |
-| 8–14                | 0.80   |
+| 8ï¿½14                | 0.80   |
 | > 14                | 0.60   |
 
 ### 4.6 Publisher Reliability (both tiers)
 
-News from trusted financial publishers receives a **1.3× boost**:
+News from trusted financial publishers receives a **1.3ï¿½ boost**:
 
 > Reuters, Bloomberg, WSJ/Wall Street Journal, Financial Times/FT,
 > CNBC, Barron's, Forbes, MarketWatch
@@ -593,8 +593,8 @@ News from trusted financial publishers receives a **1.3× boost**:
 ### 4.7 Aggregate Score (both tiers)
 
 ```
-total_weight  = S recency_weight × publisher_weight  for all items
-agg_score     = S (item_score × total_weight) / total_weight
+total_weight  = S recency_weight ï¿½ publisher_weight  for all items
+agg_score     = S (item_score ï¿½ total_weight) / total_weight
 
 Label:
   agg_score > +0.10  ? Positive
@@ -631,18 +631,18 @@ Based on the **previous session's** High, Low, Close.
 P  = (H + L + C) / 3          ? Pivot
 R1 = 2P - L
 R2 = P + (H - L)
-R3 = H + 2×(P - L)
+R3 = H + 2ï¿½(P - L)
 S1 = 2P - H
 S2 = P - (H - L)
-S3 = L - 2×(H - P)
+S3 = L - 2ï¿½(H - P)
 ```
 
 R1/R2/R3 = resistance levels.  S1/S2/S3 = support levels.
 Pivot (P) is the primary reference level: price above P is generally considered bullish.
 
 **Expert note:** Classic pivots are the most widely used by prop desks and retail traders.
-Fibonacci pivots (`R1 = P + 0.382×(H-L)`) and Woodie pivots (`P = (H+L+2C)/4`) are
-alternatives — expert review invited on preference.
+Fibonacci pivots (`R1 = P + 0.382ï¿½(H-L)`) and Woodie pivots (`P = (H+L+2C)/4`) are
+alternatives ï¿½ expert review invited on preference.
 
 ### 5.3 52-Week High / Low
 
@@ -654,7 +654,7 @@ These represent the highest and lowest traded prices over the trailing 52 weeks.
 ```
 typical_price_i = (High_i + Low_i + Close_i) / 3
 
-VWAP = S(typical_price_i × Volume_i) / S(Volume_i)
+VWAP = S(typical_price_i ï¿½ Volume_i) / S(Volume_i)
 ```
 
 Computed over **5-day hourly bars** (fetched with `period="5d", interval="1h"`).
@@ -666,7 +666,7 @@ intraday tick or minute data. The 5-day VWAP serves as a medium-term trend refer
 - Price crossing below 5D VWAP ? caution signal
 
 **Bar-based approximation:** This VWAP uses hourly bar typical prices, not tick-level
-transaction prices. True institutional VWAP is computed as `S(price_i × volume_i) / S(volume_i)`
+transaction prices. True institutional VWAP is computed as `S(price_i ï¿½ volume_i) / S(volume_i)`
 over every individual trade or minute bar. The typical-price hourly approximation is
 acceptable for directional context but differs from exchange-reported VWAP by a small
 margin depending on intraday price distribution.
@@ -699,7 +699,7 @@ ideally be based on intraday data at 15-minute resolution for precision.
 Expert calibration on bucket count and timeframe welcome.
 
 **Equal-width bucket limitation:** Buckets are equal-width price intervals (e.g. a $10
-stock split into 20 × $0.50 buckets). Professional systems instead align buckets to the
+stock split into 20 ï¿½ $0.50 buckets). Professional systems instead align buckets to the
 tick size or use fixed price increments (e.g. $0.25 for a mid-cap). Equal-width can
 overly compress low-priced small-cap stocks and spread high-priced stocks too thinly.
 The current implementation is satisfactory for qualitative POC/value-area context.
@@ -710,8 +710,8 @@ The current implementation is satisfactory for qualitative POC/value-area contex
 sma20_now  = mean(close[-20:])
 sma20_prev = mean(close[-21:-1])
 
-if   sma20_now > sma20_prev × 1.001:  trend = "Uptrend"
-elif sma20_now < sma20_prev × 0.999:  trend = "Downtrend"
+if   sma20_now > sma20_prev ï¿½ 1.001:  trend = "Uptrend"
+elif sma20_now < sma20_prev ï¿½ 0.999:  trend = "Downtrend"
 else:                                  trend = "Sideways"
 ```
 
@@ -721,7 +721,7 @@ The 0.1% threshold prevents noise from triggering trend changes.
 
 Detected on the most recent candle using standard candlestick geometry.
 
-**Doji:** Open ˜ Close (body = 10% of full candle range)
+**Doji:** Open ï¿½ Close (body = 10% of full candle range)
 
 ```
 body  = |close - open|
@@ -729,19 +729,19 @@ range = high - low
 Doji if range > 0 and body / range < 0.10
 ```
 
-**Hammer:** Small body in upper third, long lower shadow (= 2× body)
+**Hammer:** Small body in upper third, long lower shadow (= 2ï¿½ body)
 
 ```
 lower_shadow = min(open, close) - low
 body         = |close - open|
-Hammer if lower_shadow >= 2 × body and body > 0
+Hammer if lower_shadow >= 2 ï¿½ body and body > 0
 ```
 
-**Shooting Star:** Inverse of hammer — long upper shadow, small body at bottom
+**Shooting Star:** Inverse of hammer ï¿½ long upper shadow, small body at bottom
 
 ```
 upper_shadow = high - max(open, close)
-Shooting Star if upper_shadow >= 2 × body and body > 0
+Shooting Star if upper_shadow >= 2 ï¿½ body and body > 0
 ```
 
 **Bullish Engulfing:** Current candle's body completely engulfs previous candle's body,
@@ -762,7 +762,7 @@ Bullish Engulfing if:
 ## 6. Analyst Quick Snapshot Verdict
 
 The **Analyst Verdict** cell (BUY / HOLD / AVOID) on the report cover page is a
-purely mechanical composite score — **not** an investment recommendation.
+purely mechanical composite score ï¿½ **not** an investment recommendation.
 It summarises five independent signals into a single label so that the cover
 page headlines the overall picture without a human having to hunt through
 all sections.
@@ -814,11 +814,11 @@ clearly strong in most signals to reach BUY.
 High-growth technology / SaaS companies often show:
 * A single bad quarter of earnings (YoY earnings growth negative) due to
   investment cycles, exceptional items, or base effects.
-* Strong top-line momentum (revenue growth 15–25 %) that is invisible in
+* Strong top-line momentum (revenue growth 15ï¿½25 %) that is invisible in
   the original four-signal formula.
 
 Without the revenue signal, such companies were mechanically scored AVOID
-when the underlying thesis was growth-funded investment — as seen with
+when the underlying thesis was growth-funded investment ï¿½ as seen with
 INTELLECT.NS in Feb 2026 (20 % YoY revenue growth, earnings decline from
 heavy hiring, but analyst consensus strongly positive).  The revenue bonus
 brings the verdict closer to the true fundamental picture.
@@ -856,5 +856,5 @@ brings the verdict closer to the true fundamental picture.
 
 ---
 
-*Last updated: 2026-02-26 — added Section 6 (Analyst Verdict formula + revenue growth signal), fixed gross_margin_pct key in executive summary, added structured per-step logging and memory capture to `generate_full_report`.*
+*Last updated: 2026-02-26 ï¿½ added Section 6 (Analyst Verdict formula + revenue growth signal), fixed gross_margin_pct key in executive summary, added structured per-step logging and memory capture to `generate_full_report`.*
 *All calculation code versions are tracked in git history.*

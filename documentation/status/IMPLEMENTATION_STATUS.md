@@ -690,7 +690,7 @@ Fully implemented service + LLM orchestrator. Registered in agent_registry, agen
 
 ### `create_video_post` (LinkedIn)
 - Only **uploads an existing local video file** to LinkedIn � it does NOT generate or create a video.
-- A request like "create a video about X and post it" will fail � Octa Bot cannot generate video content.
+- A request like "create a video about X and post it" will fail � OctaMind cannot generate video content.
 - Workaround: Record/create the video externally, then ask "post this video: /path/to/video.mp4".
 
 ### `generate_ai_image` (LinkedIn)
@@ -714,7 +714,7 @@ Fully implemented service + LLM orchestrator. Registered in agent_registry, agen
 
 ### `schedule_email`
 - Scheduling is software-implemented (stored JSON, checked by a background scheduler).
-- It is **not** a native Gmail scheduled send � it relies on the Octa Bot process being running at send time.
+- It is **not** a native Gmail scheduled send � it relies on the OctaMind process being running at send time.
 - If the application is closed before the scheduled time, the email will not be sent.
 
 ### `export_to_calendar`

@@ -1,138 +1,166 @@
-﻿# Octa Bot
+﻿# OctaMind
 
-An AI-powered platform for managing Gmail, Google Drive, WhatsApp, Telegram, and your local filesystem through natural language. **Personal Assistants** have memory, personality, and context. **Skills** (Email, Drive, WhatsApp, Telegram, Files) are stateless executors that the Personal Assistant orchestrates.
+OctaMind is a multi-agent personal assistant platform that lets you operate Gmail, Google Drive, Google Calendar, Telegram, WhatsApp, LinkedIn, local files, web browsing, habit tracking, and stock analysis through natural language. The product centers on Personal Assistants, which hold identity, memory, and long-running context, while individual skills stay focused on execution.
 
----
+## What Ships Today
+
+- Agent Hub dashboard for creating, configuring, and launching Personal Assistants
+- Embedded Personal Assistant workspace inside the dashboard
+- Skill routing across email, drive, files, calendar, scheduler, file organizer, habit tracking, browser, stock market, LinkedIn, WhatsApp, and Telegram
+- Persistent assistant memory plus cross-channel history merging for dashboard and Telegram
+- Local runtime state and generated artifacts under `your_data/`
+- Public research artifacts in `research/`
+
+## Current Skill Catalog
+
+| Skill | Primary use cases |
+|------|-------------------|
+| Email | Read, search, summarize, draft, reply, schedule, and report on Gmail |
+| Google Drive | Search, upload, download, share, organize, and analyze Drive files |
+| Files | Search across drives, inspect local files, zip or unzip, write reports, and deliver files back into the current chat |
+| Calendar | Create, update, delete, list, and search Google Calendar events |
+| Scheduler | Find the best slots, protect focus time, resolve conflicts, and optimize schedules |
+| File Organizer | Propose folder cleanup or archival plans and apply them only after approval |
+| Habit Tracker | Track habits, streaks, reports, and optional calendar-backed habit sessions |
+| Browser | Search the web, extract page content, inspect metadata, and download public files |
+| Stock Market | Read-only quotes, technicals, risk analysis, portfolio analysis, and PDF reports |
+| LinkedIn | Draft, publish, schedule, and analyze LinkedIn posts and page activity |
+| WhatsApp | Send, search, summarize, schedule, and analyze WhatsApp conversations |
+| Telegram | Send, search, summarize, schedule, and manage Telegram chats and polls |
+
+## Architecture At A Glance
+
+- `start.py` launches the Streamlit Agent Hub on `http://localhost:8501`
+- `start.py` also launches the Hub API on `http://localhost:8502`
+- On Windows, a keep-awake helper is started by default unless disabled in `config/settings.json`
+- Memory consolidation runs as a background process on startup and continues on an 8-hour loop
+- Telegram pollers are managed per Personal Assistant from the dashboard, not directly by `start.py`
+- Runtime outputs, operational state, archives, reports, and generated artifacts are stored under `your_data/`
+
+## Quick Start
+
+### 1. Prepare configuration
+
+Copy the example settings file and add the credentials for the features you plan to use:
+
+```bash
+copy config\settings.example.json config\settings.json
+```
+
+At minimum, configure:
+
+- `llm_api_keys.GITHUB_TOKEN` or another supported provider key
+- `config/credentials.json` if you will use Gmail, Drive, or Calendar
+- `whatsapp` settings if you will use the WhatsApp skill
+- `linkedin` settings if you will use the LinkedIn skill
+
+### 2. Use the project Python environment
+
+This repository does not currently ship a single locked dependency manifest such as `requirements.txt` or `pyproject.toml`. Use the existing project environment you have been developing with, or install only the dependencies required by the features you enable. The setup guides below call out feature-specific packages where needed.
+
+### 3. Start OctaMind
+
+```bash
+python start.py
+```
+
+This starts:
+
+- the Agent Hub dashboard on port `8501`
+- the Hub API on port `8502`
+- the Windows keep-awake helper when enabled
+- the background memory consolidation loop
+
+To stop all tracked processes:
+
+```bash
+python stop.py
+```
+
+If you only want to run the dashboard directly for local development:
+
+```bash
+python run_agent_hub.py
+```
+
+## How To Use It
+
+1. Open the Agent Hub in your browser.
+2. Create a Personal Assistant.
+3. Enable only the skills that assistant should use.
+4. Open the embedded assistant workspace.
+5. Ask for work in natural language, including cross-skill requests such as downloading a file and emailing it, finding time and booking a meeting, or generating a stock report and sending it onward.
+
+## Repository Layout
+
+```text
+OctaMind/
+├── start.py                         # Launch dashboard, API, keep-awake helper, consolidation loop
+├── stop.py                          # Stop dashboard and tracked agent processes
+├── run_agent_hub.py                 # Direct dashboard runner
+├── config/                          # Example settings, provider config, OAuth tokens and credentials
+├── docs/                            # Public website assets
+├── documentation/                   # Setup, architecture, status, and reference documentation
+├── errors/                          # Persistent JSON error registry and local error notes
+├── research/                        # Published research PDFs only
+├── src/
+│   ├── agent/                       # Hub, routing, runtime management, memory, UI, logging
+│   ├── browser/                     # Web browsing and page extraction services
+│   ├── calendar/                    # Google Calendar integration
+│   ├── drive/                       # Google Drive integration
+│   ├── email/                       # Gmail integration
+│   ├── files/                       # Local filesystem tools
+│   ├── habit_tracker/               # Habit tracking services
+│   ├── linkedin/                    # LinkedIn publishing and analytics
+│   ├── stock_market/                # Market data, analysis, and reports
+│   ├── telegram/                    # Telegram service layer
+│   └── whatsapp/                    # WhatsApp service layer
+├── tests/                           # Unit, integration, manual, and channel-specific tests
+└── your_data/                       # Live assistant state, generated outputs, archives, reports
+```
+
+## Documentation Map
+
+### Start here
+
+- [documentation/setup/SETUP.md](documentation/setup/SETUP.md): shared setup for provider keys and Google OAuth
+- [documentation/reference/AGENTS.md](documentation/reference/AGENTS.md): current skill catalog and routing surface
+- [documentation/status/IMPLEMENTATION_STATUS.md](documentation/status/IMPLEMENTATION_STATUS.md): feature status, notable changes, and known limitations
+
+### Feature setup guides
+
+- [documentation/setup/EMAIL_SETUP.md](documentation/setup/EMAIL_SETUP.md)
+- [documentation/setup/CALENDAR_SETUP.md](documentation/setup/CALENDAR_SETUP.md)
+- [documentation/setup/TELEGRAM_SETUP.md](documentation/setup/TELEGRAM_SETUP.md)
+- [documentation/setup/WHATSAPP_SETUP.md](documentation/setup/WHATSAPP_SETUP.md)
+- [documentation/setup/FILES_SETUP.md](documentation/setup/FILES_SETUP.md)
+- [documentation/setup/BROWSER_AGENT_SETUP.md](documentation/setup/BROWSER_AGENT_SETUP.md)
+- [documentation/setup/STOCK_AGENT_SETUP.md](documentation/setup/STOCK_AGENT_SETUP.md)
+- [documentation/setup/LINKEDIN_SETUP.md](documentation/setup/LINKEDIN_SETUP.md)
+
+### Architecture and operations
+
+- [documentation/architecture/ARCHITECTURE.md](documentation/architecture/ARCHITECTURE.md)
+- [documentation/architecture/PA-DESIGN.md](documentation/architecture/PA-DESIGN.md)
+- [documentation/architecture/memory-system.md](documentation/architecture/memory-system.md)
+- [documentation/reference/TOOL_REFERENCE.md](documentation/reference/TOOL_REFERENCE.md)
+- [documentation/reference/REPO_HYGIENE.md](documentation/reference/REPO_HYGIENE.md)
+
+## Runtime Data And Hygiene
+
+- Generated outputs and live runtime state should go under `your_data/`
+- Do not blindly delete the core JSON state in `your_data/` because it stores assistant memory, jobs, conversations, and operation history
+- Logs are truncated on startup, but normalized errors are preserved in `errors/log_error_registry.json`
+- The `research/` folder is intentionally restricted to the published PDFs only
 
 ## Research Papers
 
 - **LLM-Driven DAG Planning with Topological Execution for Multi-Agent AI Orchestration**  
-    [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18911464.svg)](https://doi.org/10.5281/zenodo.18911464)  
-	Zenodo DOI: [10.5281/zenodo.18911464](https://doi.org/10.5281/zenodo.18911464)  
+	[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18911464.svg)](https://doi.org/10.5281/zenodo.18911464)  
+	DOI: [10.5281/zenodo.18911464](https://doi.org/10.5281/zenodo.18911464)  
 	PDF: [research/LLM_DAG_Orchestration.pdf](research/LLM_DAG_Orchestration.pdf)
+
 - **Markdown-Native Agent Memory and Skill Retrieval with FAISS: Building Persistent AI Systems Without a Traditional Database**  
-    [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19018414.svg)](https://doi.org/10.5281/zenodo.19018414)  
-	Zenodo DOI: [10.5281/zenodo.19018414](https://doi.org/10.5281/zenodo.19018414)  
+	[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19018414.svg)](https://doi.org/10.5281/zenodo.19018414)  
+	DOI: [10.5281/zenodo.19018414](https://doi.org/10.5281/zenodo.19018414)  
 	PDF: [research/Markdown_Native_Memory_FAISS_Architecture.pdf](research/Markdown_Native_Memory_FAISS_Architecture.pdf)
-
----
-
-## Quick Start
-
-```bash
-# 1. Configure credentials (see documentation/setup/SETUP.md)
-#    - Copy config/settings.example.json to config/settings.json
-#    - Add your LLM provider key under llm_api_keys (GitHub Models by default)
-#    - Place Google OAuth credentials at config/credentials.json if you use Gmail, Drive, or Calendar
-
-# 2. Run
-python start.py
-```
-
-`start.py` (or `start.exe`) launches the Agent Hub dashboard at **http://localhost:8501**, truncates all log files for a clean session, and opens the browser automatically.
-
-On Windows, OctaMind now also starts a lightweight keep-awake helper by default so Telegram and other external channels remain reachable while the machine is locked. You can disable that behavior with `runtime.keep_awake_when_running: false` in `config/settings.json` or `OCTAMIND_KEEP_AWAKE_WHEN_RUNNING=0`.
-
-Google sign-in is completed on first use per service. OctaMind now supports local browser callback, Telegram `/authcomplete`, or a public HTTPS callback when `google.oauth_callback_base_url` is configured in `config/settings.json`.
-
----
-
-## What It Does
-
-From the **Agent Hub** you create and launch agents. Each agent opens in its own browser tab on a separate port.
-
-| Agent | What it does |
-|-------|-------------|
-| **Email Agent** | Read, send, search, count, draft, schedule Gmail messages (47 tools) |
-| **Drive Agent** | List, search, upload, download, share, organise Google Drive files (37 tools) |
-| **WhatsApp Agent** | Send/read messages, schedule, auto-reply, contacts, analytics (36 tools) |
-| **Telegram Agent** | Send/read messages, schedule, polls, media, analytics (38 tools) |
-| **Files Agent** | Browse, copy, zip, organise, search your local filesystem (48 tools) |
-| **Personal Assistant** | Cross-agent commands ("Download X and email it to Y", "Zip folder and upload to Drive") |
-
-All agents understand **natural language** — no commands to memorise.
-
----
-
-## Project Structure
-
-```
-Octa Bot/
-├── start.py                    # Launch entry point
-├── stop.py                     # Stop all running agents
-├── config/
-│   ├── settings.json           # Runtime credentials and provider settings (do not commit)
-│   ├── credentials.json        # Google OAuth credentials (do not commit)
-│   ├── token.json              # Gmail OAuth token (auto-generated)
-│   ├── drive_token.json        # Drive OAuth token (auto-generated)
-│   └── calendar_token.json     # Calendar OAuth token (auto-generated)
-├── src/
-│   ├── agent/
-│   │   ├── core/               # Process manager, agent registry
-│   │   ├── llm/                # LLM client (GitHub Models), ReAct loop
-│   │   ├── memory/             # 6-layer cognitive memory system
-│   │   ├── ui/
-│   │   │   ├── dashboard/      # Agent Hub UI
-│   │   │   ├── email_agent/    # Email Agent UI + orchestrator
-│   │   │   ├── drive_agent/    # Drive Agent UI + orchestrator
-│   │   │   ├── whatsapp_agent/ # WhatsApp Agent UI + orchestrator
-│   │   │   ├── telegram_agent/ # Telegram Agent UI + orchestrator
-│   │   │   ├── files_agent/    # Files Agent UI + orchestrator
-│   │   │   └── multi_agent/    # Personal Assistant Hub UI
-│   │   └── workflows/          # Multi-agent workflow planner + executor
-│   ├── email/                  # Gmail API service layer
-│   ├── drive/                  # Google Drive API service layer
-│   ├── whatsapp/               # Meta WhatsApp Cloud API + webhook server
-│   ├── telegram/               # Telegram Bot API + long-poll thread
-│   ├── browser/                # HTTP-only web browsing and extraction
-│   ├── stock_market/           # Read-only stock analysis + reporting
-│   ├── calendar/               # Google Calendar integration
-│   └── habit_tracker/          # Habit tracking service layer
-│
-├── memory/                     # Per-PA cognitive memory (Personal Assistants only; Skills are stateless)
-├── your_data/
-│   └── runtime_state/          # Runtime state such as agents.json and running_* trackers
-├── tests/                      # Unit + integration tests
-├── documentation/              # Developer documentation
-└── docs/                       # Public-facing website (index.html)
-```
-
----
-
-## Documentation
-
-| File | Contents |
-|------|----------|
-| [documentation/setup/SETUP.md](documentation/setup/SETUP.md) | Gmail OAuth credentials + GitHub Models token |
-| [documentation/setup/EMAIL_SETUP.md](documentation/setup/EMAIL_SETUP.md) | Gmail + Drive OAuth setup |
-| [documentation/setup/WHATSAPP_SETUP.md](documentation/setup/WHATSAPP_SETUP.md) | WhatsApp Business API + webhook setup |
-| [documentation/setup/TELEGRAM_SETUP.md](documentation/setup/TELEGRAM_SETUP.md) | Telegram Bot token setup |
-| [documentation/architecture/ARCHITECTURE.md](documentation/architecture/ARCHITECTURE.md) | How the system works (routing, ReAct, memory) |
-| [documentation/reference/AGENTS.md](documentation/reference/AGENTS.md) | What each agent can do + example commands |
-| [documentation/reference/REPO_HYGIENE.md](documentation/reference/REPO_HYGIENE.md) | Safe cleanup targets, persistent error registry, and maintenance workflow |
-| [documentation/reference/TOOL_REFERENCE.md](documentation/reference/TOOL_REFERENCE.md) | Every tool — parameters, defaults, example prompts |
-| [documentation/status/IMPLEMENTATION_STATUS.md](documentation/status/IMPLEMENTATION_STATUS.md) | What’s implemented, what’s not, known limits |
-| [documentation/architecture/memory-system.md](documentation/architecture/memory-system.md) | Full memory architecture reference |
-
----
-
-## Logs
-
-Log files are written to the project root and **auto-truncated on every start**:
-`email_agent.log` · `drive_agent.log` · `whatsapp_agent.log` · `telegram_agent.log` · `files_agent.log` · `personal_assistant.log`
-
-Runtime log errors are also normalized into [errors/log_error_registry.json](errors/log_error_registry.json), which is kept across sessions and can be used to improve tool descriptions, routing, and fallback behavior without relying on transient log files alone.
-
----
-
-## Workspace Hygiene
-
-Generated and runtime-only clutter can accumulate quickly. The repository now treats these as safe cleanup targets:
-
-- `__pycache__/`, `.pytest_cache/`, `build/`, `dist/`
-- generated exports in `your_data/exports/` and `your_data/calendar_exports/`
-- transient manifest and prune artifacts such as `your_data/.last_context_prune` and `your_data/octa_manifest_1.txt`
-
-Do not casually delete the core JSON state under `your_data/` such as `assistants.json`, `octa_context.json`, `octa_jobs.json`, `operation_history.json`, or message/history stores. Those are live assistant state, not cache.
-
-See [documentation/reference/REPO_HYGIENE.md](documentation/reference/REPO_HYGIENE.md) for the cleanup policy and the error-registry workflow.

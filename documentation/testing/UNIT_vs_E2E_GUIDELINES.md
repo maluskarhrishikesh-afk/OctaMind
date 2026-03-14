@@ -1,4 +1,4 @@
-# Unit Tests vs E2E Tests — Octa Bot Testing Guidelines
+# Unit Tests vs E2E Tests ï¿½ OctaMind Testing Guidelines
 
 **Date:** 2026-02-25 (updated to cover Browser and Stock Market agents)
 
@@ -6,7 +6,7 @@
 
 ## Short Answer
 
-**For Octa Bot, E2E tests justify their cost because the system's correctness lies in the LLM-orchestration layer.** Unit tests are valuable but only where they add real signal that E2E tests don't already provide cheaply.
+**For OctaMind, E2E tests justify their cost because the system's correctness lies in the LLM-orchestration layer.** Unit tests are valuable but only where they add real signal that E2E tests don't already provide cheaply.
 
 Use both: E2E for orchestration correctness; unit tests for service-layer logic correctness.
 
@@ -27,11 +27,11 @@ Write a focused unit test when **all** of the following apply:
 | Agent | Function | Why unit test? |
 |-------|---------|----------------|
 | Habit Tracker | `get_streak()` calculation | Boundary math (streak resets, longest-streak tracking) |
-| Habit Tracker | `get_weekly_report()` | Date window logic — last week vs this week |
-| Stock Market | `_rsi()` | Numeric algorithm — easy to break sign/period silently |
-| Stock Market | `_ema()` | Multiplier formula — used by MACD; wrong result = wrong signals |
-| Stock Market | `risk_score()` composite | Composite score bounds (1–10 capping, label assignment) |
-| Stock Market | `pattern_detection()` signals | Candlestick rule logic — should fire on known OHLC inputs |
+| Habit Tracker | `get_weekly_report()` | Date window logic ï¿½ last week vs this week |
+| Stock Market | `_rsi()` | Numeric algorithm ï¿½ easy to break sign/period silently |
+| Stock Market | `_ema()` | Multiplier formula ï¿½ used by MACD; wrong result = wrong signals |
+| Stock Market | `risk_score()` composite | Composite score bounds (1ï¿½10 capping, label assignment) |
+| Stock Market | `pattern_detection()` signals | Candlestick rule logic ï¿½ should fire on known OHLC inputs |
 | Browser | `_strip_html_basic()` | Regex correctness for HTML stripping without bs4 |
 | Browser | `_extract_title_from_html()` | Regex fallback for title extraction |
 | File Organizer | `scan_and_propose()` plan generation | Plan structure correctness before apply |
@@ -73,12 +73,12 @@ Write an E2E test when the correctness question **cannot be answered without an 
 ### Browser Agent
 
 **Unit tests** (`tests/browser/`):
-- `test_strip_html_basic` — strips script/style, decodes entities
-- `test_extract_title_regex` — fallback regex extracts `<title>` correctly
-- `test_browse_url_error` — HTTP error returns `{"status": "error", "message": ...}`
-- `test_search_web_empty_results` — handles no-results gracefully
-- `test_download_creates_file` — file is actually written to disk
-- `test_find_on_page_count` — multiple matches counted correctly
+- `test_strip_html_basic` ï¿½ strips script/style, decodes entities
+- `test_extract_title_regex` ï¿½ fallback regex extracts `<title>` correctly
+- `test_browse_url_error` ï¿½ HTTP error returns `{"status": "error", "message": ...}`
+- `test_search_web_empty_results` ï¿½ handles no-results gracefully
+- `test_download_creates_file` ï¿½ file is actually written to disk
+- `test_find_on_page_count` ï¿½ multiple matches counted correctly
 
 **E2E tests** (`tests/agent/e2e_browser_agent.py`):
 - "search the web for Python" ? selects `search_web`, returns results list
@@ -88,14 +88,14 @@ Write an E2E test when the correctness question **cannot be answered without an 
 ### Stock Market Agent
 
 **Unit tests** (`tests/stock_market/`):
-- `test_rsi_overbought` — RSI > 70 when all prices rising
-- `test_rsi_oversold` — RSI < 30 when all prices falling
-- `test_ema_values` — spot-check EMA formula
-- `test_risk_score_bounds` — composite score always 1–10
-- `test_risk_level_labels` — score-to-label mapping
-- `test_pattern_detection_doji` — doji detected with correct OHLC input
-- `test_compare_stocks_min_two` — returns error for fewer than 2 symbols
-- `test_portfolio_suggestions_concentration` — >40% single sector triggers warning
+- `test_rsi_overbought` ï¿½ RSI > 70 when all prices rising
+- `test_rsi_oversold` ï¿½ RSI < 30 when all prices falling
+- `test_ema_values` ï¿½ spot-check EMA formula
+- `test_risk_score_bounds` ï¿½ composite score always 1ï¿½10
+- `test_risk_level_labels` ï¿½ score-to-label mapping
+- `test_pattern_detection_doji` ï¿½ doji detected with correct OHLC input
+- `test_compare_stocks_min_two` ï¿½ returns error for fewer than 2 symbols
+- `test_portfolio_suggestions_concentration` ï¿½ >40% single sector triggers warning
 
 **E2E tests** (`tests/agent/e2e_stock_agent.py`):
 - "price of AAPL" ? selects `get_quote`, returns price
@@ -107,11 +107,11 @@ Write an E2E test when the correctness question **cannot be answered without an 
 ### Habit Tracker Agent
 
 **Unit tests** (`tests/habit_tracker/`):
-- `test_streak_calculation` — streak resets after missed day
-- `test_longest_streak_preserved` — current < longest never overwrites historical best
+- `test_streak_calculation` ï¿½ streak resets after missed day
+- `test_longest_streak_preserved` ï¿½ current < longest never overwrites historical best
 - `test_weekly_report_this_vs_last_week`
-- `test_add_habit_reactivation` — deactivated habit can be re-activated with `add_habit`
-- `test_daily_checkin_missing_key` — won't crash if habit log has missing field
+- `test_add_habit_reactivation` ï¿½ deactivated habit can be re-activated with `add_habit`
+- `test_daily_checkin_missing_key` ï¿½ won't crash if habit log has missing field
 
 ---
 
@@ -119,13 +119,13 @@ Write an E2E test when the correctness question **cannot be answered without an 
 
 | Agent category | Target unit assertions | Target E2E scenarios |
 |----------------|----------------------|---------------------|
-| Service/data layer (new agents) | 15–25 per agent | 3–5 per agent |
-| Orchestrator (LLM routing) | 0 (mocked if any) | 3–5 per agent |
-| Cross-agent integration | 0 | 2–3 total |
+| Service/data layer (new agents) | 15ï¿½25 per agent | 3ï¿½5 per agent |
+| Orchestrator (LLM routing) | 0 (mocked if any) | 3ï¿½5 per agent |
+| Cross-agent integration | 0 | 2ï¿½3 total |
 
-**Total budget (all agents):** ~80–120 unit assertions + 20–30 E2E scenarios.
+**Total budget (all agents):** ~80ï¿½120 unit assertions + 20ï¿½30 E2E scenarios.
 
-Do NOT write 1 assertion per function — write assertions for the meaningful invariants only. A test that duplicates what the code obviously says is noise.
+Do NOT write 1 assertion per function ï¿½ write assertions for the meaningful invariants only. A test that duplicates what the code obviously says is noise.
 
 ---
 
@@ -137,7 +137,7 @@ Do NOT write 1 assertion per function — write assertions for the meaningful inva
 | E2E testing pure math | Wasteful (LLM cost) when a unit test is free and faster |
 | Asserting `== "exact LLM message"` | Brittle; assert on `status`, `tool_used`, or key data fields |
 | Testing every `if/else` branch | Over-testing bureaucracy; focus on real failure modes |
-| No tests on error paths | Silent failures — always test at least one invalid input per service function |
+| No tests on error paths | Silent failures ï¿½ always test at least one invalid input per service function |
 
 ---
 
@@ -146,20 +146,20 @@ Do NOT write 1 assertion per function — write assertions for the meaningful inva
 ```
 tests/
 +-- agent/
-¦   +-- e2e_browser_agent.py        # E2E tests for Browser Agent (LLM + network)
-¦   +-- e2e_stock_agent.py          # E2E tests for Stock Agent (LLM + yfinance)
-¦   +-- e2e_linked_agent.py         # Existing cross-agent E2E
-¦   +-- test_agent_manager.py       # Unit tests for agent lifecycle
-¦
+ï¿½   +-- e2e_browser_agent.py        # E2E tests for Browser Agent (LLM + network)
+ï¿½   +-- e2e_stock_agent.py          # E2E tests for Stock Agent (LLM + yfinance)
+ï¿½   +-- e2e_linked_agent.py         # Existing cross-agent E2E
+ï¿½   +-- test_agent_manager.py       # Unit tests for agent lifecycle
+ï¿½
 +-- browser/
-¦   +-- test_browser_service.py     # Unit tests for browser_service.py
-¦
+ï¿½   +-- test_browser_service.py     # Unit tests for browser_service.py
+ï¿½
 +-- stock_market/
-¦   +-- test_stock_service.py       # Unit tests for stock_service.py
-¦
+ï¿½   +-- test_stock_service.py       # Unit tests for stock_service.py
+ï¿½
 +-- habit_tracker/                  # (recommended future addition)
-¦   +-- test_habit_service.py
-¦
+ï¿½   +-- test_habit_service.py
+ï¿½
 +-- integration/                    # Multi-agent integration scenarios
 ```
 
@@ -197,7 +197,7 @@ def test_browser_search_e2e():
     ...
 
 def test_rsi_calculation():
-    """Pure unit test — no LLM, no network."""
+    """Pure unit test ï¿½ no LLM, no network."""
     ...
 ```
 
@@ -208,19 +208,19 @@ def test_rsi_calculation():
 ## Practical breakdown
 
 ### Where unit tests genuinely help
-- Pure logic functions — e.g., `get_streak()` streak calculation, `get_weekly_report()` date boundary math. These are easy to break silently and fast to test in isolation.
-- Error-path validation — duplicate habit, missing habit, bad directory. E2E covers these too but unit tests catch them with zero LLM cost.
-- Service layer regressions — the 3 bugs caught on 2026-02-25 (`daily_checkin` missing key, `add_habit` rejecting re-activation, `get_habits` missing `count`) are the exact kind of problem a small unit test per function would detect instantly on every change.
+- Pure logic functions ï¿½ e.g., `get_streak()` streak calculation, `get_weekly_report()` date boundary math. These are easy to break silently and fast to test in isolation.
+- Error-path validation ï¿½ duplicate habit, missing habit, bad directory. E2E covers these too but unit tests catch them with zero LLM cost.
+- Service layer regressions ï¿½ the 3 bugs caught on 2026-02-25 (`daily_checkin` missing key, `add_habit` rejecting re-activation, `get_habits` missing `count`) are the exact kind of problem a small unit test per function would detect instantly on every change.
 
 ### Where E2E tests are better
-- LLM tool selection — "does the LLM call `get_streak` when asked about streaks?" Only E2E can validate that.
-- Prompt safety — "does the File Organizer refuse to call `apply_plan` without confirmation?" Only testable E2E.
-- Integration correctness — does the full pipeline from NL ? tool ? response return the right shape object?
+- LLM tool selection ï¿½ "does the LLM call `get_streak` when asked about streaks?" Only E2E can validate that.
+- Prompt safety ï¿½ "does the File Organizer refuse to call `apply_plan` without confirmation?" Only testable E2E.
+- Integration correctness ï¿½ does the full pipeline from NL ? tool ? response return the right shape object?
 
-## Recommendation for Octa Bot
+## Recommendation for OctaMind
 - Continue using E2E tests for orchestration and LLM-integrated flows.
 - Add focused unit tests for service/data layers (e.g., `src/habit_tracker/habit_service.py`, file-organizer plan generation logic). These tests are fast, cheap (no API calls), and catch silent regressions.
-- Aim for ~30–40 focused unit assertions covering critical logic and error paths, not thousands of trivial tests.
+- Aim for ~30ï¿½40 focused unit assertions covering critical logic and error paths, not thousands of trivial tests.
 
 ---
 

@@ -1,99 +1,151 @@
-# Octa Bot Setup Guide
+# OctaMind Setup Guide
 
-Two things are typically configured before running Octa Bot:
+Use this guide for the shared setup required by most OctaMind deployments. Feature-specific setup steps are documented in the dedicated guides under `documentation/setup/`.
+
+## What You Usually Need
+
+Before running OctaMind, configure:
+
 1. **LLM provider credentials** in `config/settings.json`
-2. **Google OAuth credentials** in `config/credentials.json` if you use Gmail, Drive, or Calendar
+2. **Google OAuth credentials** in `config/credentials.json` if you will use Gmail, Drive, or Calendar
+3. **Optional feature sections** in `config/settings.json` for WhatsApp or LinkedIn if you enable those skills
 
----
+## 1. Create `config/settings.json`
 
-## 1. LLM Provider Credentials
+Copy the example file:
 
-Octa Bot uses [GitHub Models](https://github.com/marketplace/models) as its LLM provider (free tier: 150 requests/day).
+```bash
+copy config\settings.example.json config\settings.json
+```
 
-### Configure `config/settings.json`
+The example already includes the current top-level sections used by the codebase:
 
-Copy `config/settings.example.json` to `config/settings.json` and fill in the values you need.
+- `llm_api_keys`
+- `google`
+- `runtime`
+- `whatsapp`
+- `linkedin`
 
-For the default GitHub Models setup, add your token under `llm_api_keys`:
+## 2. Configure An LLM Provider
+
+OctaMind defaults to GitHub Models, but the active provider is selected through `config/providers.json`. Credentials are loaded from `config/settings.json` first and can fall back to environment variables.
+
+Minimal GitHub Models example:
 
 ```json
 {
-   "llm_api_keys": {
-      "GITHUB_TOKEN": "ghp_your_token_here"
-   }
+  "llm_api_keys": {
+    "GITHUB_TOKEN": "ghp_your_token_here"
+  }
 }
 ```
 
-`config/providers.json` controls which provider is active. `config/settings.json` supplies the credentials and provider-specific paths.
+### GitHub Models token
 
-### Get a GitHub Models Token
-1. Go to **GitHub ? Settings ? Developer settings ? Personal access tokens ? Tokens (classic)**
-2. Click **Generate new token (classic)** � no special scopes required
-3. Copy the token: `ghp_xxxxxxxxxxxx`
+1. Open GitHub settings.
+2. Go to developer settings.
+3. Create a classic personal access token.
+4. Put the token under `llm_api_keys.GITHUB_TOKEN`.
 
-> **Rate limits (free tier):** 15 requests/minute, 150 requests/day.  
-> When the limit is hit, agents will show: *"? API rate limit reached. Please wait X minutes."*  
-> The counter resets every 24 hours.
+If you switch providers later, keep `config/providers.json` and `config/settings.json` in sync.
 
-### Model Used
-Configured via `config/providers.json`. The API key is read from `config/settings.json` first and falls back to environment variables.
+## 3. Configure Google OAuth
 
----
+If you will use Gmail, Drive, or Calendar:
 
-## 2. Google OAuth (Gmail + Drive + Calendar)
+1. Create or reuse a Google Cloud project.
+2. Enable the Gmail API, Google Drive API, and Google Calendar API as needed.
+3. Create OAuth credentials.
+4. Save the credentials file as `config/credentials.json`.
 
-### Step 1 � Google Cloud Project
+OctaMind supports three completion modes for Google auth:
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or use an existing one)
-3. Enable the APIs you need:
-   - [Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
-   - [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com)
-   - [Google Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com)
+- local browser callback on the OctaMind machine
+- Telegram `/authcomplete <url>` completion
+- public HTTPS callback when `google.oauth_callback_base_url` is configured
 
-### Step 2 � OAuth Credentials
+Typical files after first successful auth:
 
-1. Go to **Credentials ? Create Credentials ? OAuth client ID**
-2. Use **Desktop application** for the default local-callback flow
-3. If you plan to use a public HTTPS callback, create a **Web application** client instead and add your public callback URL
-4. Download the credentials file
-5. Rename it `credentials.json` and place it at `config/credentials.json`
-
-### Step 3 � First Run Authentication
-
-On the first use of Gmail, Drive, or Calendar, Octa Bot opens the Google consent flow and stores a token for that service automatically.
-
-Supported completion modes:
-- Local browser callback on the OctaMind machine
-- Telegram `/authcomplete <url>` pasteback flow
-- Public HTTPS callback when `google.oauth_callback_base_url` is configured in `config/settings.json`
-
-**Typical files after setup:**
-```
-config/credentials.json      # from Google Cloud (you provide this)
-config/token.json            # Gmail token
-config/drive_token.json      # Drive token
-config/calendar_token.json   # Calendar token
-config/settings.json         # your runtime credentials and paths
+```text
+config/credentials.json
+config/token.json
+config/drive_token.json
+config/calendar_token.json
+config/settings.json
 ```
 
-> Never commit `config/settings.json`, `config/credentials.json`, or token files.
+Never commit real credentials or token files.
 
-### Token Refresh
+If a token becomes invalid, delete the corresponding token file and run the auth flow again.
 
-If a token expires or stops working, delete the relevant file and re-run auth:
-- `config/token.json` for Gmail
-- `config/drive_token.json` for Drive
-- `config/calendar_token.json` for Calendar
+## 4. Optional Feature Configuration
 
----
+### WhatsApp
 
-## 3. Verify Setup
+Fill the `whatsapp` section in `config/settings.json` if you enable the WhatsApp skill. The full webhook and Meta Cloud API setup is covered in [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md).
 
-Start the platform and launch an agent:
+### LinkedIn
+
+Fill the `linkedin` section in `config/settings.json` if you enable the LinkedIn skill. The OAuth and page setup is covered in [LINKEDIN_SETUP.md](LINKEDIN_SETUP.md).
+
+### Runtime
+
+The `runtime.keep_awake_when_running` flag controls whether the Windows keep-awake helper is launched with OctaMind.
+
+## 5. Start OctaMind
+
+Run:
 
 ```bash
 python start.py
 ```
 
-In the Agent Hub, create a Gmail or Calendar-enabled assistant and try a real request such as *"How many emails do I have?"* or *"What is on my calendar today?"*.
+What this does today:
+
+- starts the Streamlit Agent Hub on port `8501`
+- starts the Hub API on port `8502`
+- starts the Windows keep-awake helper when enabled
+- starts the memory consolidation background loop
+- opens the dashboard in your browser when ready
+
+To stop the tracked runtime processes:
+
+```bash
+python stop.py
+```
+
+If you want only the dashboard process for local UI work:
+
+```bash
+python run_agent_hub.py
+```
+
+## 6. Verify The Installation
+
+1. Start OctaMind.
+2. Open the Agent Hub.
+3. Create a Personal Assistant.
+4. Enable the skills you want that assistant to use.
+5. Open the assistant workspace and try a real request.
+
+Good smoke tests:
+
+- Email: "How many unread emails do I have?"
+- Calendar: "What is on my calendar today?"
+- Files: "Search my laptop for PDF invoices"
+- Browser: "Search the web for the latest Python release"
+
+## Setup Guides By Feature
+
+- [EMAIL_SETUP.md](EMAIL_SETUP.md)
+- [CALENDAR_SETUP.md](CALENDAR_SETUP.md)
+- [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)
+- [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md)
+- [FILES_SETUP.md](FILES_SETUP.md)
+- [BROWSER_AGENT_SETUP.md](BROWSER_AGENT_SETUP.md)
+- [STOCK_AGENT_SETUP.md](STOCK_AGENT_SETUP.md)
+- [LINKEDIN_SETUP.md](LINKEDIN_SETUP.md)
+
+## Important Repository Reality
+
+The repository does not currently include a single unified dependency manifest such as `requirements.txt` or `pyproject.toml`. If you are onboarding a fresh machine, use the existing team Python environment or install the dependencies required by the features you plan to enable.

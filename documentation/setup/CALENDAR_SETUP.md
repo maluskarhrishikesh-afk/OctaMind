@@ -1,18 +1,18 @@
-# Calendar Agent (Google Calendar) — Setup & Testing Guide
+# Calendar Agent (Google Calendar) ï¿½ Setup & Testing Guide
 
-This guide walks you through connecting Octa Bot to your Google Calendar and testing every feature of the Calendar Skill.
+This guide walks you through connecting OctaMind to your Google Calendar and testing every feature of the Calendar Skill.
 
 ---
 
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
-- [Step 1 — Google Cloud Project](#step-1--google-cloud-project)
-- [Step 2 — Enable the Calendar API](#step-2--enable-the-calendar-api)
-- [Step 3 — Add the Calendar Scope](#step-3--add-the-calendar-scope)
-- [Step 4 — Configure Octa Bot](#step-4--configure-Octa Bot)
-- [Step 5 — First-Run Authentication](#step-5--first-run-authentication)
-- [Step 6 — Attach the Calendar Skill to a Personal Assistant](#step-6--attach-the-calendar-skill-to-a-personal-assistant)
+- [Step 1 ï¿½ Google Cloud Project](#step-1--google-cloud-project)
+- [Step 2 ï¿½ Enable the Calendar API](#step-2--enable-the-calendar-api)
+- [Step 3 ï¿½ Add the Calendar Scope](#step-3--add-the-calendar-scope)
+- [Step 4 ï¿½ Configure OctaMind](#step-4--configure-OctaMind)
+- [Step 5 ï¿½ First-Run Authentication](#step-5--first-run-authentication)
+- [Step 6 ï¿½ Attach the Calendar Skill to a Personal Assistant](#step-6--attach-the-calendar-skill-to-a-personal-assistant)
 - [Testing Each Tool Category](#testing-each-tool-category)
 - [Troubleshooting](#troubleshooting)
 
@@ -21,22 +21,22 @@ This guide walks you through connecting Octa Bot to your Google Calendar and tes
 ## Architecture Overview
 
 ```
-Octa Bot Calendar Skill
-        ¦
-        ¦  OAuth 2.0 (config/calendar_token.json)
+OctaMind Calendar Skill
+        ï¿½
+        ï¿½  OAuth 2.0 (config/calendar_token.json)
         ?
   Google Calendar API v3  ----------------------------------?  Your Google calendars
   (googleapis.com)    list / create / update / delete events
 ```
 
 **Key points:**
-- The Calendar Skill **reuses the same `config/credentials.json`** as Gmail and Google Drive — if you have already gone through Google OAuth setup for email or Drive, the credentials file is already in place
-- The first authorization generates `config/calendar_token.json` — subsequent starts refresh it silently
-- No webhook needed — the skill queries the Calendar API on demand
+- The Calendar Skill **reuses the same `config/credentials.json`** as Gmail and Google Drive ï¿½ if you have already gone through Google OAuth setup for email or Drive, the credentials file is already in place
+- The first authorization generates `config/calendar_token.json` ï¿½ subsequent starts refresh it silently
+- No webhook needed ï¿½ the skill queries the Calendar API on demand
 
 ---
 
-## Step 1 — Google Cloud Project
+## Step 1 ï¿½ Google Cloud Project
 
 If you already set up the Email or Drive agent you already have a project. Skip to **Step 2**.
 
@@ -46,7 +46,7 @@ If you already set up the Email or Drive agent you already have a project. Skip 
 
 ---
 
-## Step 2 — Enable the Calendar API
+## Step 2 ï¿½ Enable the Calendar API
 
 1. In [Google Cloud Console](https://console.cloud.google.com/) ? **APIs & Services** ? **Library**
 2. Search for **Google Calendar API**
@@ -54,7 +54,7 @@ If you already set up the Email or Drive agent you already have a project. Skip 
 
 ---
 
-## Step 3 — Add the Calendar Scope
+## Step 3 ï¿½ Add the Calendar Scope
 
 The Calendar Skill requests a single, full-access scope:
 
@@ -74,7 +74,7 @@ https://www.googleapis.com/auth/calendar
 
 ---
 
-## Step 4 — Configure Octa Bot
+## Step 4 ï¿½ Configure OctaMind
 
 Open `config/settings.json` and confirm the `google` section looks like this (these paths should already be present after recent setup):
 
@@ -91,7 +91,7 @@ The `calendar_token_path` key is added automatically if you pulled the latest co
 
 ---
 
-## Step 5 — First-Run Authentication
+## Step 5 ï¿½ First-Run Authentication
 
 Run the Google auth helper from your project root:
 
@@ -114,12 +114,12 @@ Expected output: `True`
 
 ---
 
-## Step 6 — Attach the Calendar Skill to a Personal Assistant
+## Step 6 ï¿½ Attach the Calendar Skill to a Personal Assistant
 
-1. Open the **Octa Bot Dashboard** (`http://localhost:8501`)
+1. Open the **OctaMind Dashboard** (`http://localhost:8501`)
 2. Click the **Configure** tab for your Personal Assistant
 3. Under **Skills**, enable **Calendar**
-4. Click **?? Save Changes**
+4. Click **Save Changes**
 
 The PA will now route any calendar-related requests through the Calendar Skill.
 
@@ -129,7 +129,7 @@ The PA will now route any calendar-related requests through the Calendar Skill.
 
 Open the PA chat and try the commands below.  Each command tests one or more Calendar tools.
 
-### 1 — Viewing Today & Tomorrow
+### 1 ï¿½ Viewing Today & Tomorrow
 
 ```
 What's on my calendar today?
@@ -141,7 +141,7 @@ Show me tomorrow's events
 ```
 **Expected:** Tomorrow's events listed with times.
 
-### 2 — List & Search
+### 2 ï¿½ List & Search
 
 ```
 List my next 10 upcoming events
@@ -153,42 +153,42 @@ Search my calendar for "team meeting"
 ```
 **Expected:** All events matching "team meeting".
 
-### 3 — Create an Event
+### 3 ï¿½ Create an Event
 
 ```
 Create an event called "Project Review" on Friday at 3pm for 1 hour
 ```
 **Expected:** Confirmation with the new event ID and a link.
 
-### 4 — Quick Add (Natural Language)
+### 4 ï¿½ Quick Add (Natural Language)
 
 ```
 Quick add: Lunch with Sarah tomorrow at noon
 ```
 **Expected:** Event created using Google's natural-language quickAdd parser.
 
-### 5 — Update an Event
+### 5 ï¿½ Update an Event
 
 ```
 Move "Project Review" to 4pm
 ```
 **Expected:** Confirmation that the event time was updated.
 
-### 6 — Delete an Event
+### 6 ï¿½ Delete an Event
 
 ```
 Delete the meeting called "Project Review"
 ```
 **Expected:** Confirmation of deletion.
 
-### 7 — Recurring Events
+### 7 ï¿½ Recurring Events
 
 ```
 Create a recurring Monday standup at 9am for 30 minutes, every week for the next 4 weeks
 ```
 **Expected:** Recurring event created.
 
-### 8 — Daily & Weekly Agenda
+### 8 ï¿½ Daily & Weekly Agenda
 
 ```
 Show me my daily agenda for Monday
@@ -200,28 +200,28 @@ Show me my calendar for this week
 ```
 **Expected:** Weekly overview grouped by day.
 
-### 9 — Find Free Slots
+### 9 ï¿½ Find Free Slots
 
 ```
 Find a 2-hour free slot this week
 ```
 **Expected:** List of available 2-hour windows during working hours.
 
-### 10 — Conflict Detection
+### 10 ï¿½ Conflict Detection
 
 ```
 Do I have any scheduling conflicts this week?
 ```
 **Expected:** List of overlapping events (or "No conflicts found").
 
-### 11 — Set a Reminder
+### 11 ï¿½ Set a Reminder
 
 ```
 Add a 30-minute reminder to all events tomorrow
 ```
 **Expected:** Reminders added to matching events.
 
-### 12 — Accept / Decline Invites
+### 12 ï¿½ Accept / Decline Invites
 
 ```
 Accept the invite for "Q3 Planning Session"
@@ -232,7 +232,7 @@ Decline the "Design Review" invite
 ```
 **Expected:** RSVP status updated.
 
-### 13 — List Calendars
+### 13 ï¿½ List Calendars
 
 ```
 Show all my calendars
@@ -266,5 +266,5 @@ python setup_google_auth.py
 
 ## Related Guides
 
-- [Email Setup](EMAIL_SETUP.md) — Gmail Agent (shares the same credentials.json)
-- [Files Setup](FILES_SETUP.md) — Local Files Agent (no auth required)
+- [Email Setup](EMAIL_SETUP.md) ï¿½ Gmail Agent (shares the same credentials.json)
+- [Files Setup](FILES_SETUP.md) ï¿½ Local Files Agent (no auth required)

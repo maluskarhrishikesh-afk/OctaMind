@@ -1,6 +1,6 @@
-# Telegram Agent — Setup & Testing Guide
+# Telegram Agent ï¿½ Setup & Testing Guide
 
-This guide walks you through creating a Telegram bot, connecting it to Octa Bot,
+This guide walks you through creating a Telegram bot, connecting it to OctaMind,
 and verifying every feature of the Telegram Agent.
 
 ---
@@ -8,13 +8,13 @@ and verifying every feature of the Telegram Agent.
 ## Table of Contents
 
 1. [Architecture Overview](#architecture-overview)
-2. [Step 1 — Create a Telegram Bot via @BotFather](#step-1--create-a-telegram-bot-via-botfather)
-3. [Step 2 — Get Your Bot Token](#step-2--get-your-bot-token)
-4. [Step 3 — Configure Octa Bot](#step-3--configure-Octa Bot)
-5. [Step 4 — Add the Telegram Block to settings.json](#step-4--add-the-telegram-block-to-settingsjson)
-6. [Step 5 — Install Python Dependencies](#step-5--install-python-dependencies)
-7. [Step 6 — Create a Telegram Agent in the Hub](#step-6--create-a-telegram-agent-in-the-hub)
-8. [Step 7 — Find Your Chat ID](#step-7--find-your-chat-id)
+2. [Step 1 ï¿½ Create a Telegram Bot via @BotFather](#step-1--create-a-telegram-bot-via-botfather)
+3. [Step 2 ï¿½ Get Your Bot Token](#step-2--get-your-bot-token)
+4. [Step 3 ï¿½ Configure OctaMind](#step-3--configure-OctaMind)
+5. [Step 4 ï¿½ Add the Telegram Block to settings.json](#step-4--add-the-telegram-block-to-settingsjson)
+6. [Step 5 ï¿½ Install Python Dependencies](#step-5--install-python-dependencies)
+7. [Step 6 - Enable Telegram For A Personal Assistant](#step-6---enable-telegram-for-a-personal-assistant)
+8. [Step 7 ï¿½ Find Your Chat ID](#step-7--find-your-chat-id)
 9. [Testing Each Tool Category](#testing-each-tool-category)
     - [Messaging & Sending](#category-1--messaging--sending)
     - [Reading & Inbox](#category-2--reading--inbox)
@@ -33,33 +33,33 @@ and verifying every feature of the Telegram Agent.
 
 ```
 Your Telegram account
-        ¦   sends message
+        ï¿½   sends message
         ?
   Telegram Bot API  ----------------------------------------------------------?
   (api.telegram.org)         Long-polling getUpdates (every 2 s)
-                                                                               ¦
+                                                                               ï¿½
                                                               +----------------+
                                                               ?
-                                                   Octa Bot Background Poller
+                                                   OctaMind Background Poller
                                                    (src/telegram/polling/poller.py)
-                                                              ¦
+                                                              ï¿½
                                                    writes to message_store (in-memory)
-                                                              ¦
-  Telegram Bot API ?---- Octa Bot Agent ?---- Telegram Agent UI
+                                                              ï¿½
+  Telegram Bot API ?---- OctaMind Agent ?---- Telegram Agent UI
   (sends messages)       (reads store)         (Streamlit, port 850x)
 ```
 
 **Key points:**
-- **No webhook is needed** — the agent uses Telegram's **long-polling** (`getUpdates`).
+- **No webhook is needed** ï¿½ the agent uses Telegram's **long-polling** (`getUpdates`).
   No public URL, no ngrok, no port forwarding required.
 - The poller starts **automatically** the moment you open the Telegram Agent UI.
-- **Outbound messages** go directly: Octa Bot ? Telegram Bot API ? recipient.
+- **Outbound messages** go directly: OctaMind ? Telegram Bot API ? recipient.
 - **Inbound messages** are collected by the background poller into an in-memory store.
 - The agent only needs one credential: the **bot token** from @BotFather.
 
 ---
 
-## Step 1 — Create a Telegram Bot via @BotFather
+## Step 1 ï¿½ Create a Telegram Bot via @BotFather
 
 1. Open Telegram (desktop or mobile) and search for **@BotFather**.
 
@@ -68,40 +68,40 @@ Your Telegram account
    /newbot
    ```
 
-3. BotFather will ask for a **name** (display name, e.g. `Octa Bot Agent`).
+3. BotFather will ask for a **name** (display name, e.g. `OctaMind Agent`).
 
-4. Then it asks for a **username** — must end in `bot` (e.g. `Octa Bot_myname_bot`).
+4. Then it asks for a **username** ï¿½ must end in `bot` (e.g. `OctaMind_myname_bot`).
 
 5. BotFather replies with:
    ```
-   Done! Congratulations on your new bot. You will find it at t.me/Octa Bot_myname_bot.
+   Done! Congratulations on your new bot. You will find it at t.me/OctaMind_myname_bot.
    Use this token to access the HTTP API:
    7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
    ```
 
-6. **Copy the token** — you will need it in Step 4.
+6. **Copy the token** ï¿½ you will need it in Step 4.
 
 > ?? The bot username must be globally unique.
 > If the name is taken, try adding your initials or a number.
 
 ---
 
-## Step 2 — Get Your Bot Token
+## Step 2 ï¿½ Get Your Bot Token
 
 The token looks like: `7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
 
 - The part before the `:` is the **bot ID**.
-- **Keep this token private** — anyone with it can send messages as your bot.
+- **Keep this token private** ï¿½ anyone with it can send messages as your bot.
 - If you ever leak it, revoke and regenerate with `/revoke` inside BotFather.
 
 ---
 
-## Step 3 — Confirm Octa Bot is Running
+## Step 3 ï¿½ Confirm OctaMind is Running
 
-Make sure Octa Bot is already set up with a working LLM key:
+Make sure OctaMind is already set up with a working LLM key:
 
 1. Open `config/settings.json` and confirm `llm_api_keys.GITHUB_TOKEN` is filled in.
-2. Start Octa Bot:
+2. Start OctaMind:
    ```powershell
    .\.venv\Scripts\python.exe -m streamlit run src\agent\ui\agent_dashboard.py
    ```
@@ -109,7 +109,7 @@ Make sure Octa Bot is already set up with a working LLM key:
 
 ---
 
-## Step 4 — Add the Telegram Block to settings.json
+## Step 4 ï¿½ Add the Telegram Block to settings.json
 
 Open `config/settings.json` and add a `"telegram"` section alongside the existing keys:
 
@@ -129,7 +129,7 @@ Open `config/settings.json` and add a `"telegram"` section alongside the existin
 
 Replace the placeholder with the actual token you copied from BotFather.
 
-> **Alternative — environment variable:**
+> **Alternative ï¿½ environment variable:**
 > If you prefer not to store the token in a file, set it as an environment variable instead.
 > The agent checks `TELEGRAM_BOT_TOKEN` before falling back to `settings.json`.
 > ```powershell
@@ -138,10 +138,10 @@ Replace the placeholder with the actual token you copied from BotFather.
 
 ---
 
-## Step 5 — Install Python Dependencies
+## Step 5 ï¿½ Install Python Dependencies
 
 The Telegram agent uses only the standard `requests` library, which is already
-included in Octa Bot's base requirements.  No extra packages are needed.
+included in OctaMind's base requirements.  No extra packages are needed.
 
 Verify the install is complete:
 
@@ -151,24 +151,21 @@ Verify the install is complete:
 
 ---
 
-## Step 6 — Create a Telegram Agent in the Hub
+## Step 6 - Enable Telegram For A Personal Assistant
 
 1. Open the **Agent Hub** at `http://localhost:8501`.
 
-2. Click **+ Create Agent**.
+2. Create a Personal Assistant or open an existing one.
 
-3. Select agent type: **Telegram Agent**.
+3. Open the assistant configuration panel.
 
-4. Give it a name (e.g. `My Telegram Bot`).
+4. Enable **Telegram** if it is available in your current deployment configuration.
 
-5. Optionally set a role/personality (e.g. `Be concise and use bullet points`).
+5. Save the changes.
 
-6. Click **Create Agent**.
+6. Use the dashboard controls for Telegram on that assistant to start or reconnect the bot integration.
 
-7. Click **Start** — Octa Bot launches the Telegram Agent UI in a new browser tab.
-
-8. The UI header shows a green **? Connected** badge if the bot token is valid.
-   If you see **? Not configured**, go back and check Step 4.
+7. Open the assistant workspace and test Telegram-related requests.
 
 > The background long-polling loop starts automatically when the UI loads.
 > You will see log lines like `[Poller] Background polling loop started.`
@@ -176,23 +173,23 @@ Verify the install is complete:
 
 ---
 
-## Step 7 — Find Your Chat ID
+## Step 7 ï¿½ Find Your Chat ID
 
 Most Telegram commands require a **chat_id** (an integer like `123456789`).
 
-### Method A — Message the bot, then ask Octa Bot
+### Method A ï¿½ Message the bot, then ask OctaMind
 
-1. In your Telegram app, open your newly created bot (`t.me/Octa Bot_myname_bot`) and send it any message, e.g. `hello`.
+1. In your Telegram app, open your newly created bot (`t.me/OctaMind_myname_bot`) and send it any message, e.g. `hello`.
 
-2. In the Octa Bot Telegram Agent chat, type:
+2. In the OctaMind Telegram Agent chat, type:
    ```
    Show recent messages
    ```
-   Octa Bot will display the inbound message along with the **chat_id** and **message_id**.
+   OctaMind will display the inbound message along with the **chat_id** and **message_id**.
 
-3. Note your chat_id — it will be the same every time you message this bot from your account.
+3. Note your chat_id ï¿½ it will be the same every time you message this bot from your account.
 
-### Method B — Use the Bot API directly
+### Method B ï¿½ Use the Bot API directly
 
 Open this URL in your browser (replace `TOKEN` with your bot token):
 ```
@@ -216,17 +213,17 @@ After sending a message to the bot, the response contains:
 
 ## Testing Each Tool Category
 
-Open the Octa Bot Telegram Agent chat and run the commands below.
+Open the OctaMind Telegram Agent chat and run the commands below.
 Replace `YOUR_CHAT_ID` with the chat_id discovered in Step 7.
 
 ---
 
-### Category 1 — Messaging & Sending
+### Category 1 ï¿½ Messaging & Sending
 
 ```
 Send hello world to YOUR_CHAT_ID
 ```
-**Expected:** "Message sent" confirmation. Check Telegram — the bot should have sent the message.
+**Expected:** "Message sent" confirmation. Check Telegram ï¿½ the bot should have sent the message.
 
 ```
 Send *bold text* and _italic_ to YOUR_CHAT_ID
@@ -255,9 +252,9 @@ Delete message 1 from chat YOUR_CHAT_ID
 
 ---
 
-### Category 2 — Reading & Inbox
+### Category 2 ï¿½ Reading & Inbox
 
-First, send 2–3 messages to your bot from Telegram, then:
+First, send 2ï¿½3 messages to your bot from Telegram, then:
 
 ```
 Show unread messages
@@ -286,7 +283,7 @@ How many messages are in my inbox
 
 ---
 
-### Category 3 — Search
+### Category 3 ï¿½ Search
 
 Send a few messages containing "meeting" and "invoice" to your bot first.
 
@@ -312,7 +309,7 @@ Telegram stats
 
 ---
 
-### Category 4 — Chats & Groups
+### Category 4 ï¿½ Chats & Groups
 
 ```
 List my chats
@@ -338,7 +335,7 @@ Pin message 1 in chat GROUP_CHAT_ID
 
 ---
 
-### Category 5 — Media
+### Category 5 ï¿½ Media
 
 ```
 Send photo to YOUR_CHAT_ID from https://picsum.photos/400/300
@@ -364,10 +361,10 @@ Get download URL for file_id AgACAgIxxxxxxx
 
 ---
 
-### Category 6 — Polls
+### Category 6 ï¿½ Polls
 
 ```
-Create poll in chat YOUR_CHAT_ID asking "Best Octa Bot feature?" with options Email Drive Telegram
+Create poll in chat YOUR_CHAT_ID asking "Best OctaMind feature?" with options Email Drive Telegram
 ```
 **Expected:** A Telegram poll appears in the chat with three options.
 
@@ -380,14 +377,14 @@ Stop poll message POLL_MESSAGE_ID in chat YOUR_CHAT_ID
 
 ---
 
-### Category 7 — AI Smart Features
+### Category 7 ï¿½ AI Smart Features
 
-These require a working LLM key in `settings.json`. Send 5–10 messages to your bot first.
+These require a working LLM key in `settings.json`. Send 5ï¿½10 messages to your bot first.
 
 ```
 Summarize chat YOUR_CHAT_ID
 ```
-**Expected:** A 3–5 sentence AI summary of the conversation.
+**Expected:** A 3ï¿½5 sentence AI summary of the conversation.
 
 ```
 Action items from chat YOUR_CHAT_ID
@@ -397,7 +394,7 @@ Action items from chat YOUR_CHAT_ID
 ```
 Draft a message to chat YOUR_CHAT_ID about the upcoming project deadline
 ```
-**Expected:** An AI-written message (shown as a preview — you confirm before sending).
+**Expected:** An AI-written message (shown as a preview ï¿½ you confirm before sending).
 
 ```
 Detect urgent messages
@@ -416,7 +413,7 @@ Translate message YOUR_CHAT_ID:1 to Spanish
 
 ---
 
-### Category 8 — Scheduling
+### Category 8 ï¿½ Scheduling
 
 ```
 Schedule message to YOUR_CHAT_ID for 1 minute from now saying Scheduled test
@@ -435,7 +432,7 @@ Cancel scheduled message SCHEDULE_ID
 
 ---
 
-### Category 9 — Cross-Agent Actions
+### Category 9 ï¿½ Cross-Agent Actions
 
 These require at least one Gmail or Drive agent to also be running.
 
@@ -457,7 +454,7 @@ Share Drive file DRIVE_FILE_ID in chat YOUR_CHAT_ID
 
 - Check that `config/settings.json` has a `"telegram"` block with a non-empty `bot_token`.
 - Run: `.\.venv\Scripts\python.exe -c "from src.telegram.telegram_auth import get_bot_token; print(get_bot_token()[:10])"`
-  — should print the first 10 characters of your token.
+  ï¿½ should print the first 10 characters of your token.
 
 ---
 
@@ -479,7 +476,7 @@ print(get_me())
 The in-memory message store is empty until the poller receives messages.
 1. Confirm the poller is running: the UI should show the poller status in the sidebar.
 2. Send a fresh message to the bot from your Telegram app.
-3. Wait 2–3 seconds, then run `Show recent messages` again.
+3. Wait 2ï¿½3 seconds, then run `Show recent messages` again.
 
 ---
 
@@ -487,7 +484,7 @@ The in-memory message store is empty until the poller receives messages.
 
 Check `logs/telegram_agent.log` for errors.  Common causes:
 - Invalid token (poller fails on the first `getUpdates` call).
-- Another instance of Octa Bot is already polling the same bot — Telegram only allows one `getUpdates` session per bot.
+- Another instance of OctaMind is already polling the same bot ï¿½ Telegram only allows one `getUpdates` session per bot.
 
 ---
 

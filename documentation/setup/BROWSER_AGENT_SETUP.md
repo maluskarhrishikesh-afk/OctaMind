@@ -1,12 +1,12 @@
 # Browser Agent Setup Guide
 
-This guide explains how to set up, configure, and test the Browser Agent in Octa Bot.
+This guide explains how to set up, configure, and test the Browser Agent in OctaMind.
 
 ---
 
 ## What the Browser Agent Does
 
-The Browser Agent gives any Octa Bot Personal Assistant the ability to search the web, inspect URLs, extract readable content, and download files from public pages.
+The Browser Agent gives any OctaMind Personal Assistant the ability to search the web, inspect URLs, extract readable content, and download files from public pages.
 
 | Tool | What it does |
 |------|-------------|
@@ -73,11 +73,11 @@ print(r['status'], '-', r['count'], 'results')
 
 ## Enabling the Browser Skill in the UI
 
-1. Open the Octa Bot dashboard (`python start.py` or `streamlit run src/agent/ui/dashboard/app.py`)
-2. Click **"+ Add Agent / Skill"**
-3. In the skill catalogue, locate **?? Web Browser**
-4. Toggle it on for an existing Personal Assistant, or create a new one with it pre-selected
-5. Save - the PA now routes web-related queries to the Browser Agent
+1. Open the OctaMind dashboard with `python start.py`
+2. Create a Personal Assistant or open an existing one
+3. In the assistant configuration panel, enable **Web Browser** under **Skills**
+4. Save the changes
+5. Open the assistant workspace - web-related queries will now route to the Browser skill
 
 ---
 

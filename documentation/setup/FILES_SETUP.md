@@ -1,8 +1,8 @@
-# Files Agent — Setup & Testing Guide
+# Files Skill - Setup and Testing Guide
 
 ## Overview
 
-The Files Agent is a local-file-system management agent for Octa Bot. It needs **no credentials and no API setup** — it works immediately after you create a Files Agent in the Agent Hub. The only optional dependency is an LLM provider (for the AI smart features in the last section), and `send2trash` for Recycle Bin support.
+The Files skill is OctaMind's local-file-system toolkit. It needs **no credentials and no API setup**. Enable it on a Personal Assistant and it can search, inspect, organize, archive, and deliver files from the local machine. The only optional dependency called out here is `send2trash` for Recycle Bin support.
 
 ---
 
@@ -16,16 +16,16 @@ pip install send2trash
 
 `send2trash` enables safe deletion (Recycle Bin instead of permanent delete). Without it, deletes are **permanent** by default.
 
-### 2. Create a Files Agent in the Agent Hub
+### 2. Enable the Files skill on a Personal Assistant
 
 1. Open the **Agent Hub** (`http://localhost:8501`)
-2. Click **+ Create Agent**
-3. Select agent type: **Files Agent**
-4. Give it a name (e.g., "My Files Agent")
-5. Click **Create Agent**
-6. Click **Start** to launch the agent's chat UI
+2. Create a Personal Assistant or open an existing one
+3. Open the assistant configuration panel
+4. Enable **Files** under **Skills**
+5. Save the changes
+6. Open the assistant workspace and start asking file-related requests
 
-The Files Agent opens in its own browser tab (port auto-assigned). No environment variables or credentials needed.
+No environment variables or external credentials are needed for the Files skill.
 
 ---
 
@@ -35,7 +35,7 @@ Work through each section below to verify every feature category works.
 
 ---
 
-### Category 1 — File & Folder Operations (8 tools)
+### Category 1 ï¿½ File & Folder Operations (8 tools)
 
 Open the Files Agent chat and type these commands one by one:
 
@@ -47,25 +47,25 @@ List my Downloads folder
 ```
 Get info on C:/Windows/notepad.exe
 ```
-**Expected:** File metadata — size, dates, extension, type.
+**Expected:** File metadata ï¿½ size, dates, extension, type.
 
 ```
-Create folder C:/Users/<YourName>/Desktop/Octa Bot_Test
+Create folder C:/Users/<YourName>/Desktop/OctaMind_Test
 ```
 **Expected:** "Folder created successfully."
 
 ```
-Copy C:/Windows/notepad.exe to C:/Users/<YourName>/Desktop/Octa Bot_Test/notepad_copy.exe
+Copy C:/Windows/notepad.exe to C:/Users/<YourName>/Desktop/OctaMind_Test/notepad_copy.exe
 ```
 **Expected:** "File copied."
 
 ```
-Rename C:/Users/<YourName>/Desktop/Octa Bot_Test/notepad_copy.exe to test_copy.exe
+Rename C:/Users/<YourName>/Desktop/OctaMind_Test/notepad_copy.exe to test_copy.exe
 ```
 **Expected:** "File renamed."
 
 ```
-Move C:/Users/<YourName>/Desktop/Octa Bot_Test/test_copy.exe to C:/Users/<YourName>/Desktop/
+Move C:/Users/<YourName>/Desktop/OctaMind_Test/test_copy.exe to C:/Users/<YourName>/Desktop/
 ```
 **Expected:** "File moved."
 
@@ -76,7 +76,7 @@ Delete C:/Users/<YourName>/Desktop/test_copy.exe
 
 ---
 
-### Category 2 — Search & Find (6 tools)
+### Category 2 ï¿½ Search & Find (6 tools)
 
 ```
 Find files named notepad in C:/Windows
@@ -110,7 +110,7 @@ Find empty folders in C:/Users/<YourName>/Documents
 
 ---
 
-### Category 3 — Archives (5 tools)
+### Category 3 ï¿½ Archives (5 tools)
 
 First, create a test folder with content:
 ```
@@ -140,7 +140,7 @@ Unzip C:/Users/<YourName>/Desktop/ZipTest.zip to C:/Users/<YourName>/Desktop/Zip
 
 ---
 
-### Category 4 — Organise & Bulk (7 tools)
+### Category 4 ï¿½ Organise & Bulk (7 tools)
 
 > ?? All destructive tools default to **dry run**. The agent will show a preview. To apply, reply "yes, do it" or add "dry_run=False".
 
@@ -155,7 +155,7 @@ Organise C:/Users/<YourName>/Downloads by date (dry run)
 **Expected:** Preview list showing YYYY/MM folder structure.
 
 ```
-Bulk rename files in C:/Users/<YourName>/Desktop/Octa Bot_Test with prefix Test_
+Bulk rename files in C:/Users/<YourName>/Desktop/OctaMind_Test with prefix Test_
 ```
 **Expected:** Preview of `Test_<original_name>` renames.
 
@@ -165,7 +165,7 @@ Move all PDF files from C:/Users/<YourName>/Downloads to C:/Users/<YourName>/Doc
 **Expected:** Preview of files that would be moved.
 
 ```
-Clean empty folders in C:/Users/<YourName>/Octa Bot_Test
+Clean empty folders in C:/Users/<YourName>/OctaMind_Test
 ```
 **Expected:** "Found X empty folders to remove" or "No empty folders."
 
@@ -176,7 +176,7 @@ Deduplicate files in C:/Users/<YourName>/Downloads (dry run)
 
 ---
 
-### Category 5 — Disk & Space (5 tools)
+### Category 5 ï¿½ Disk & Space (5 tools)
 
 ```
 Show all drives
@@ -201,11 +201,11 @@ Find large files on C: drive
 ```
 Files modified recently in C:/Users/<YourName>
 ```
-**Expected:** Files modified in the last 24–48 hours.
+**Expected:** Files modified in the last 24ï¿½48 hours.
 
 ---
 
-### Category 6 — Read & Analyse (6 tools)
+### Category 6 ï¿½ Read & Analyse (6 tools)
 
 ```
 Read C:/Windows/System32/drivers/etc/hosts
@@ -240,14 +240,14 @@ Get file stats for C:/Users/<YourName>/Documents
 
 ---
 
-### Category 7 — AI Features (6 tools)
+### Category 7 ï¿½ AI Features (6 tools)
 
 > Requires LLM provider configured in `config/settings.json`.
 
 ```
 Summarize C:/Users/<YourName>/Documents/any_text_file.txt
 ```
-**Expected:** 3–5 sentence AI summary.
+**Expected:** 3ï¿½5 sentence AI summary.
 
 ```
 Analyse my Downloads folder
@@ -276,7 +276,7 @@ Describe C:/Windows/notepad.exe
 
 ---
 
-### Category 8 — Cross-Agent Tools (5 tools)
+### Category 8 ï¿½ Cross-Agent Tools (5 tools)
 
 These require the corresponding agent to be configured:
 
@@ -288,19 +288,19 @@ These require the corresponding agent to be configured:
 | `zip_and_upload_to_drive` | Drive OAuth |
 | `send_file_via_whatsapp` | Returns helpful error (WhatsApp needs public URL, not local path) |
 
-**Test — email a file:**
+**Test ï¿½ email a file:**
 ```
 Email C:/Users/<YourName>/Desktop/any_file.txt to your-email@gmail.com
 ```
 **Expected:** "Email sent with attachment."
 
-**Test — upload to Drive:**
+**Test ï¿½ upload to Drive:**
 ```
 Upload C:/Users/<YourName>/Desktop/any_file.txt to Google Drive
 ```
 **Expected:** "File uploaded to Drive. File ID: ..."
 
-**Test — zip and email:**
+**Test ï¿½ zip and email:**
 ```
 Zip C:/Users/<YourName>/Documents and email to your-email@gmail.com
 ```
@@ -326,6 +326,6 @@ Zip C:/Users/<YourName>/Documents and email to your-email@gmail.com
 
 - All paths should be **absolute** (e.g., `C:/Users/YourName/Documents`). Relative paths are resolved from the project root.
 - Tilde expansion works: `~/Documents` maps to your home directory.
-- The agent remembers past interactions via the memory system — you can ask follow-up questions like "what did you find?" after a search.
+- The agent remembers past interactions via the memory system ï¿½ you can ask follow-up questions like "what did you find?" after a search.
 - Max search results: 500 files per query (hard cap to prevent full-drive scans).
-- Max file read: 5 MB (hard cap — larger files return a truncation notice).
+- Max file read: 5 MB (hard cap ï¿½ larger files return a truncation notice).

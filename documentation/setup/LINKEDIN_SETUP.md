@@ -23,7 +23,7 @@ This guide walks you through configuring the LinkedIn Agent so that Octa can pub
 
 - A **LinkedIn account** (personal or company admin)
 - Access to the [LinkedIn Developer Portal](https://developer.linkedin.com/)
-- Octa Bot installed and `config/settings.json` present (copy from `settings.example.json` if not)
+- OctaMind installed and `config/settings.json` present (copy from `settings.example.json` if not)
 - Python environment activated
 
 ---
@@ -34,7 +34,7 @@ This guide walks you through configuring the LinkedIn Agent so that Octa can pub
 2. Fill in:
    | Field | Value |
    |---|---|
-   | App name | `Octa Bot` (or any name you like) |
+   | App name | `OctaMind` (or any name you like) |
    | LinkedIn Page | Your personal or company page URL |
    | App logo | Upload any logo |
    | Legal agreement | Check the box |
@@ -52,7 +52,7 @@ This guide walks you through configuring the LinkedIn Agent so that Octa can pub
 
 ## Request the Required Scopes
 
-LinkedIn restricts posting API access — you need to request the following products from the **Products** tab of your app:
+LinkedIn restricts posting API access ï¿½ you need to request the following products from the **Products** tab of your app:
 
 | Product | Scopes it enables | Required for |
 |---|---|---|
@@ -60,13 +60,13 @@ LinkedIn restricts posting API access — you need to request the following produc
 | Sign In with LinkedIn using OpenID Connect | `openid`, `profile`, `email` | Identifying yourself |
 | Marketing Developer Platform (optional) | `r_organization_social`, `w_organization_social` | Company page posting |
 
-> **Note:** Some products require LinkedIn review (1–5 business days). `Share on LinkedIn` is approved automatically for personal use.
+> **Note:** Some products require LinkedIn review (1ï¿½5 business days). `Share on LinkedIn` is approved automatically for personal use.
 
 ---
 
 ## Run the OAuth2 Flow
 
-Octa Bot provides a helper to complete the OAuth2 authorisation. With your virtual environment activated, run:
+OctaMind provides a helper to complete the OAuth2 authorisation. With your virtual environment activated, run:
 
 ```bash
 python -c "
@@ -89,7 +89,7 @@ print('Access token:', token)
 "
 ```
 
-5. Copy the printed access token — you will paste it into `settings.json` next.
+5. Copy the printed access token ï¿½ you will paste it into `settings.json` next.
 
 > **Access tokens expire** after 60 days for personal use. Run this flow again when it expires, or request a long-lived token through the Marketing Developer Platform.
 
@@ -99,14 +99,14 @@ print('Access token:', token)
 
 If you want Octa to post on behalf of a **LinkedIn Company Page** (not your personal profile), you need the page's Organisation URN.
 
-### Method 1 — LinkedIn Admin URL
+### Method 1 ï¿½ LinkedIn Admin URL
 
 1. Go to your Company Page admin panel.
 2. The URL will look like: `https://www.linkedin.com/company/12345678/admin/`
 3. The numeric ID (`12345678`) is your org ID.
 4. Your URN is: `urn:li:organization:12345678`
 
-### Method 2 — API call
+### Method 2 ï¿½ API call
 
 ```bash
 python -c "
@@ -158,15 +158,15 @@ Open `config/settings.json` and fill in the `linkedin` section:
 
 The LinkedIn Agent is already registered in the code. To use it:
 
-1. Launch the Agent Hub:
+1. Launch OctaMind:
    ```bash
-   python run_agent_hub.py
+   python start.py
    ```
 2. Open the dashboard at [http://localhost:8501](http://localhost:8501).
-3. Click **+ Add Agent / Skill** ? select **LinkedIn**.
-4. Give it a name (e.g., "Company Page Manager") and save.
+3. Create a Personal Assistant or open an existing one.
+4. In the assistant configuration panel, enable **LinkedIn** under **Skills** and save.
 
-The agent will now appear in your Hub and respond to natural language requests like:
+The assistant can now route LinkedIn requests like:
 
 > "Post a LinkedIn update about our new open-source release with an AI-generated image."
 > "Schedule a motivational post for Monday."
@@ -197,9 +197,9 @@ If you see an error, check the [Troubleshooting](#troubleshooting) section.
 
 ## AI Image Generation (Optional)
 
-The LinkedIn Agent can generate images using DALL·E 3 or Stable Diffusion before attaching them to posts.
+The LinkedIn Agent can generate images using DALLï¿½E 3 or Stable Diffusion before attaching them to posts.
 
-### DALL·E 3 (OpenAI)
+### DALLï¿½E 3 (OpenAI)
 
 1. Make sure `openai` is installed:
    ```bash
@@ -241,12 +241,12 @@ The LinkedIn Agent can generate images using DALL·E 3 or Stable Diffusion before
 ### `POST https://api.linkedin.com/v2/ugcPosts` returns `404`
 
 - The `author` URN is incorrect. Make sure `org_urn` is in the exact format `urn:li:organization:12345678` (no trailing spaces).
-- If posting as personal profile, leave `org_urn` empty — the agent will use your member URN from `/v2/me`.
+- If posting as personal profile, leave `org_urn` empty ï¿½ the agent will use your member URN from `/v2/me`.
 
 ### Image upload fails
 
 - Verify your token has the `w_member_social` (or `w_organization_social`) scope.
-- Image must be JPEG or PNG, = 10 MB. The agent resizes automatically if using DALL·E 3 output.
+- Image must be JPEG or PNG, = 10 MB. The agent resizes automatically if using DALLï¿½E 3 output.
 
 ### Agent not appearing in the dashboard
 
@@ -259,7 +259,7 @@ The LinkedIn Agent can generate images using DALL·E 3 or Stable Diffusion before
 
 ### Getting more help
 
-Open a [GitHub Issue](https://github.com/your-org/Octa Bot/issues) with the label `linkedin` and include the full error traceback (redact any tokens).
+Open a [GitHub Issue](https://github.com/your-org/OctaMind/issues) with the label `linkedin` and include the full error traceback (redact any tokens).
 
 ---
 

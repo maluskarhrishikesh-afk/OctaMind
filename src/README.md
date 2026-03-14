@@ -1,206 +1,91 @@
-﻿# Octa Bot - Source Code Structure
+﻿# OctaMind Source Tree
 
-This directory contains the organized source code for the Octa Bot project.
+This directory contains the runtime code for OctaMind. The current architecture is centered on Personal Assistants plus a catalog of stateless skill executors.
 
-## Directory Structure
+## Source Layout
 
-```
+```text
 src/
-├── __init__.py              # Main package initialization
-├── email/                   # Email-related modules
-│   ├── __init__.py
-│   ├── gmail_service.py    # Gmail API client and functions
-│   ├── gmail_auth.py       # OAuth helpers
-│   ├── gmail_summarizer.py # Email summarisation
-│   └── features/           # Phase 1–4 Gmail automation features
-└── agent/                   # AI Agent modules
-    ├── __init__.py
-    ├── core/               # Agent manager, process manager, automations
-    ├── llm/                # LLM client (GitHub Models / local)
-    ├── memory/             # Persistent memory system (6 memory files)
-    └── ui/                 # Streamlit user interfaces
-        ├── agent_dashboard.py      # Thin shim → dashboard/
-        ├── email_agent_ui.py       # Thin shim → email_agent/
-        ├── generic_agent_ui.py     # Generic chat UI (full)
-        ├── assets/                 # Shared assets (octopus.png, etc.)
-        ├── dashboard/              # Agent Hub subpackage (7 modules)
-        │   ├── app.py              # main() — page config, sidebar, grid
-        │   ├── agent_card.py       # show_agent_card()
-        │   ├── configure_panel.py  # show_configure_panel()
-        │   ├── create_form.py      # show_create_agent_form()
-        │   ├── helpers.py          # Logo base64 helpers
-        │   └── styles.py           # DARK_THEME_CSS + inject_css()
-        └── email_agent/            # Gmail Agent UI subpackage (6 modules)
-            ├── app.py              # main() — Streamlit rendering loop
-            ├── conversation.py     # handle_conversation()
-            ├── formatters.py       # format_email_result() + Gmail cards
-            ├── helpers.py          # Logo + browser watchdog thread
-            └── orchestrator.py     # execute_with_llm_orchestration()
+├── agent/
+│   ├── core/                    # Agent manager, process lifecycle, automation scheduler
+│   ├── context/                 # Structured conversation state helpers
+│   ├── hub/                     # Hub API, PA manager, auth session flow, processor
+│   ├── llm/                     # Provider adapters and orchestration support
+│   ├── logging/                 # Log setup and persistent JSON error registry integration
+│   ├── manifest/                # Shared context manifest and cross-agent context storage
+│   ├── memory/                  # Memory storage, consolidation, retrieval, and tooling
+│   ├── runtime_paths.py         # Canonical helpers for `your_data/` and migrated runtime files
+│   ├── system/                  # Keep-awake and system-level helpers
+│   ├── ui/
+│   │   ├── dashboard/           # Streamlit Agent Hub
+│   │   ├── personal_assistant/  # Embedded PA workspace and live sync
+│   │   ├── email_agent/         # Email skill orchestrator and prompts
+│   │   ├── drive_agent/         # Drive skill orchestrator and prompts
+│   │   ├── files_agent/         # Files skill orchestrator and prompts
+│   │   ├── calendar_agent/      # Calendar skill orchestrator and prompts
+│   │   ├── scheduler_agent/     # Smart scheduling skill orchestrator and prompts
+│   │   ├── file_organizer_agent/# Approval-based folder organization skill
+│   │   ├── habit_agent/         # Habit tracker skill orchestrator
+│   │   ├── browser_agent/       # Web browsing skill orchestrator
+│   │   ├── stock_agent/         # Stock analysis skill orchestrator
+│   │   ├── linkedin_agent/      # LinkedIn skill orchestrator
+│   │   └── whatsapp_agent/      # WhatsApp skill orchestrator
+│   └── workflows/               # Skill registry, routing, DAG planning, workflow execution
+├── browser/                     # HTTP-only web browsing and extraction services
+├── calendar/                    # Google Calendar service layer
+├── drive/                       # Google Drive service layer
+├── email/                       # Gmail service layer and features
+├── files/                       # Local filesystem tools and report writers
+├── habit_tracker/               # Habit tracking service layer
+├── linkedin/                    # LinkedIn publishing, scheduling, analytics
+├── stock_market/                # Quotes, technicals, fundamentals, portfolio analysis
+├── telegram/                    # Telegram messaging and scheduling services
+└── whatsapp/                    # WhatsApp messaging, scheduling, and webhook services
 ```
 
-## Email Module (`src/email/`)
+## Runtime Model
 
-The email module provides Gmail integration functionality.
+- Personal Assistants own memory, identity, and conversation history.
+- Skills are stateless executors selected by the workflow router.
+- The skill registry in `src/agent/workflows/agent_registry.py` is the canonical list of routed skills.
+- Runtime state and generated artifacts should be written through `src/agent/runtime_paths.py` helpers so they land under `your_data/`.
 
-### Components:
+## Main Entry Points
 
-- **gmail_service.py**: Core Gmail service with authentication and email operations
-  - `send_email()`: Send emails using Gmail API
-  - `list_emails()`: List and filter emails
-  - `GmailServiceClient`: OOP interface for Gmail operations
+- `start.py`: launches the dashboard, Hub API, keep-awake helper, and memory consolidation loop
+- `stop.py`: stops the dashboard, tracked agent processes, and keep-awake helper
+- `run_agent_hub.py`: runs the dashboard directly for local development
+- `src/agent/hub/server.py`: FastAPI hub backend used by the dashboard and auth flows
+- `src/agent/ui/dashboard/app.py`: Streamlit Agent Hub UI
 
-- **gmail_examples.py**: Basic usage examples
-  - Simple email sending
-  - Listing unread messages
-  - Email filtering
+## Current Routed Skills
 
-- **gmail_integration.py**: Advanced integration examples
-  - Email assistant workflows
-  - Batch email sending
-  - Email + AI integration patterns
+The workflow router currently exposes these skills:
 
-- **mcp_server.py**: Model Context Protocol server for Gmail
-  - MCP tools for email operations
-  - Ready for Claude Desktop integration
+- `email`
+- `drive`
+- `whatsapp`
+- `files`
+- `calendar`
+- `scheduler`
+- `file_organizer`
+- `habit_tracker`
+- `browser`
+- `stock_market`
+- `linkedin`
 
-### Usage Example:
+Telegram integration is implemented in `src/telegram/` and is also surfaced through the Personal Assistant experience and dashboard controls.
 
-```python
-from src.email import send_email, list_emails
+## Data And State Conventions
 
-# Send an email
-result = send_email(
-    to="recipient@example.com",
-    subject="Hello",
-    message="This is a test email"
-)
+- Use `your_data/` for generated files, reports, schedules, runtime state, and migrated live artifacts.
+- Keep OAuth credentials and tokens in `config/`.
+- Treat `memory/` as live Personal Assistant memory, not disposable cache.
+- Use the persistent error registry in `errors/log_error_registry.json` for durable troubleshooting instead of relying only on truncated log files.
 
-# List unread emails
-emails = list_emails(query='is:unread', max_results=10)
-```
+## Development Notes
 
-## Agent Module (`src/agent/`)
-
-The agent module provides AI functionality powered by Gemma models.
-
-### Components:
-
-- **model_downloader.py**: Download Gemma models from Hugging Face
-  - `download_gemma()`: Download model snapshots
-  - Handles authentication and caching
-
-- **gemma_runner.py**: Run Gemma models for text generation
-  - `load_model_and_processor()`: Load and cache models
-  - `generate_response()`: Generate AI responses
-  - Interactive CLI chat interface
-
-- **gemma_chat_ui.py**: Streamlit web interface
-  - Web-based chat UI
-  - Conversation history management
-  - Real-time response generation
-
-### Usage Example:
-
-```python
-from src.agent import download_gemma
-from src.agent.gemma_runner import load_model_and_processor, generate_response
-
-# Download model (if needed)
-download_gemma(model_id="google/gemma-3-4b-it")
-
-# Load and use model
-model, processor, device = load_model_and_processor()
-response = generate_response(model, processor, device, "Hello, how are you?")
-print(response)
-```
-
-## Running the Modules
-
-### Gmail Service Test:
-```bash
-cd C:\Hrishikesh\Octa Bot
-python -m src.email.gmail_service
-```
-
-### Gemma Interactive Chat:
-```bash
-python -m src.agent.gemma_runner
-```
-
-### Streamlit Chat UI:
-```bash
-streamlit run src/agent/gemma_chat_ui.py
-```
-
-### MCP Server:
-```bash
-python -m src.email.mcp_server
-```
-
-## Configuration
-
-### Gmail Setup:
-1. Place `credentials.json` in the project root
-2. Run any Gmail example to authenticate
-3. Token will be saved automatically
-
-### Gemma Setup:
-1. Set `HUGGINGFACE_TOKEN` environment variable (optional)
-2. Models are cached in `model_cache/` directory
-
-## Integration Patterns
-
-### Email + AI Integration:
-```python
-from src.email import list_emails, send_email
-from src.agent.gemma_runner import load_model_and_processor, generate_response
-
-# Load AI model
-model, processor, device = load_model_and_processor()
-
-# Get unread emails
-emails = list_emails(query='is:unread', max_results=5)
-
-# Generate and send AI replies
-for email in emails:
-    prompt = f"Write a professional reply to: {email['subject']}"
-    reply = generate_response(model, processor, device, prompt)
-    
-    send_email(
-        to=email['sender'],
-        subject=f"Re: {email['subject']}",
-        message=reply
-    )
-```
-
-## Development
-
-### Adding New Features:
-
-1. **Email features**: Add to `src/email/gmail_service.py`
-2. **Agent features**: Add to `src/agent/gemma_runner.py`
-3. **Examples**: Create new files in respective directories
-
-### Testing:
-
-Run the test script to verify Gmail setup:
-```bash
-python test_gmail_setup.py
-```
-
-## Dependencies
-
-Install required packages:
-```bash
-pip install google-auth google-auth-oauthlib google-api-python-client
-pip install torch transformers accelerate bitsandbytes
-pip install streamlit
-pip install huggingface_hub
-```
-
-## Notes
-
-- All modules use relative imports within the package
-- Credentials and tokens are stored in project root
-- Model cache is in project root (`model_cache/`)
-- For production use, consider moving sensitive files to secure locations
+- Prefer updating `src/agent/workflows/agent_registry.py` when adding or removing routed skills.
+- When adding a new feature that writes files, route paths through `runtime_paths.py` instead of hardcoding the current working directory.
+- When updating dashboard behavior, check both `src/agent/ui/dashboard/` and `src/agent/ui/personal_assistant/` because the embedded PA workspace now owns a significant part of the user experience.
+- For setup and operator-facing documentation, update the files under `documentation/` at the same time so repo docs do not drift from shipped behavior.
