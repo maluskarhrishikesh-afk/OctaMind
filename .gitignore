@@ -86,4 +86,7 @@ research/*
 !research/LLM_DAG_Orchestration.pdf
 !research/Markdown_Native_Memory_FAISS_Architecture.pdf
 
+# Temporary debug artifacts (ignore whole tmp_debug folder)
+.tmp_debug/
+
 
