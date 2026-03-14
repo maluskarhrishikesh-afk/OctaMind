@@ -155,12 +155,12 @@ OctaMind/
 
 ## Research Papers
 
-- **LLM-Driven DAG Planning with Topological Execution for Multi-Agent AI Orchestration**  
+- **DAG and Topological sort to reduce unnecessary reasoning by LLMs**  
 	[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18911464.svg)](https://doi.org/10.5281/zenodo.18911464)  
 	DOI: [10.5281/zenodo.18911464](https://doi.org/10.5281/zenodo.18911464)  
 	PDF: [research/LLM_DAG_Orchestration.pdf](research/LLM_DAG_Orchestration.pdf)
 
-- **Markdown-Native Agent Memory and Skill Retrieval with FAISS: Building Persistent AI Systems Without a Traditional Database**  
+- **Building Persistent AI Systems Without a Traditional Database**  
 	[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19018414.svg)](https://doi.org/10.5281/zenodo.19018414)  
 	DOI: [10.5281/zenodo.19018414](https://doi.org/10.5281/zenodo.19018414)  
-	PDF: [research/Markdown_Native_Memory_FAISS_Architecture.pdf](research/Markdown_Native_Memory_FAISS_Architecture.pdf)
+	PDF: [research/Markdown_Native_Architecture.pdf](research/Markdown_Native_Architecture.pdf)
