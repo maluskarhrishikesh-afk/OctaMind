@@ -1,4 +1,4 @@
-# Browser Agent — Setup Guide
+# Browser Agent Setup Guide
 
 This guide explains how to set up, configure, and test the Browser Agent in Octa Bot.
 
@@ -6,7 +6,7 @@ This guide explains how to set up, configure, and test the Browser Agent in Octa
 
 ## What the Browser Agent Does
 
-The Browser Agent gives any Octa Bot Personal Assistant the ability to interact with the web:
+The Browser Agent gives any Octa Bot Personal Assistant the ability to search the web, inspect URLs, extract readable content, and download files from public pages.
 
 | Tool | What it does |
 |------|-------------|
@@ -27,10 +27,10 @@ The Browser Agent gives any Octa Bot Personal Assistant the ability to interact 
 
 ### Python Packages
 
-The Browser Agent works with **zero extra dependencies** using Python's built-in `urllib.request`. When `beautifulsoup4` and `requests` are installed (recommended), parsing is significantly richer.
+The Browser Agent works with Python's built-in HTTP stack. When `beautifulsoup4` and `requests` are installed, parsing and extraction are more reliable.
 
 ```bash
-# Recommended — already installed by setup process
+# Recommended
 pip install beautifulsoup4 requests
 ```
 
@@ -42,13 +42,13 @@ python -c "import requests; print('requests OK:', requests.__version__)"
 
 ### No API Keys or Credentials Required
 
-The Browser Agent requires no API keys, OAuth tokens, or account setup. It works entirely using HTTP requests.
+The Browser Agent requires no API keys, OAuth tokens, or browser automation setup. It works entirely through HTTP requests.
 
 ---
 
 ## Installation
 
-1. **Packages are already installed** if you ran `pip install yfinance beautifulsoup4 requests` during project setup.
+1. Install the optional parsing packages if they are not already present.
 
 2. **Verify the agent is registered:**
 
@@ -77,7 +77,7 @@ print(r['status'], '-', r['count'], 'results')
 2. Click **"+ Add Agent / Skill"**
 3. In the skill catalogue, locate **?? Web Browser**
 4. Toggle it on for an existing Personal Assistant, or create a new one with it pre-selected
-5. Save — the PA now routes web-related queries to the Browser Agent
+5. Save - the PA now routes web-related queries to the Browser Agent
 
 ---
 
@@ -90,7 +90,7 @@ Once added to a PA, the Browser Agent understands natural language:
 "Browse https://python.org and tell me what's new"
 "What is the title of https://github.com?"
 "Find all links on https://example.com"
-"Download https://example.com/file.pdf to data/downloads/file.pdf"
+"Download https://example.com/file.pdf to your_data/downloads/file.pdf"
 "Summarise the article at [URL]"
 "Find where it mentions 'pricing' on https://company.com/products"
 "Get the metadata for https://openai.com"
@@ -102,25 +102,20 @@ Once added to a PA, the Browser Agent understands natural language:
 
 ```
 User query
-    ¦
-    ?
+    |
 browser_agent/orchestrator.py
     execute_with_llm_orchestration(user_query, agent_id, artifacts_out)
-    ¦
-    +- Step 1: LLM tool selector (temperature=0.1, max_tokens=400)
-    ¦          ? chooses one of 10 tools + params
-    ¦
-    +- Step 2: _dispatch_tool(tool, params)
-    ¦          ? calls src/browser/browser_service.py
-    ¦          ? uses urllib.request (stdlib) + optional bs4
-    ¦
-    +- Step 3: LLM response composer (temperature=0.4, max_tokens=1500)
-               ? returns human-readable message
+    |
+    +- Loads tool docs from src/agent/ui/browser_agent/skills.md
+    +- Uses direct shortcuts for some high-confidence queries before the LLM planner
+    +- Dispatches to src/browser/browser_service.py
+    +- Composes a human-readable answer with source-aware output
 ```
 
 **Service layer:** `src/browser/browser_service.py`  
 **Package init:** `src/browser/__init__.py`  
-**Orchestrator:** `src/agent/ui/browser_agent/orchestrator.py`
+**Orchestrator:** `src/agent/ui/browser_agent/orchestrator.py`  
+**Tool docs:** `src/agent/ui/browser_agent/skills.md`
 
 ---
 
@@ -128,7 +123,12 @@ browser_agent/orchestrator.py
 
 ### Unit tests (no LLM, no network):
 ```bash
-python -m pytest tests/agent/test_browser_service.py -v
+python -m pytest tests/browser/test_browser_service.py -v
+```
+
+### Orchestrator regression tests:
+```bash
+python -m pytest tests/agent/test_browser_stock_orchestrators.py -k browser -v
 ```
 
 ### E2E test (requires LLM and network):
@@ -147,11 +147,11 @@ python -m pytest tests/ -k "browser" -v
 
 | Limitation | Notes |
 |-----------|-------|
-| JavaScript-rendered pages | Pages requiring JS execution (SPAs) will return sparse content — the agent uses HTTP-only, not a real browser |
+| JavaScript-rendered pages | Pages requiring JS execution (SPAs) will return sparse content - the agent is HTTP-only, not a headless browser |
 | Rate limiting / CAPTCHAs | Some sites block automated requests; the agent will return an HTTP error with an explanation |
 | Login-required pages | No session/cookie/login support; public pages only |
 | Very large pages | Content is truncated at `max_chars` (default 3000 for `browse_url`) |
-| File download paths | `download_file_from_url` requires a valid local path — create directories beforehand or specify an existing folder |
+| File download paths | `download_file_from_url` requires a valid local path - create directories beforehand or specify an existing folder |
 
 ---
 
@@ -166,7 +166,7 @@ pip install beautifulsoup4
 Some sites block automated user agents. The Browser Agent already sends a realistic browser User-Agent string, but some sites require additional headers or JS execution. Try a different URL or use `search_web` to find a mirror.
 
 **Connection timeout:**
-Default timeout is 15 seconds. For slow sites this may not be enough — the error message will say "timed out".
+Default timeout is 15 seconds. For slow sites this may not be enough ï¿½ the error message will say "timed out".
 
 **No search results:**
 DuckDuckGo HTML search is used. If DuckDuckGo is unavailable in your region, use `browse_url` directly with a known URL instead.
@@ -180,4 +180,4 @@ DuckDuckGo HTML search is used. If DuckDuckGo is unavailable in your region, use
 | `urllib.request` | stdlib | ? always | HTTP fetching |
 | `beautifulsoup4` | =4.12 | ? recommended | Rich HTML parsing |
 | `requests` | =2.31 | ? recommended | Richer HTTP client |
-| Playwright / Selenium | — | ? not used | Full browser (not needed) |
+| Playwright / Selenium | ï¿½ | ? not used | Full browser (not needed) |

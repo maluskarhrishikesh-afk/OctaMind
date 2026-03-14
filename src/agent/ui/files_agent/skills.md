@@ -124,6 +124,11 @@
 - **description**: Create a .zip archive from one or more individual files or folders. Use when the user says "zip these files together", "create a zip with files X Y Z", "compress multiple files into one archive", "bundle these files as a zip", "pack these documents into a zip file". sources is a list of file paths.
 - **tags**: zip, compress, archive, multiple, bundle, pack, zip files, create archive
 
+### zip_files_from_manifest
+- **signature**: `zip_files_from_manifest(manifest_path="", output_path="")`
+- **description**: Read the saved search manifest and zip EXACTLY the file paths from the previous search. Use for follow-up requests like "zip them", "archive those results", or "send the files you found as a zip". This is preferred over `zip_folder` when the previous search matched only a subset of files inside a folder.
+- **tags**: zip manifest, zip previous search, zip exact results, archive found files, zip them, zip those
+
 ### unzip_file
 - **signature**: `unzip_file(archive_path, destination="")`
 - **description**: Extract / decompress a .zip archive to a folder. Use when the user says "unzip file X", "extract the archive", "decompress X to folder Y", "unzip and extract to Z", "extract contents of zip X", "open the zip file". Destination defaults to a folder named after the archive.
@@ -232,7 +237,7 @@
 
 ### save_search_manifest
 - **signature**: `save_search_manifest(found_paths, manifest_path="")`
-- **description**: Persist a list of found file paths to the manifest file (data/octa_manifest.txt) for use in subsequent turns. CALL IMMEDIATELY after any search step so the paths are available in the next turn when the user asks to copy, zip, or process them. Without this, file paths are lost between turns.
+- **description**: Persist a list of found file paths to the manifest file (`your_data/octa_manifest.txt` by default) for use in subsequent turns. CALL IMMEDIATELY after any search step so the paths are available in the next turn when the user asks to copy, zip, or process them. Without this, file paths are lost between turns.
 - **tags**: save, manifest, persist, paths, results, cross-turn, save paths, remember files
 
 ### collect_files_from_manifest

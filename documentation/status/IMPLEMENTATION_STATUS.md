@@ -591,7 +591,7 @@ Completely new agent. No overlap with Calendar or Files agents.
 **Data stores:** `your_data/habits.json` (definitions), `your_data/habit_logs.json` (daily logs) with legacy fallback from `data/`  
 **No credentials required** for all 8 core tools; Calendar integration requires Calendar auth.
 
-### Browser Agent � 10 Tools
+### Browser Agent - 10 Tools
 HTTP-only web browsing. No credentials, no API keys, no headless browser required.
 
 | Category | Tools | Status |
@@ -605,24 +605,28 @@ HTTP-only web browsing. No credentials, no API keys, no headless browser require
 **Registry key:** `browser`  
 **Service:** `src/browser/browser_service.py`  
 **Backend:** `urllib.request` (stdlib) + optional `beautifulsoup4` + `requests`  
-**No credentials required.** No JavaScript execution � public HTTP pages only.
+**Planner docs:** `src/agent/ui/browser_agent/skills.md`  
+**No credentials required.** No JavaScript execution - public HTTP pages only.
 
-### Stock Market Analysis Agent � 10 Tools
+### Stock Market Analysis Agent - 13 Tools
 Read-only analysis. No buy/sell, no brokerage integration.
 
 | Category | Tools | Status |
 |----------|-------|--------|
-| Market data | get_quote, get_historical_data, market_overview | ? |
+| Market data | resolve_ticker, get_quote, get_historical_data, market_overview | ? |
 | Technical analysis | technical_analysis (RSI, MACD, Bollinger, SMA), pattern_detection | ? |
 | Risk analysis | risk_score (volatility, Beta, VaR 95%, Sharpe) | ? |
-| Portfolio | portfolio_analysis, portfolio_suggestions | ? |
-| Intelligence | sentiment_analysis, compare_stocks | ? |
+| Fundamentals | fundamental_analysis | ? |
+| Portfolio | portfolio_analysis, portfolio_suggestions, save_context | ? |
+| Intelligence | sentiment_analysis, compare_stocks, research_company_web | ? |
+| Reporting | generate_full_report | ? |
 
 **Registry key:** `stock_market`  
 **Service:** `src/stock_market/stock_service.py`  
-**Data source:** `yfinance` (Yahoo Finance public API) � free, no API key required.  
-**No credentials required.** All indicators computed in pure Python (no ML dependencies).  
-**PDF Report Generation:** `generate_full_report(symbol)` runs all 10 analyses and builds a multi-page A4 PDF with cover page, Analyst Quick Snapshot, 7 analysis sections, charts, and risk tables. Output saved to `your_data/reports/`.
+**Data sources:** `yfinance` plus browser-backed public-web research.  
+**Planner docs:** `src/agent/ui/stock_agent/skills.md`  
+**No credentials required.** All indicators are computed in pure Python and the report flow stays read-only.  
+**Report generation:** `generate_full_report(query_or_symbol)` resolves the ticker, runs quantitative analysis, pulls company and management commentary from the web, and writes PDF plus Markdown outputs to `your_data/reports/`.
 
 ### LinkedIn Agent � 17 Tools
 Fully implemented service + LLM orchestrator. Registered in agent_registry, agent_manager, and dashboard skill cards.
@@ -648,8 +652,8 @@ Fully implemented service + LLM orchestrator. Registered in agent_registry, agen
 - [x] Drive-only command routing ? Drive Agent direct
 - [x] Email-only command routing ? Email Agent direct
 - [x] NL-based cross-agent workflow planner (`plan_nl_workflow`) for combined commands
-- [x] Agent capability registry (`agent_registry.py`) � ~10 tokens per agent, scales to N agents; **10 agents registered**: drive, email, whatsapp, files, calendar, scheduler, file_organizer, habit_tracker, browser, stock_market
-- [x] Planning context: ~80 tokens for 8 agents (vs ~8,000 tokens in old flat-tool-list design)
+- [x] Agent capability registry (`agent_registry.py`) - ~10 tokens per agent, scales to N agents; **11 agents registered**: drive, email, whatsapp, files, calendar, scheduler, file_organizer, habit_tracker, browser, stock_market, linkedin
+- [x] Planning context stays compact because the planner sees one short description per registered agent instead of a flat tool list
 - [x] Natural-language step format: orchestrator issues plain-English instructions, no tool signatures
 - [x] Sequential multi-agent execution via `nl_step_runner.py` � each sub-agent runs its own full ReAct loop
 - [x] Artifact handoff between agents (`artifacts_out` dict + `{output_key.field}` token substitution)
@@ -657,14 +661,14 @@ Fully implemented service + LLM orchestrator. Registered in agent_registry, agen
 - [x] Composed final response from all agent results
 - [x] **Hard-coded `_collective_memory_` personality** � warm, proactive, protective personal-assistant character baked in as prose; immune to personality trait slider edits
 - [x] **WhatsApp agent** registered in `agent_registry.py` � available for PA workflows
-- [x] **Telegram agent** registered in `agent_registry.py` � available for PA workflows
 - [x] **Files agent** registered in `agent_registry.py` � available for PA workflows
 - [x] **Calendar agent** registered in `agent_registry.py` � Google Calendar CRUD via PA
 - [x] **Scheduler agent** registered in `agent_registry.py` � intelligent scheduling, focus blocks, insights
 - [x] **File Organizer agent** registered in `agent_registry.py` � approval-workflow file organization
 - [x] **Habit Tracker agent** registered in `agent_registry.py` � habit tracking, streaks, weekly reports
 - [x] **Browser agent** registered in `agent_registry.py` � web browsing, search, text extraction, downloads
-- [x] **LinkedIn agent** registered in `agent_registry.py` � available for PA workflows (text posts, AI-generated content, scheduling, analytics)- [x] **`on_progress` callback in `HubProcessor.process()`** (2026-03-02) — callers can pass a `Callable[[str], None]`; fired at key milestones so Telegram (and future channels) can show live progress
+- [x] **LinkedIn agent** registered in `agent_registry.py` - available for PA workflows (text posts, AI-generated content, scheduling, analytics)
+- [x] **`on_progress` callback in `HubProcessor.process()`** (2026-03-02) — callers can pass a `Callable[[str], None]`; fired at key milestones so Telegram (and future channels) can show live progress
 - [x] **`file_artifacts` in `HubResponse`** (2026-03-02) — `List[str]` of local file paths produced by skill executors; populated from `artifacts_out["file_path"]` or step `"file_path"` field
 - [x] **Scheduling enrichment in Telegram channel** (2026-03-02) — `_enrich_scheduling_followup()` now called in `HubProcessor._dispatch()`, not only in dashboard `app.py`
 - [x] **`clear_session(session_id)`** (2026-03-02) — helper to wipe per-session history from memory + `hub_conversations.json`; used by `/reset` command

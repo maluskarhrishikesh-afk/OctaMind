@@ -144,7 +144,7 @@ router.detect_agents_needed(message)
 
 - Kept in memory (`_SESSION_HISTORY` dict keyed by `session_id`)
 - Persisted to `your_data/hub_conversations.json` after every turn (legacy `data/` file is still read on older installs)
-- Dashboard's **Live Channels** tab reads this file every 5 seconds
+- Dashboard's **Live Channels** tab reads this file and also listens to the local event stream used by `src/agent/ui/personal_assistant/live_sync.py`
 
 ---
 

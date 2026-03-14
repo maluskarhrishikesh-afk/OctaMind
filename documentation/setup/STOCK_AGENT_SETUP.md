@@ -1,8 +1,8 @@
-# Stock Market Analysis Agent — Setup Guide
+# Stock Market Analysis Agent Setup Guide
 
 This guide explains how to set up, configure, and test the Stock Market Analysis Agent in Octa Bot.
 
-> **Important:** This agent is **read-only analysis only**. It has no buy/sell, order placement, or brokerage integration of any kind.
+> **Important:** This agent is read-only. It has no buy/sell, order placement, or brokerage integration of any kind.
 
 ---
 
@@ -10,18 +10,22 @@ This guide explains how to set up, configure, and test the Stock Market Analysis
 
 | Tool | What it does |
 |------|-------------|
+| **resolve_ticker** | Resolve a company name like "Intellect Design Arena" to the most likely ticker |
 | **get_quote** | Real-time price, change, volume, P/E ratio, market cap, sector |
 | **get_historical_data** | OHLCV bar data for any period and interval |
+| **fundamental_analysis** | Buffett-style quality, moat, growth, leverage, and valuation checks |
 | **technical_analysis** | RSI, MACD, Bollinger Bands, SMA-20/50/200 with signals |
 | **risk_score** | Annualised volatility, Beta vs SPY, VaR 95%, Sharpe ratio, 1-10 risk score |
 | **pattern_detection** | Support/resistance, trend direction, candlestick patterns (doji, hammer, engulfing) |
 | **portfolio_analysis** | Sector allocation, pairwise correlation matrix, diversification score |
 | **portfolio_suggestions** | Rebalancing hints, concentration warnings (informational only) |
 | **sentiment_analysis** | News headline NLP sentiment scoring (positive/neutral/negative) |
-| **compare_stocks** | Side-by-side metric comparison for 2–10 symbols |
+| **compare_stocks** | Side-by-side metric comparison for 2ï¿½10 symbols |
 | **market_overview** | Broad market snapshot: SPY, QQQ, DIA, IWM, VIX + mood indicator |
+| **research_company_web** | Investor-relations, annual-report, and management-commentary research from the public web |
+| **generate_full_report** | End-to-end report generation that combines market data and browser-backed company research |
 
-**Data source:** [yfinance](https://github.com/ranaroussi/yfinance) — free, no API key required.
+**Data sources:** [yfinance](https://github.com/ranaroussi/yfinance) for market data and the Browser service for public-web company research. No API key required.
 
 ---
 
@@ -51,7 +55,7 @@ Python 3.9+. (Already required by Octa Bot core.)
 
 ## Installation
 
-1. **Install the package** (already done if you followed initial setup):
+1. Install the required packages:
 
 ```bash
 pip install yfinance beautifulsoup4 requests
@@ -86,7 +90,7 @@ print(m['market_mood'])
 2. Click **"+ Add Agent / Skill"**
 3. In the skill catalogue, locate **?? Stock Market Analysis**
 4. Toggle it on for an existing Personal Assistant, or create a new one
-5. Save — the PA now routes market analysis queries to the Stock Agent
+5. Save - the PA now routes market analysis queries to the Stock Agent
 
 ---
 
@@ -109,6 +113,8 @@ Once added to a PA, the Stock Agent understands natural language:
 "Give me a market overview"
 "What is the support and resistance for Netflix?"
 "Bollinger Bands for Amazon"
+"Analyse Intellect Design Arena"
+"Generate a stock report for Nvidia"
 ```
 
 ---
@@ -117,28 +123,21 @@ Once added to a PA, the Stock Agent understands natural language:
 
 ```
 User query
-    ¦
-    ?
+    |
 stock_agent/orchestrator.py
     execute_with_llm_orchestration(user_query, agent_id, artifacts_out)
-    ¦
-    +- Step 1: LLM tool selector (temperature=0.1, max_tokens=400)
-    ¦          ? chooses one of 10 analysis tools + params
-    ¦          ? extracts ticker symbol(s) from natural language
-    ¦
-    +- Step 2: _dispatch_tool(tool, params)
-    ¦          ? calls src/stock_market/stock_service.py
-    ¦          ? fetches data from Yahoo Finance via yfinance
-    ¦          ? computes indicators in pure Python (no extra ML deps)
-    ¦
-    +- Step 3: LLM response composer (temperature=0.4, max_tokens=1500)
-               ? formats findings as clear, plain-language analysis
-               ? always includes "not financial advice" disclaimer
+    |
+    +- Loads tool docs from src/agent/ui/stock_agent/skills.md
+    +- Resolves company names to tickers when needed
+    +- Runs market/fundamental/technical/risk analysis via src/stock_market/stock_service.py
+    +- Uses browser-backed company research for richer full-company reports
+    +- Returns informational analysis with a not-financial-advice disclaimer
 ```
 
 **Service layer:** `src/stock_market/stock_service.py`  
 **Package init:** `src/stock_market/__init__.py`  
-**Orchestrator:** `src/agent/ui/stock_agent/orchestrator.py`
+**Orchestrator:** `src/agent/ui/stock_agent/orchestrator.py`  
+**Tool docs:** `src/agent/ui/stock_agent/skills.md`
 
 ---
 
@@ -146,24 +145,24 @@ stock_agent/orchestrator.py
 
 ### RSI (Relative Strength Index, 14-day)
 - `< 30` ? Oversold signal
-- `30–70` ? Neutral
+- `30ï¿½70` ? Neutral
 - `> 70` ? Overbought signal
 
 ### MACD (12, 26, 9 EMA)
 - Histogram `> 0` ? Bullish momentum
 - Histogram `< 0` ? Bearish momentum
 
-### Bollinger Bands (20-day SMA ± 2 std)
+### Bollinger Bands (20-day SMA ï¿½ 2 std)
 - Price above upper band ? Overbought
 - Price below lower band ? Oversold
 
-### Risk Score (1–10 composite)
+### Risk Score (1ï¿½10 composite)
 - Derived from: annualised volatility, Beta vs SPY, daily VaR 95%
-- Score 1–2: Very Low risk
-- Score 3–4: Low
-- Score 5–6: Moderate
-- Score 7–8: High
-- Score 9–10: Very High
+- Score 1ï¿½2: Very Low risk
+- Score 3ï¿½4: Low
+- Score 5ï¿½6: Moderate
+- Score 7ï¿½8: High
+- Score 9ï¿½10: Very High
 
 ---
 
@@ -172,6 +171,11 @@ stock_agent/orchestrator.py
 ### Unit tests (no LLM, requires internet for yfinance):
 ```bash
 python -m pytest tests/stock_market/ -v
+```
+
+### Orchestrator regression tests:
+```bash
+python -m pytest tests/agent/test_browser_stock_orchestrators.py -k stock -v
 ```
 
 ### E2E test (requires LLM + internet):
@@ -194,9 +198,10 @@ python -m pytest tests/ -k "stock" -v
 | Market hours | Quotes return last close price outside trading hours |
 | Cryptocurrency | yfinance supports crypto tickers (e.g. "BTC-USD") but data quality varies |
 | Non-US stocks | International tickers need exchange suffix: "RELIANCE.NS" (NSE), "SAP.DE" (Xetra) |
-| Sentiment NLP | Keyword-based — not a trained ML model; indicative only |
+| Sentiment NLP | Keyword-based - not a trained ML model; indicative only |
 | Pattern detection | Rule-based candlestick patterns only; no ML-based chart recognition |
-| No persistence | Stock data is never saved to disk — all real-time on demand |
+| Full reports | `generate_full_report` can save PDF and Markdown outputs under `your_data/reports/` |
+| No trading actions | The agent never places orders or gives buy/sell/hold instructions |
 
 ---
 
@@ -229,10 +234,10 @@ pip install yfinance
 | `yfinance` | =0.2.40 | ? required | All market data, quotes, news |
 | `math` | stdlib | ? always | Statistical calculations |
 | `datetime` | stdlib | ? always | Date handling |
-| pandas | transitive via yfinance | — | Returned by yfinance internally |
+| pandas | transitive via yfinance | ï¿½ | Returned by yfinance internally |
 
 ---
 
 ## Disclaimer
 
-All output from this agent is **for informational and educational purposes only**. It does not constitute financial advice, investment recommendations, or trading signals. Always consult a qualified financial advisor before making investment decisions.
+All output from this agent is for informational and educational purposes only. It does not constitute financial advice, investment recommendations, or trading signals. Always consult a qualified financial advisor before making investment decisions.
