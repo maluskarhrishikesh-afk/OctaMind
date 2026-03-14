@@ -28,6 +28,8 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from src.agent.runtime_paths import get_your_data_dir
+
 # ── Reportlab imports (lazy, with clear error) ─────────────────────────────────
 
 def _rl():
@@ -120,7 +122,7 @@ def _make_page_cb(logo_path, symbol, generated_on, page_w, page_h, margin):
                                      width=icon_h, height=icon_h,
                                      preserveAspectRatio=True, anchor="sw")
                     logo_x += icon_h + 0.15 * cm
-                except Exception:  # noqa: BLE001
+                except (OSError, RuntimeError, TypeError, ValueError):
                     pass
             canvas.setFont("Helvetica-Bold", 7.5)
             canvas.setFillColorRGB(*_NAVY)
@@ -495,7 +497,7 @@ def build_report(
     patterns: Optional[Dict]     = None,
     sentiment: Optional[Dict]    = None,
     narrative: str               = "",
-    output_dir: str              = "data",
+    output_dir: str              = "",
 ) -> str:
     """
     Generate a PDF analysis report and save it to output_dir.
@@ -510,6 +512,7 @@ def build_report(
         sentiment:   Result from sentiment_analysis().
         narrative:   LLM-generated plain-language summary.
         output_dir:  Directory to save the PDF (created if needed).
+                 Defaults to <workspace>/your_data/reports.
 
     Returns:
         Absolute path to the generated PDF file.
@@ -524,6 +527,8 @@ def build_report(
         HRFlowable, PageBreak,
     )
 
+    if not output_dir:
+        output_dir = str(get_your_data_dir("reports", create=True))
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename  = f"analysis_{symbol.upper()}_{timestamp}.pdf"

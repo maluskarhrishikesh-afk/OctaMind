@@ -14,12 +14,18 @@ Storage: data/assistants.json
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-_PA_PATH = Path(__file__).parent.parent.parent.parent / "data" / "assistants.json"
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
+
+_PA_PATH = migrate_legacy_runtime_state_file("assistants.json")
+
+_PA_MANAGER_ERRORS = (OSError, TypeError, ValueError, json.JSONDecodeError)
+_PA_IMPORT_ERRORS = (ImportError, AttributeError)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -63,20 +69,20 @@ def load_assistants() -> List[dict]:
             data = json.loads(_PA_PATH.read_text(encoding="utf-8"))
             if isinstance(data, list):
                 return data   # may be empty — that's valid after deleting all PAs
-        except Exception:
+        except _PA_MANAGER_ERRORS:
             pass
 
     # First run — create the default assistant with every available skill
     try:
         from src.agent.workflows.agent_registry import AGENT_REGISTRY
         all_skills = list(AGENT_REGISTRY.keys())
-    except Exception:
+    except _PA_IMPORT_ERRORS:
         all_skills = ["drive", "email", "files"]
 
     try:
         from src.agent.hub.channel_registry import CHANNEL_REGISTRY
         all_channels = list(CHANNEL_REGISTRY.keys())
-    except Exception:
+    except _PA_IMPORT_ERRORS:
         all_channels = ["dashboard", "api", "telegram"]
 
     default = _make_assistant(
@@ -137,7 +143,7 @@ This section is updated automatically during memory consolidation.
 *(Updated automatically during memory consolidation.)*
 """
         mem.personality_path.write_text(personality_content, encoding="utf-8")
-    except Exception as exc:
+    except (_PA_IMPORT_ERRORS + _PA_MANAGER_ERRORS + (KeyError,)) as exc:
         print(f"⚠️ Could not initialise PA memory for {pa['id']}: {exc}")
 
 
@@ -174,16 +180,17 @@ def delete_assistant(pa_id: str) -> bool:
     Returns False if the PA is not found.
     """
     assistants = load_assistants()
+    deleted_pa = next((assistant for assistant in assistants if assistant["id"] == pa_id), None)
     remaining = [a for a in assistants if a["id"] != pa_id]
     if len(remaining) == len(assistants):
         return False   # not found
 
     _save(remaining)
-    _cleanup_pa_resources(pa_id)
+    _cleanup_pa_resources(deleted_pa or {"id": pa_id, "name": pa_id})
     return True
 
 
-def _cleanup_pa_resources(pa_id: str) -> None:
+def _cleanup_pa_resources(pa: dict) -> None:
     """Delete the memory directory and log files for a personal assistant.
 
     Also stops any running Telegram poller so file handles are released before
@@ -192,13 +199,17 @@ def _cleanup_pa_resources(pa_id: str) -> None:
     import shutil
     import glob
 
+    pa_id = str(pa.get("id", "")).strip()
+    pa_name = str(pa.get("name", "")).strip()
+    safe_name = re.sub(r"[^\w\-.]", "_", pa_name) if pa_name else ""
+
     project_root = _PA_PATH.parent.parent   # …/OctaMind
 
     # 1. Stop any running Telegram poller (releases the log file handle)
     try:
         from src.telegram.pa_poller_manager import stop_pa_poller
         stop_pa_poller(pa_id)
-    except Exception:
+    except (_PA_IMPORT_ERRORS + (OSError, RuntimeError, ValueError)):
         pass  # poller may not be running — that's fine
 
     # 2. Memory directory
@@ -206,7 +217,7 @@ def _cleanup_pa_resources(pa_id: str) -> None:
     if memory_dir.exists():
         try:
             shutil.rmtree(memory_dir)
-        except Exception as exc:
+        except OSError as exc:
             print(f"⚠️  Could not remove memory dir {memory_dir}: {exc}")
 
     # 3. Log files — match logs/*<pa_id>*.log and logs/<pa_id>.log
@@ -214,10 +225,15 @@ def _cleanup_pa_resources(pa_id: str) -> None:
     patterns = [
         str(logs_dir / f"*{pa_id}*.log"),
         str(logs_dir / f"{pa_id}.log"),
+        str(logs_dir / f"{pa_name}.log") if pa_name else "",
+        str(logs_dir / f"{safe_name}.log") if safe_name else "",
+        str(logs_dir / f"pa_{pa_id}_stderr.txt") if pa_id else "",
     ]
     for pattern in patterns:
+        if not pattern:
+            continue
         for path in glob.glob(pattern):
             try:
                 Path(path).unlink()
-            except Exception as exc:
+            except OSError as exc:
                 print(f"⚠️  Could not remove log {path}: {exc}")

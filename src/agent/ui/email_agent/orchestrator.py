@@ -12,6 +12,29 @@ from typing import Any, Dict, Optional
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 
+
+def _coerce_report_content(content: Any) -> str:
+    if isinstance(content, dict):
+        return (
+            content.get("report_content")
+            or content.get("summary")
+            or content.get("content")
+            or json.dumps(content, indent=2, ensure_ascii=False)
+        )
+
+    if isinstance(content, str):
+        candidate = content.strip()
+        if candidate.startswith(("{", "[")):
+            for parser in (json.loads, ast.literal_eval):
+                try:
+                    parsed = parser(candidate)
+                    return _coerce_report_content(parsed)
+                except Exception:
+                    continue
+        return candidate
+
+    return str(content)
+
 # ---------------------------------------------------------------------------
 # Tool builders (lazy so Gmail auth errors surface at call time not import time)
 # ---------------------------------------------------------------------------
@@ -256,15 +279,7 @@ def _build_all_tools() -> Dict[str, Any]:
 
     def write_pdf_report(path: str, title: str, content: str) -> dict:
         from src.files.features.file_ops import write_pdf_report as _wpdf  # noqa: PLC0415
-        if isinstance(content, dict):
-            content = (
-                content.get("report_content")
-                or content.get("content")
-                or content.get("summary")
-                or json.dumps(content, indent=2, ensure_ascii=False)
-            )
-        elif not isinstance(content, str):
-            content = str(content)
+        content = _coerce_report_content(content)
         return _wpdf(path, title, content)
 
     def write_text_file(path: str, content: str) -> dict:

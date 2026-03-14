@@ -108,6 +108,7 @@ The user query may include a `## Session State` JSON block from the previous con
 | Key | Description | When to use |
 |-----|-------------|-------------|
 | `last_found_file_path` | Path to a single file found in the previous turn | User says: *"mail it to me"*, *"send it to me"*, *"email it"*, *"send me that file"* → call `send_email_with_attachment(to='me', ...)` with `attachment_path={__session__.last_found_file_path}` |
-| `last_found_paths` | List of paths (single file only in email context) | Same as above — prefer `last_found_file_path` |
+| `last_found_bundle_dir` | Staged folder for a previous multi-file files search | Files agent should zip it first, then pass the zip path to email |
+| `file_manifest` | Manifest path for a previous multi-file files search | Files agent should use it as a fallback when no staged bundle folder is available |
 
 **Multiple-file scenario:** The files agent will zip them first and pass the zip path via `{files_step.file_path}` — use that as `attachment_path`.

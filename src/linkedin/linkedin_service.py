@@ -55,12 +55,12 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from urllib.parse import urlencode
 
 import requests
 
-from src.agent.runtime_paths import get_your_data_dir
+from src.agent.runtime_paths import get_your_data_dir, migrate_legacy_runtime_state_file
 
 logger = logging.getLogger("linkedin_service")
 
@@ -70,7 +70,7 @@ _AUTH_URL = "https://www.linkedin.com/oauth/v2/authorization"
 _TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 _SCOPES = "w_member_social openid profile email"
 
-_SCHEDULE_FILE = Path("data/linkedin_scheduled.json")
+_SCHEDULE_FILE = migrate_legacy_runtime_state_file("linkedin_scheduled.json")
 
 # ── Config helpers ────────────────────────────────────────────────────────────
 
@@ -80,9 +80,8 @@ def _config() -> Dict[str, Any]:
     if not cfg_path.exists():
         return {}
     try:
-        with open(cfg_path) as f:
-            return json.load(f).get("linkedin", {})
-    except Exception:
+        return json.loads(cfg_path.read_text(encoding="utf-8")).get("linkedin", {})
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
         return {}
 
 
@@ -501,7 +500,7 @@ def create_image_post(
     """
     try:
         asset_urn = _upload_image(image_path)
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
         return {"status": "error", "message": f"Image upload failed: {exc}"}
 
     author = _author_urn()
@@ -538,7 +537,7 @@ def create_video_post(
     """
     try:
         asset_urn = _upload_video(video_path)
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
         return {"status": "error", "message": f"Video upload failed: {exc}"}
 
     author = _author_urn()
@@ -660,14 +659,12 @@ def get_post_analytics(post_id: str) -> Dict[str, Any]:
 def _load_scheduled() -> List[Dict[str, Any]]:
     if not _SCHEDULE_FILE.exists():
         return []
-    with open(_SCHEDULE_FILE) as f:
-        return json.load(f)
+    return json.loads(_SCHEDULE_FILE.read_text(encoding="utf-8"))
 
 
 def _save_scheduled(posts: List[Dict[str, Any]]) -> None:
     _SCHEDULE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_SCHEDULE_FILE, "w") as f:
-        json.dump(posts, f, indent=2)
+    _SCHEDULE_FILE.write_text(json.dumps(posts, indent=2), encoding="utf-8")
 
 
 def schedule_post(
@@ -762,7 +759,7 @@ def run_scheduled_posts() -> Dict[str, Any]:
                 sched = sched.replace(tzinfo=timezone.utc)
             if sched > now:
                 continue
-        except Exception:
+        except ValueError:
             continue
 
         pt = p.get("post_type", "text")
@@ -781,7 +778,7 @@ def run_scheduled_posts() -> Dict[str, Any]:
                 )
             else:
                 result = {"status": "error", "message": f"Unknown post_type: {pt}"}
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
             result = {"status": "error", "message": str(exc)}
 
         if result.get("status") == "success":
@@ -850,7 +847,7 @@ def generate_ai_post_content(
         )
         content = resp.choices[0].message.content.strip()
         return {"status": "success", "post_text": content, "topic": topic, "tone": tone}
-    except Exception as exc:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, requests.RequestException) as exc:
         return {"status": "error", "message": str(exc)}
 
 
@@ -897,7 +894,7 @@ def generate_ai_image(
             "message": f"Image generated and saved to {out_path}",
             "revised_prompt": getattr(resp.data[0], "revised_prompt", prompt),
         }
-    except Exception as exc:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError, requests.RequestException) as exc:
         return {
             "status": "error",
             "message": (

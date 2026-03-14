@@ -30,7 +30,11 @@ import time
 from pathlib import Path
 from datetime import datetime
 
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
+
 logger = logging.getLogger("Octa Bot.consolidation_runner")
+
+_RUNNER_CACHE: dict[str, "ConsolidationRunner"] = {}
 
 # ── Tuning ────────────────────────────────────────────────────────────────────
 # Testing mode: 1-hour cycle (change to 8 for production)
@@ -40,8 +44,8 @@ _TICK_SECONDS = 30                 # granularity for stop responsiveness
 _IDLE_THRESHOLD_SECONDS = 15 * 60  # 15 min idle → lightweight session-end consolidation
 
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-_ASSISTANTS_JSON = _PROJECT_ROOT / "data" / "assistants.json"   # Personal Assistants only
-_HUB_CONV_JSON   = _PROJECT_ROOT / "data" / "hub_conversations.json"  # Live Channels
+_ASSISTANTS_JSON = migrate_legacy_runtime_state_file("assistants.json")   # Personal Assistants only
+_HUB_CONV_JSON   = migrate_legacy_runtime_state_file("hub_conversations.json")  # Live Channels
 _MEMORY_ROOT     = _PROJECT_ROOT / "memory"
 from src.agent.memory.agent_memory import COLLECTIVE_AGENT_ID as _MULTI_AGENT_ID
 
@@ -153,7 +157,7 @@ class ConsolidationRunner:
                 consolidator = MemoryConsolidator(get_agent_memory(agent_id))
                 consolidator.consolidate_lightweight()
                 logger.info("[ConsolidationRunner] ✔ Idle-session lightweight consolidation: %s", agent_id)
-            except Exception as exc:
+            except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 logger.debug("[ConsolidationRunner] Idle check skipped for %s: %s", agent_id, exc)
 
     # ── Live Channels ingestion ────────────────────────────────────────────────
@@ -170,7 +174,7 @@ class ConsolidationRunner:
             return
         try:
             data = json.loads(_HUB_CONV_JSON.read_text(encoding="utf-8"))
-        except Exception as exc:
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.warning("[ConsolidationRunner] Could not read hub_conversations.json: %s", exc)
             return
 
@@ -185,7 +189,7 @@ class ConsolidationRunner:
             if state_file.exists():
                 try:
                     ingested = json.loads(state_file.read_text(encoding="utf-8"))
-                except Exception:
+                except (OSError, TypeError, ValueError, json.JSONDecodeError):
                     ingested = {}
 
             new_entries = 0
@@ -224,7 +228,7 @@ class ConsolidationRunner:
                         "[ConsolidationRunner] Ingested %d new channel session(s) for %s.",
                         new_entries, agent_id,
                     )
-            except Exception as exc:
+            except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 logger.debug("[ConsolidationRunner] Channel ingest skipped for %s: %s", agent_id, exc)
 
     # ── Dirty-check helpers ────────────────────────────────────────────────────
@@ -257,7 +261,7 @@ class ConsolidationRunner:
             last_consolidation_ts = datetime.fromisoformat(last_str).timestamp()
             wm_mtime = working_md.stat().st_mtime
             return wm_mtime > last_consolidation_ts
-        except Exception:
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
             return True   # conservative: consolidate if state is unreadable
 
     # ── Agent list ────────────────────────────────────────────────────────────
@@ -279,7 +283,7 @@ class ConsolidationRunner:
                         aid = pa.get("id", "")
                         if aid and aid != _MULTI_AGENT_ID:
                             ids.append(aid)
-        except Exception as exc:
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.error("[ConsolidationRunner] Could not read assistants.json: %s", exc)
         return ids
 
@@ -306,7 +310,7 @@ class ConsolidationRunner:
                 consolidator = MemoryConsolidator(memory)
                 consolidator.consolidate()
                 logger.info("[ConsolidationRunner] ✔ %s", agent_id)
-            except Exception as exc:
+            except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 logger.error(
                     "[ConsolidationRunner] ✘ %s — %s", agent_id, exc, exc_info=True
                 )
@@ -314,17 +318,16 @@ class ConsolidationRunner:
         logger.info("[ConsolidationRunner] Cycle complete at %s.", ts)
 
 
-# ── Singleton ──────────────────────────────────────────────────────────────────
-
-_runner_instance: ConsolidationRunner | None = None
 _runner_lock = threading.Lock()
 
 
 def get_consolidation_runner() -> ConsolidationRunner:
     """Return the process-wide singleton ConsolidationRunner."""
-    global _runner_instance
-    if _runner_instance is None:
+    runner = _RUNNER_CACHE.get("default")
+    if runner is None:
         with _runner_lock:
-            if _runner_instance is None:
-                _runner_instance = ConsolidationRunner()
-    return _runner_instance
+            runner = _RUNNER_CACHE.get("default")
+            if runner is None:
+                runner = ConsolidationRunner()
+                _RUNNER_CACHE["default"] = runner
+    return runner

@@ -14,8 +14,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from src.agent.runtime_paths import migrate_legacy_root_runtime_state_file
+
 _ROOT = Path(__file__).parent.parent.parent
-_STATE_FILE = _ROOT / "running_tg_pollers.json"   # separate from running_agents.json
+_STATE_FILE = migrate_legacy_root_runtime_state_file("running_tg_pollers.json")
 _POLLER_SCRIPT = _ROOT / "src" / "telegram" / "pa_poller_runner.py"
 
 

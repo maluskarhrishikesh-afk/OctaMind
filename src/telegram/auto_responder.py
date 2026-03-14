@@ -16,12 +16,18 @@ Auto-reply is skipped for:
 Special commands handled without the LLM:
   /start   — welcome message
   /reset   — clear conversation history for this chat
-  /agents  — list the skill agents available to this PA
+    /agents  — list available and enabled skill agents for this PA
+    /skills  — show enabled and disabled skills for this PA
+    /enable <skill>  — enable a skill for this PA
+    /disable <skill> — disable a skill for this PA
+        /auth <calendar|email|drive> — start Google auth in Telegram
+        /authcomplete <redirect-url> — finish Google auth from a pasted redirect URL
 """
 from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from typing import Any, Dict, Optional
 
@@ -34,7 +40,8 @@ _reply_lock = threading.Lock()
 _TG_MAX_LEN = 4000  # slightly below the hard 4096 limit for safety
 
 # Characters that can break Telegram Markdown v1 entity parsing
-_MD_STRIP_TABLE = str.maketrans("", "", "*_`[]\\​")
+_MD_STRIP_TABLE = str.maketrans("", "", "*_`[]\\\u200B")
+_GOOGLE_AUTH_COMPLETE_RE = re.compile(r"(?:https?://localhost[^\s]+|\bcode=[^\s]+.*\bstate=[^\s]+)", re.IGNORECASE)
 
 
 def _plain_text(text: str) -> str:
@@ -100,6 +107,34 @@ def maybe_auto_reply(stored_message: Dict[str, Any]) -> None:
         _handle_agents(chat_id)
         return
 
+    if cmd.lower().startswith("/enable "):
+        _handle_skill_toggle(chat_id, cmd.split(" ", 1)[1], enable=True)
+        return
+
+    if cmd.lower().startswith("/disable "):
+        _handle_skill_toggle(chat_id, cmd.split(" ", 1)[1], enable=False)
+        return
+
+    if cmd.lower().startswith("/authcomplete "):
+        _handle_google_auth_complete(chat_id, cmd.split(" ", 1)[1])
+        return
+
+    if cmd.lower() == "/authcomplete":
+        _handle_google_auth_complete(chat_id, "")
+        return
+
+    if cmd.lower().startswith("/auth "):
+        _handle_google_auth_start(chat_id, cmd.split(" ", 1)[1])
+        return
+
+    if cmd.lower() == "/auth":
+        _handle_google_auth_start(chat_id, "")
+        return
+
+    if _looks_like_google_auth_completion_payload(cmd):
+        _handle_google_auth_complete(chat_id, cmd)
+        return
+
     # Skip other bot commands (they start with /)
     if cmd.startswith("/"):
         return
@@ -125,7 +160,12 @@ def _send_welcome(chat_id: int | str) -> None:
         "Send me any message and I'll get right to work. 😊\n\n"
         "**Commands:**\n"
         "• `/reset` — clear conversation history\n"
-        "• `/agents` — list available skills"
+        "• `/skills` — view enabled and available skills\n"
+        "• `/enable files` — enable a skill\n"
+        "• `/enable scheduler` — enable another skill\n"
+        "• `/disable files` — disable a skill\n"
+        "• `/auth calendar` — start Google Calendar sign-in\n"
+        "• `/authcomplete <redirect-url>` — finish Google sign-in"
     )
     try:
         from .telegram_service import send_text
@@ -154,20 +194,45 @@ def _handle_reset(chat_id: int | str) -> None:
 
 
 def _handle_agents(chat_id: int | str) -> None:
-    """Send a list of available skill agents to the user."""
+    """Send enabled and available skill agents for the current PA."""
     try:
         from src.agent.workflows.agent_registry import AGENT_REGISTRY
-        lines = ["🤖 *Available Skills*\n"]
+        pa_id_env = os.environ.get("PA_ID", "").strip()
+        enabled_skills = set()
+        pa_name = "this assistant"
+        if pa_id_env:
+            from src.agent.hub.pa_manager import get_assistant
+
+            pa = get_assistant(pa_id_env)
+            if pa:
+                enabled_skills = {str(skill).strip() for skill in pa.get("skills", []) if str(skill).strip()}
+                pa_name = pa.get("name") or pa_name
+
+        lines = [f"🤖 *Skills for {pa_name}*\n"]
         _icons = {
             "email": "✉️", "drive": "📁", "files": "🗂️",
             "calendar": "📅", "stock_market": "📈", "whatsapp": "💬",
             "telegram": "✈️", "browser": "🌐", "linkedin": "💼",
             "habit_tracker": "📊", "scheduler": "🔔", "file_organizer": "🗃️",
         }
-        for name, info in AGENT_REGISTRY.items():
+        enabled_lines = []
+        disabled_lines = []
+        for name in AGENT_REGISTRY:
             icon = _icons.get(name, "🔧")
-            desc = info.get("description", "")[:60]
-            lines.append(f"{icon} *{name.replace('_', ' ').title()}* — {desc}")
+            label = name.replace("_", " ").title()
+            if name in enabled_skills:
+                enabled_lines.append(f"{icon} *{label}*")
+            else:
+                disabled_lines.append(f"{icon} {label}")
+        lines.append("✅ *Enabled*\n" + ("\n".join(enabled_lines) if enabled_lines else "None"))
+        if disabled_lines:
+            lines.append("\n➕ *Available to Enable*\n" + "\n".join(disabled_lines[:12]))
+        sample_disabled = [name for name in AGENT_REGISTRY if name not in enabled_skills][:3]
+        if sample_disabled:
+            command_examples = ", ".join(f"`/enable {name.replace('_', ' ')}`" for name in sample_disabled)
+            lines.append(f"\nUse {command_examples} to enable more skills here in Telegram.")
+        else:
+            lines.append("\nUse `/disable <skill>` if you want to turn a skill off here in Telegram.")
         msg = "\n".join(lines)
     except Exception:
         msg = "🤖 Skills are loading — try again in a moment."
@@ -179,6 +244,107 @@ def _handle_agents(chat_id: int | str) -> None:
         store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
     except Exception as exc:
         logger.warning("[AutoReply] /agents response failed for %s: %s", chat_id, exc)
+
+
+def _normalize_skill_name(raw_name: str) -> str:
+    return str(raw_name or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _normalize_google_auth_service(raw_name: str) -> str:
+    value = _normalize_skill_name(raw_name)
+    aliases = {
+        "gmail": "email",
+        "mail": "email",
+        "gdrive": "drive",
+        "google_drive": "drive",
+        "google_calendar": "calendar",
+        "scheduler": "calendar",
+    }
+    return aliases.get(value, value)
+
+
+def _looks_like_google_auth_completion_payload(text: str) -> bool:
+    return bool(_GOOGLE_AUTH_COMPLETE_RE.search(str(text or "")))
+
+
+def _handle_google_auth_start(chat_id: int | str, raw_service: str) -> None:
+    try:
+        from src.agent.hub.google_auth_session import build_telegram_google_auth_reply
+        from .telegram_service import send_text
+        from .polling.message_store import store_outbound_message
+
+        service = _normalize_google_auth_service(raw_service)
+        if service not in {"calendar", "email", "drive"}:
+            msg = "Use `/auth calendar`, `/auth email`, or `/auth drive` to start Google sign-in."
+        else:
+            msg = build_telegram_google_auth_reply([service], force=True, session_id=f"telegram_{chat_id}") or (
+                f"{service.title()} is already authorized. If you want to re-authorize it, try `/auth {service}` again in a moment."
+            )
+
+        resp = send_text(chat_id, msg)
+        store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning("[AutoReply] /auth failed for %s: %s", chat_id, exc)
+
+
+def _handle_google_auth_complete(chat_id: int | str, raw_payload: str) -> None:
+    try:
+        from src.agent.hub.google_auth_session import complete_google_auth_session
+        from .telegram_service import send_text
+        from .polling.message_store import store_outbound_message
+
+        if not raw_payload.strip():
+            msg = "Paste the full `http://localhost/...` redirect URL after `/authcomplete`, or just paste the URL directly into this chat."
+        else:
+            _, msg = complete_google_auth_session(raw_payload)
+
+        resp = send_text(chat_id, msg)
+        store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning("[AutoReply] /authcomplete failed for %s: %s", chat_id, exc)
+
+
+def _handle_skill_toggle(chat_id: int | str, raw_skill: str, *, enable: bool) -> None:
+    """Enable or disable a PA skill directly from Telegram."""
+    try:
+        from src.agent.workflows.agent_registry import AGENT_REGISTRY
+        from src.agent.hub.pa_manager import get_assistant, update_assistant
+        from .telegram_service import send_text
+        from .polling.message_store import store_outbound_message
+
+        pa_id_env = os.environ.get("PA_ID", "").strip()
+        if not pa_id_env:
+            msg = "⚠️ Skill changes are only supported for dedicated Personal Assistant bots."
+        else:
+            pa = get_assistant(pa_id_env)
+            if not pa:
+                msg = "⚠️ I could not find the assistant configuration for this bot."
+            else:
+                skill_name = _normalize_skill_name(raw_skill)
+                if skill_name not in AGENT_REGISTRY:
+                    available = ", ".join(sorted(AGENT_REGISTRY.keys()))
+                    msg = f"⚠️ Unknown skill: `{skill_name}`.\n\nAvailable skills: {available}"
+                else:
+                    current_skills = [str(skill).strip() for skill in pa.get("skills", []) if str(skill).strip()]
+                    if enable:
+                        if skill_name in current_skills:
+                            msg = f"✅ **{skill_name.replace('_', ' ').title()}** is already enabled for **{pa['name']}**."
+                        else:
+                            updated_skills = current_skills + [skill_name]
+                            update_assistant(pa_id_env, skills=updated_skills)
+                            msg = f"✅ Enabled **{skill_name.replace('_', ' ').title()}** for **{pa['name']}**."
+                    else:
+                        if skill_name not in current_skills:
+                            msg = f"ℹ️ **{skill_name.replace('_', ' ').title()}** is not enabled for **{pa['name']}**."
+                        else:
+                            updated_skills = [skill for skill in current_skills if skill != skill_name]
+                            update_assistant(pa_id_env, skills=updated_skills)
+                            msg = f"✅ Disabled **{skill_name.replace('_', ' ').title()}** for **{pa['name']}**."
+
+        resp = send_text(chat_id, msg)
+        store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+    except Exception as exc:
+        logger.warning("[AutoReply] skill toggle failed for %s: %s", chat_id, exc)
 
 
 def _generate_and_send(chat_id: int | str, user_text: str) -> None:

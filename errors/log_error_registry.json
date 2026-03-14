@@ -1,7 +1,1932 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-03-09T07:27:35Z",
+  "updated_at": "2026-03-14T09:40:25Z",
   "entries": [
+    {
+      "fingerprint": "b50d8ab6a7c40ed4",
+      "category": "provider_rate_limit",
+      "logger": "email_agent.llm_parser",
+      "normalized_message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
+      "severity": "ERROR",
+      "count": 15,
+      "first_seen": "2026-03-08T15:22:50Z",
+      "last_seen": "2026-03-14T09:40:25Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-14T07:55:20Z",
+          "level": "ERROR",
+          "logger": "email_agent.llm_parser",
+          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 7567 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 7567 seconds before retrying.'}}",
+          "correlation_id": "273944c3",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-14T07:55:42Z",
+          "level": "ERROR",
+          "logger": "email_agent.llm_parser",
+          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 7544 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 7544 seconds before retrying.'}}",
+          "correlation_id": "663e3f38",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-14T07:56:04Z",
+          "level": "ERROR",
+          "logger": "email_agent.llm_parser",
+          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 7523 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 7523 seconds before retrying.'}}",
+          "correlation_id": "565957ae",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-14T07:58:06Z",
+          "level": "ERROR",
+          "logger": "email_agent.llm_parser",
+          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 7401 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 7401 seconds before retrying.'}}",
+          "correlation_id": "28e17598",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-14T09:40:25Z",
+          "level": "ERROR",
+          "logger": "email_agent.llm_parser",
+          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 1262 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 1262 seconds before retrying.'}}",
+          "correlation_id": "4f2291db",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "1d199e146d885e37",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': 'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message'}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-14T06:49:08Z",
+      "last_seen": "2026-03-14T06:49:08Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-14T06:49:08Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': 'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message'}",
+          "correlation_id": "b1fa5eac",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "33421dd78847244e",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [calendar] ✗ step=s2 tool=delete_event returned error: Could not delete event: <HttpError 404 when requesting https://www.googleapis.com/calendar/v3/calendars/primary/events/9",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-14T06:34:17Z",
+      "last_seen": "2026-03-14T06:34:17Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-14T06:34:17Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [calendar] ✗ step=s2 tool=delete_event returned error: Could not delete event: <HttpError 404 when requesting https://www.googleapis.com/calendar/v3/calendars/primary/events/9",
+          "correlation_id": "8ce45bc9",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "aace67acd80d0a8c",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [calendar] ✗ step=s1 tool=delete_event returned error: Could not delete event: <HttpError 404 when requesting https://www.googleapis.com/calendar/v3/calendars/primary/events/1",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-14T06:34:16Z",
+      "last_seen": "2026-03-14T06:34:16Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-14T06:34:16Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [calendar] ✗ step=s1 tool=delete_event returned error: Could not delete event: <HttpError 404 when requesting https://www.googleapis.com/calendar/v3/calendars/primary/events/1",
+          "correlation_id": "8ce45bc9",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "533a8815511b60be",
+      "category": "provider_rate_limit",
+      "logger": "huggingface_hub.utils._http",
+      "normalized_message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+      "severity": "WARNING",
+      "count": 28,
+      "first_seen": "2026-03-08 17:34:15.639",
+      "last_seen": "2026-03-13T17:44:09Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-13T06:20:57Z",
+          "level": "WARNING",
+          "logger": "huggingface_hub.utils._http",
+          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T06:20:57Z",
+          "level": "WARNING",
+          "logger": "huggingface_hub.utils._http",
+          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T06:20:57Z",
+          "level": "WARNING",
+          "logger": "huggingface_hub.utils._http",
+          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+          "correlation_id": "f44d8aae",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:03:37Z",
+          "level": "WARNING",
+          "logger": "huggingface_hub.utils._http",
+          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+          "correlation_id": "56fc86da",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T17:44:09Z",
+          "level": "WARNING",
+          "logger": "huggingface_hub.utils._http",
+          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
+          "correlation_id": "20d1134c",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d5dc2dedd5868ff1",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 42\"}",
+      "severity": "ERROR",
+      "count": 5,
+      "first_seen": "2026-03-13T08:22:25Z",
+      "last_seen": "2026-03-13T17:11:59Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-13T08:22:25Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 42\"}",
+          "correlation_id": "5e209b0b",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T10:03:45Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 42\"}",
+          "correlation_id": "4781d4b3",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T10:06:31Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 42\"}",
+          "correlation_id": "e951fd5e",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T10:07:15Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 42\"}",
+          "correlation_id": "2ec91325",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T17:11:59Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 42\"}",
+          "correlation_id": "4c31fdf2",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "7eac98bef6b620a4",
+      "category": "provider_rate_limit",
+      "logger": "workflows.skill_react",
+      "normalized_message": "│ ✗ [habit] LLM call failed at iter 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-13T08:22:28Z",
+      "last_seen": "2026-03-13T08:22:28Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-13T08:22:28Z",
+          "level": "ERROR",
+          "logger": "workflows.skill_react",
+          "message": "│  ✗ [habit] LLM call failed at iter 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 2099 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 2099 seconds before retrying.'}}",
+          "correlation_id": "5e209b0b",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "4787f008ab57d72d",
+      "category": "provider_rate_limit",
+      "logger": "workflows",
+      "normalized_message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}) — using keyword fallback",
+      "severity": "WARNING",
+      "count": 12,
+      "first_seen": "2026-03-08 17:38:36.376",
+      "last_seen": "2026-03-13T08:22:23Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-13T08:01:05Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3383 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3383 seconds before retrying.'}}) — using keyword fallback",
+          "correlation_id": "bd1e5e97",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:02:23Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3305 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3305 seconds before retrying.'}}) — using keyword fallback",
+          "correlation_id": "7961620d",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:02:56Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3271 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3271 seconds before retrying.'}}) — using keyword fallback",
+          "correlation_id": "56fc86da",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:05:15Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3132 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3132 seconds before retrying.'}}) — using keyword fallback",
+          "correlation_id": "e2b02052",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:22:23Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 2105 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 2105 seconds before retrying.'}}) — using keyword fallback",
+          "correlation_id": "5e209b0b",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "2ea9992d91394f05",
+      "category": "provider_rate_limit",
+      "logger": "workflows",
+      "normalized_message": "│ ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
+      "severity": "ERROR",
+      "count": 4,
+      "first_seen": "2026-03-08 17:38:41.773",
+      "last_seen": "2026-03-13T08:05:24Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:38:41.773",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "│  ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66770 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66770 seconds before retrying.'}}",
+          "correlation_id": "ea632b15",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        },
+        {
+          "timestamp": "2026-03-10T19:13:00Z",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "│  ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43434 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43434 seconds before retrying.'}}",
+          "correlation_id": "a1b456f2",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T19:13:57Z",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "│  ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43377 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43377 seconds before retrying.'}}",
+          "correlation_id": "669e22df",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:05:24Z",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "│  ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3124 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3124 seconds before retrying.'}}",
+          "correlation_id": "e2b02052",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "de211ddd766bf70e",
+      "category": "general_error",
+      "logger": "workflows",
+      "normalized_message": "run_workflow: DAG planning failed — falling back to ReAct loop",
+      "severity": "WARNING",
+      "count": 8,
+      "first_seen": "2026-03-08 17:38:39.772",
+      "last_seen": "2026-03-13T08:05:22Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T19:12:57Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "run_workflow: DAG planning failed — falling back to ReAct loop",
+          "correlation_id": "a1b456f2",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T19:13:49Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "run_workflow: DAG planning failed — falling back to ReAct loop",
+          "correlation_id": "669e22df",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:40:37Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "run_workflow: DAG planning failed — falling back to ReAct loop",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:41:06Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "run_workflow: DAG planning failed — falling back to ReAct loop",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:05:22Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "run_workflow: DAG planning failed — falling back to ReAct loop",
+          "correlation_id": "e2b02052",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "0284ce2bc6107777",
+      "category": "provider_rate_limit",
+      "logger": "workflows.dag",
+      "normalized_message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}} — falling back",
+      "severity": "ERROR",
+      "count": 4,
+      "first_seen": "2026-03-08 17:38:39.767",
+      "last_seen": "2026-03-13T08:05:22Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-08 17:38:39.767",
+          "level": "ERROR",
+          "logger": "workflows.dag",
+          "message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66772 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66772 seconds before retrying.'}} — falling back",
+          "correlation_id": "ea632b15",
+          "request_id": "-",
+          "source": "logs\\My_Assistant.log"
+        },
+        {
+          "timestamp": "2026-03-10T19:12:57Z",
+          "level": "ERROR",
+          "logger": "workflows.dag",
+          "message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43436 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43436 seconds before retrying.'}} — falling back",
+          "correlation_id": "a1b456f2",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T19:13:49Z",
+          "level": "ERROR",
+          "logger": "workflows.dag",
+          "message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43384 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43384 seconds before retrying.'}} — falling back",
+          "correlation_id": "669e22df",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:05:22Z",
+          "level": "ERROR",
+          "logger": "workflows.dag",
+          "message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3126 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3126 seconds before retrying.'}} — falling back",
+          "correlation_id": "e2b02052",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "906ec9ee7e23d09e",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 57\"}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-13T08:05:18Z",
+      "last_seen": "2026-03-13T08:05:18Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-13T08:05:18Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 57\"}",
+          "correlation_id": "e2b02052",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "4f89a3e1dba83261",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 55\"}",
+      "severity": "ERROR",
+      "count": 2,
+      "first_seen": "2026-03-13T08:01:06Z",
+      "last_seen": "2026-03-13T08:02:24Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-13T08:01:06Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 55\"}",
+          "correlation_id": "bd1e5e97",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-13T08:02:24Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 55\"}",
+          "correlation_id": "7961620d",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "8c74ae3ed9fb4bcb",
+      "category": "general_error",
+      "logger": "workflows",
+      "normalized_message": "Router LLM classification failed (no llm in router tests), falling back to keywords",
+      "severity": "WARNING",
+      "count": 25,
+      "first_seen": "2026-03-10T17:28:30Z",
+      "last_seen": "2026-03-12T09:48:58Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T17:40:07Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Router LLM classification failed (no llm in router tests), falling back to keywords",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:40:07Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Router LLM classification failed (no llm in router tests), falling back to keywords",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:40:07Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Router LLM classification failed (no llm in router tests), falling back to keywords",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:40:07Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Router LLM classification failed (no llm in router tests), falling back to keywords",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-12T09:48:58Z",
+          "level": "WARNING",
+          "logger": "workflows",
+          "message": "Router LLM classification failed (no llm in router tests), falling back to keywords",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d359cdaef937f39d",
+      "category": "dag_planner_fallback",
+      "logger": "workflows.dag",
+      "normalized_message": "DAG planner: LLM returned empty or non-list — falling back",
+      "severity": "WARNING",
+      "count": 4,
+      "first_seen": "2026-03-10T17:28:38Z",
+      "last_seen": "2026-03-11T17:41:06Z",
+      "root_cause": "The DAG planner failed and dropped to fallback execution, usually because of upstream provider failure or malformed planner output.",
+      "tool_description_guidance": [
+        "Keep tool signatures and return-key wording short and unambiguous so the planner can reference results, file_path, and report_content reliably."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T17:28:38Z",
+          "level": "WARNING",
+          "logger": "workflows.dag",
+          "message": "DAG planner: LLM returned empty or non-list — falling back",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T17:29:09Z",
+          "level": "WARNING",
+          "logger": "workflows.dag",
+          "message": "DAG planner: LLM returned empty or non-list — falling back",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:40:37Z",
+          "level": "WARNING",
+          "logger": "workflows.dag",
+          "message": "DAG planner: LLM returned empty or non-list — falling back",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:41:06Z",
+          "level": "WARNING",
+          "logger": "workflows.dag",
+          "message": "DAG planner: LLM returned empty or non-list — falling back",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "84163823810d60bc",
+      "category": "general_error",
+      "logger": "workflows",
+      "normalized_message": "NL workflow planning failed: Expecting value: line 1 column 1 (char 0)",
+      "severity": "ERROR",
+      "count": 2,
+      "first_seen": "2026-03-10T17:28:32Z",
+      "last_seen": "2026-03-11T17:40:09Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T17:28:32Z",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "NL workflow planning failed: Expecting value: line 1 column 1 (char 0)",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:40:09Z",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "NL workflow planning failed: Expecting value: line 1 column 1 (char 0)",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "1b3f680a1d45ef78",
+      "category": "general_error",
+      "logger": "workflows",
+      "normalized_message": "NL workflow planning failed: timeout",
+      "severity": "ERROR",
+      "count": 2,
+      "first_seen": "2026-03-10T17:28:32Z",
+      "last_seen": "2026-03-11T17:40:09Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T17:28:32Z",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "NL workflow planning failed: timeout",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:40:09Z",
+          "level": "ERROR",
+          "logger": "workflows",
+          "message": "NL workflow planning failed: timeout",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "c1c57b6e800b88a5",
+      "category": "general_error",
+      "logger": "workflows.skill_react",
+      "normalized_message": "│ ✗ [files] LLM call failed at iter 1: Error code: 413 - {'error': {'code': 'tokens_limit_reached', 'message': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.', 'details': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.'}}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-11T17:15:00Z",
+      "last_seen": "2026-03-11T17:15:00Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T17:15:00Z",
+          "level": "ERROR",
+          "logger": "workflows.skill_react",
+          "message": "│  ✗ [files] LLM call failed at iter 1: Error code: 413 - {'error': {'code': 'tokens_limit_reached', 'message': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.', 'details': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.'}}",
+          "correlation_id": "7c67f222",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "00701ac931a1dc8c",
+      "category": "general_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ ⚠ [files] DAG planning failed — falling back to ReAct",
+      "severity": "WARNING",
+      "count": 2,
+      "first_seen": "2026-03-09T07:16:57Z",
+      "last_seen": "2026-03-11T17:14:59Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-09T07:16:57Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│  ⚠ [files] DAG planning failed — falling back to ReAct",
+          "correlation_id": "87847a8b",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T17:14:59Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│  ⚠ [files] DAG planning failed — falling back to ReAct",
+          "correlation_id": "7c67f222",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "af422ce928cc837b",
+      "category": "general_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ ✗ [files] Planning LLM call failed: Error code: 413 - {'error': {'code': 'tokens_limit_reached', 'message': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.', 'details': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.'}}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-11T17:14:59Z",
+      "last_seen": "2026-03-11T17:14:59Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T17:14:59Z",
+          "level": "ERROR",
+          "logger": "workflows.skill_dag",
+          "message": "│  ✗ [files] Planning LLM call failed: Error code: 413 - {'error': {'code': 'tokens_limit_reached', 'message': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.', 'details': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.'}}",
+          "correlation_id": "7c67f222",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "6f873949018d2138",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [files] ✗ step=s1 tool=zip_files_from_manifest returned error: Manifest file not found: 'data\\octa_manifest.txt'. Run a search first.",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-11T16:33:12Z",
+      "last_seen": "2026-03-11T16:33:12Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T16:33:12Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [files] ✗ step=s1 tool=zip_files_from_manifest returned error: Manifest file not found: 'data\\octa_manifest.txt'. Run a search first.",
+          "correlation_id": "4d0f5771",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "29d30ae5e2e70c30",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [email] ✗ step=s1 tool=send_email_with_attachment returned error: Attachment file not found: <workspace>/your_data/archives/Payslips.zip",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-11T10:38:05Z",
+      "last_seen": "2026-03-11T10:38:05Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T10:38:05Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [email] ✗ step=s1 tool=send_email_with_attachment returned error: Attachment file not found: <workspace>/your_data/archives/Payslips.zip",
+          "correlation_id": "c22eb224",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "2e3e6366ab3312f5",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [email] ✗ step=s1 tool=send_email_with_attachment returned error: Error sending email with attachment",
+      "severity": "WARNING",
+      "count": 2,
+      "first_seen": "2026-03-09T07:19:51Z",
+      "last_seen": "2026-03-11T10:10:18Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-09T07:19:51Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [email] ✗ step=s1 tool=send_email_with_attachment returned error: Error sending email with attachment",
+          "correlation_id": "a52598db",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-11T10:10:18Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [email] ✗ step=s1 tool=send_email_with_attachment returned error: Error sending email with attachment",
+          "correlation_id": "c620083e",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "c722e539ccebc806",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 361\"}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-11T09:16:39Z",
+      "last_seen": "2026-03-11T09:16:39Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T09:16:39Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 361\"}",
+          "correlation_id": "c65e50d7",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "451261ffe6e5b6bc",
+      "category": "general_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ ✗ [files] Synthesis LLM call failed: Error code: 413 - {'error': {'code': 'tokens_limit_reached', 'message': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.', 'details': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.'}}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-11T09:16:37Z",
+      "last_seen": "2026-03-11T09:16:37Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T09:16:37Z",
+          "level": "ERROR",
+          "logger": "workflows.skill_dag",
+          "message": "│  ✗ [files] Synthesis LLM call failed: Error code: 413 - {'error': {'code': 'tokens_limit_reached', 'message': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.', 'details': 'Request body too large for gpt-4o-mini model. Max size: 8000 tokens.'}}",
+          "correlation_id": "c65e50d7",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b565f33e01bcda15",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 250\"}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-11T09:16:07Z",
+      "last_seen": "2026-03-11T09:16:07Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T09:16:07Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 250\"}",
+          "correlation_id": "a686083b",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "09ed0109fb219cb1",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [files] ✗ step=s1 tool=zip_files returned error: Source does not exist: <path> into an archive.",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-11T09:16:03Z",
+      "last_seen": "2026-03-11T09:16:03Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T09:16:03Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [files] ✗ step=s1 tool=zip_files returned error: Source does not exist: C:\\Users\\malus\\Downloads\\Zipped into an archive.",
+          "correlation_id": "a686083b",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "e7a0eb2492480de2",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 54\"}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-11T08:35:54Z",
+      "last_seen": "2026-03-11T08:35:54Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-11T08:35:54Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 54\"}",
+          "correlation_id": "a686083b",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "c1c5e8e48968322f",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 65\"}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-10T19:13:44Z",
+      "last_seen": "2026-03-10T19:13:44Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T19:13:44Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 65\"}",
+          "correlation_id": "669e22df",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "9e9625569a53eba4",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 62\"}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-10T19:12:52Z",
+      "last_seen": "2026-03-10T19:12:52Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T19:12:52Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 62\"}",
+          "correlation_id": "a1b456f2",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "399e7596599aa7a2",
+      "category": "provider_rate_limit",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ ✗ [files] Synthesis LLM call failed: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-10T19:11:58Z",
+      "last_seen": "2026-03-10T19:11:58Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T19:11:58Z",
+          "level": "ERROR",
+          "logger": "workflows.skill_dag",
+          "message": "│  ✗ [files] Synthesis LLM call failed: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43496 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 43496 seconds before retrying.'}}",
+          "correlation_id": "09fba455",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "605dd1f7b090e384",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [browser] ✗ step=s2 tool=summarize_page returned error: Invalid IPv6 URL",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-10T19:04:17Z",
+      "last_seen": "2026-03-10T19:04:17Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T19:04:17Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [browser] ✗ step=s2 tool=summarize_page returned error: Invalid IPv6 URL",
+          "correlation_id": "e5b69380",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "25d6b83a6501b917",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 41\"}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-10T19:03:42Z",
+      "last_seen": "2026-03-10T19:03:42Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T19:03:42Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "Telegram API HTTP error: 400 Client Error: Bad Request for url: https://api.telegram.org/bot8540285779:AAGElhprTX0-hhrugsDx4rZjxzsfcqTuo5o/editMessageText | body={'ok': False, 'error_code': 400, 'description': \"Bad Request: can't parse entities: Can't find end of the entity starting at byte offset 41\"}",
+          "correlation_id": "e5b69380",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "afa6ffa3f528e039",
+      "category": "general_error",
+      "logger": "files_agent",
+      "normalized_message": "get_disk_usage failed: [WinError 3] The system cannot find the path specified",
+      "severity": "ERROR",
+      "count": 2,
+      "first_seen": "2026-03-10T18:38:05Z",
+      "last_seen": "2026-03-10T18:59:26Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:38:05Z",
+          "level": "ERROR",
+          "logger": "files_agent",
+          "message": "get_disk_usage failed: [WinError 3] The system cannot find the path specified",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:26Z",
+          "level": "ERROR",
+          "logger": "files_agent",
+          "message": "get_disk_usage failed: [WinError 3] The system cannot find the path specified",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "2b54bd46939b3f81",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "share_drive_file failed: File not found",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:14Z",
+      "last_seen": "2026-03-10T18:59:25Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:14Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "share_drive_file failed: File not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:43Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "share_drive_file failed: File not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:25Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "share_drive_file failed: File not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d45b00decdee0ecb",
+      "category": "general_error",
+      "logger": "whatsapp_agent",
+      "normalized_message": "send_message failed: Token expired",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:16Z",
+      "last_seen": "2026-03-10T18:59:25Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:16Z",
+          "level": "ERROR",
+          "logger": "whatsapp_agent",
+          "message": "send_message failed: Token expired",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:43Z",
+          "level": "ERROR",
+          "logger": "whatsapp_agent",
+          "message": "send_message failed: Token expired",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:25Z",
+          "level": "ERROR",
+          "logger": "whatsapp_agent",
+          "message": "send_message failed: Token expired",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "21d6be524e0531bb",
+      "category": "general_error",
+      "logger": "whatsapp_agent",
+      "normalized_message": "send_media failed: Either link or media_id",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:16Z",
+      "last_seen": "2026-03-10T18:59:25Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:16Z",
+          "level": "ERROR",
+          "logger": "whatsapp_agent",
+          "message": "send_media failed: Either link or media_id",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:43Z",
+          "level": "ERROR",
+          "logger": "whatsapp_agent",
+          "message": "send_media failed: Either link or media_id",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:25Z",
+          "level": "ERROR",
+          "logger": "whatsapp_agent",
+          "message": "send_media failed: Either link or media_id",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "aeedafa642de4793",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "forward_to_email failed: SMTP error",
+      "severity": "ERROR",
+      "count": 2,
+      "first_seen": "2026-03-10T18:56:43Z",
+      "last_seen": "2026-03-10T18:59:25Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:43Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "forward_to_email failed: SMTP error",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:25Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "forward_to_email failed: SMTP error",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "475ae8e4ba6e6283",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "send_message failed: Bot was blocked by the user",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:12Z",
+      "last_seen": "2026-03-10T18:59:23Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:12Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "send_message failed: Bot was blocked by the user",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:41Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "send_message failed: Bot was blocked by the user",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:23Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "send_message failed: Bot was blocked by the user",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "c5e66aef17c2f7d6",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "reply_to_message failed: Message not found",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:12Z",
+      "last_seen": "2026-03-10T18:59:23Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:12Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "reply_to_message failed: Message not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:41Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "reply_to_message failed: Message not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:23Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "reply_to_message failed: Message not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "5ebcf9345dd81b94",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "edit_message failed: Message can't be edited",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:12Z",
+      "last_seen": "2026-03-10T18:59:23Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:12Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "edit_message failed: Message can't be edited",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:41Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "edit_message failed: Message can't be edited",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:23Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "edit_message failed: Message can't be edited",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "3d136c61316aee91",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "get_chat_info failed: Chat not found",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:12Z",
+      "last_seen": "2026-03-10T18:59:23Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:12Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "get_chat_info failed: Chat not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:41Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "get_chat_info failed: Chat not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:23Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "get_chat_info failed: Chat not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "77686cfc9c5507be",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "pin_message failed: Not enough rights",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:12Z",
+      "last_seen": "2026-03-10T18:59:23Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:12Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "pin_message failed: Not enough rights",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:41Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "pin_message failed: Not enough rights",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:23Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "pin_message failed: Not enough rights",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "c7f6b8668929ee0b",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "leave_chat failed: Chat not found",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:12Z",
+      "last_seen": "2026-03-10T18:59:23Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:12Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "leave_chat failed: Chat not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:41Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "leave_chat failed: Chat not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:23Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "leave_chat failed: Chat not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b51d2dbb95d164af",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "send_poll failed: not found",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:13Z",
+      "last_seen": "2026-03-10T18:59:23Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:13Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "send_poll failed: not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:41Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "send_poll failed: not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:23Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "send_poll failed: not found",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "be046e9ed3b3c4a2",
+      "category": "general_error",
+      "logger": "telegram_agent",
+      "normalized_message": "stop_poll failed: Poll already closed",
+      "severity": "ERROR",
+      "count": 3,
+      "first_seen": "2026-03-10T18:56:13Z",
+      "last_seen": "2026-03-10T18:59:23Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T18:56:13Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "stop_poll failed: Poll already closed",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:56:41Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "stop_poll failed: Poll already closed",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T18:59:23Z",
+          "level": "ERROR",
+          "logger": "telegram_agent",
+          "message": "stop_poll failed: Poll already closed",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "26f49abe26918524",
+      "category": "general_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ ⚠ [browser] DAG planning failed — falling back to ReAct",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-10T17:37:05Z",
+      "last_seen": "2026-03-10T17:37:05Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T17:37:05Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│  ⚠ [browser] DAG planning failed — falling back to ReAct",
+          "correlation_id": "2ae2349d",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "c0af88d3ab4e3e4c",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [email] ✗ step=s1 tool=send_email_with_attachment returned error: Attachment file not found: stock_analysis_intellect_ns_20260310_135524.pdf",
+      "severity": "WARNING",
+      "count": 1,
+      "first_seen": "2026-03-10T08:26:16Z",
+      "last_seen": "2026-03-10T08:26:16Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T08:26:16Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [email] ✗ step=s1 tool=send_email_with_attachment returned error: Attachment file not found: stock_analysis_intellect_ns_20260310_135524.pdf",
+          "correlation_id": "aa2658d1",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "a3a470ee11e54027",
+      "category": "tool_execution_error",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ [browser] ✗ step=s2 tool=summarize_page returned error: '' does not appear to be an IPv4 or IPv6 address",
+      "severity": "WARNING",
+      "count": 2,
+      "first_seen": "2026-03-10T08:19:49Z",
+      "last_seen": "2026-03-10T08:24:43Z",
+      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
+      "tool_description_guidance": [
+        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T08:19:49Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [browser] ✗ step=s2 tool=summarize_page returned error: '' does not appear to be an IPv4 or IPv6 address",
+          "correlation_id": "16207017",
+          "request_id": "-",
+          "source": "runtime"
+        },
+        {
+          "timestamp": "2026-03-10T08:24:43Z",
+          "level": "WARNING",
+          "logger": "workflows.skill_dag",
+          "message": "│    [browser] ✗ step=s2 tool=summarize_page returned error: '' does not appear to be an IPv4 or IPv6 address",
+          "correlation_id": "0f7c8559",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "add87491283e559a",
+      "category": "general_error",
+      "logger": "yfinance",
+      "normalized_message": "$TCS: possibly delisted; no price data found (period=1y) (Yahoo error = \"No data found, symbol may be delisted\")",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-10T08:19:43Z",
+      "last_seen": "2026-03-10T08:19:43Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T08:19:43Z",
+          "level": "ERROR",
+          "logger": "yfinance",
+          "message": "$TCS: possibly delisted; no price data found  (period=1y) (Yahoo error = \"No data found, symbol may be delisted\")",
+          "correlation_id": "16207017",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "908a3958da70f92c",
+      "category": "general_error",
+      "logger": "yfinance",
+      "normalized_message": "$TCS: possibly delisted; no price data found (period=3mo) (Yahoo error = \"No data found, symbol may be delisted\")",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-10T08:19:43Z",
+      "last_seen": "2026-03-10T08:19:43Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T08:19:43Z",
+          "level": "ERROR",
+          "logger": "yfinance",
+          "message": "$TCS: possibly delisted; no price data found  (period=3mo) (Yahoo error = \"No data found, symbol may be delisted\")",
+          "correlation_id": "16207017",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "44b640a30acea08b",
+      "category": "general_error",
+      "logger": "yfinance",
+      "normalized_message": "$TCS: possibly delisted; no price data found (period=6mo) (Yahoo error = \"No data found, symbol may be delisted\")",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-10T08:19:42Z",
+      "last_seen": "2026-03-10T08:19:42Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-10T08:19:42Z",
+          "level": "ERROR",
+          "logger": "yfinance",
+          "message": "$TCS: possibly delisted; no price data found  (period=6mo) (Yahoo error = \"No data found, symbol may be delisted\")",
+          "correlation_id": "16207017",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "66f88e62e440a2a9",
+      "category": "general_error",
+      "logger": "yfinance",
+      "normalized_message": "HTTP Error 404: {\"quoteSummary\":{\"result\":null,\"error\":{\"code\":\"Not Found\",\"description\":\"Quote not found for symbol: XXXXINVALID99999\"}}}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-09T17:22:33Z",
+      "last_seen": "2026-03-09T17:22:33Z",
+      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
+      "tool_description_guidance": [
+        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-09T17:22:33Z",
+          "level": "ERROR",
+          "logger": "yfinance",
+          "message": "HTTP Error 404: {\"quoteSummary\":{\"result\":null,\"error\":{\"code\":\"Not Found\",\"description\":\"Quote not found for symbol: XXXXINVALID99999\"}}}",
+          "correlation_id": "-",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
+    {
+      "fingerprint": "3495ff2dba7b2c95",
+      "category": "provider_rate_limit",
+      "logger": "workflows.skill_dag",
+      "normalized_message": "│ ✗ [email] Synthesis LLM call failed: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
+      "severity": "ERROR",
+      "count": 1,
+      "first_seen": "2026-03-09T16:55:51Z",
+      "last_seen": "2026-03-09T16:55:51Z",
+      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
+      "tool_description_guidance": [
+        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
+        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
+      ],
+      "samples": [
+        {
+          "timestamp": "2026-03-09T16:55:51Z",
+          "level": "ERROR",
+          "logger": "workflows.skill_dag",
+          "message": "│  ✗ [email] Synthesis LLM call failed: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 50999 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 50999 seconds before retrying.'}}",
+          "correlation_id": "c4db98d1",
+          "request_id": "-",
+          "source": "runtime"
+        }
+      ]
+    },
     {
       "fingerprint": "6528484806f10719",
       "category": "tool_execution_error",
@@ -24,247 +1949,6 @@
           "correlation_id": "f9579769",
           "request_id": "-",
           "source": "runtime"
-        }
-      ]
-    },
-    {
-      "fingerprint": "2e3e6366ab3312f5",
-      "category": "tool_execution_error",
-      "logger": "workflows.skill_dag",
-      "normalized_message": "│ [email] ✗ step=s1 tool=send_email_with_attachment returned error: Error sending email with attachment",
-      "severity": "WARNING",
-      "count": 1,
-      "first_seen": "2026-03-09T07:19:51Z",
-      "last_seen": "2026-03-09T07:19:51Z",
-      "root_cause": "A skill tool was called successfully but returned an application-level error for the given arguments.",
-      "tool_description_guidance": [
-        "Tool descriptions should be specific about required identifiers, supported follow-up patterns, and when to use batch tools instead of single-item tools."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-09T07:19:51Z",
-          "level": "WARNING",
-          "logger": "workflows.skill_dag",
-          "message": "│    [email] ✗ step=s1 tool=send_email_with_attachment returned error: Error sending email with attachment",
-          "correlation_id": "a52598db",
-          "request_id": "-",
-          "source": "runtime"
-        }
-      ]
-    },
-    {
-      "fingerprint": "00701ac931a1dc8c",
-      "category": "general_error",
-      "logger": "workflows.skill_dag",
-      "normalized_message": "│ ⚠ [files] DAG planning failed — falling back to ReAct",
-      "severity": "WARNING",
-      "count": 1,
-      "first_seen": "2026-03-09T07:16:57Z",
-      "last_seen": "2026-03-09T07:16:57Z",
-      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
-      "tool_description_guidance": [
-        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-09T07:16:57Z",
-          "level": "WARNING",
-          "logger": "workflows.skill_dag",
-          "message": "│  ⚠ [files] DAG planning failed — falling back to ReAct",
-          "correlation_id": "87847a8b",
-          "request_id": "-",
-          "source": "runtime"
-        }
-      ]
-    },
-    {
-      "fingerprint": "533a8815511b60be",
-      "category": "provider_rate_limit",
-      "logger": "huggingface_hub.utils._http",
-      "normalized_message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
-      "severity": "WARNING",
-      "count": 2,
-      "first_seen": "2026-03-08 17:34:15.639",
-      "last_seen": "2026-03-09T07:07:35Z",
-      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
-      "tool_description_guidance": [
-        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
-        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-08 17:34:15.639",
-          "level": "WARNING",
-          "logger": "huggingface_hub.utils._http",
-          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
-          "correlation_id": "-",
-          "request_id": "-",
-          "source": "logs\\My_Assistant.log"
-        },
-        {
-          "timestamp": "2026-03-09T07:07:35Z",
-          "level": "WARNING",
-          "logger": "huggingface_hub.utils._http",
-          "message": "Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.",
-          "correlation_id": "cdc6b8f6",
-          "request_id": "-",
-          "source": "runtime"
-        }
-      ]
-    },
-    {
-      "fingerprint": "b50d8ab6a7c40ed4",
-      "category": "provider_rate_limit",
-      "logger": "email_agent.llm_parser",
-      "normalized_message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
-      "severity": "ERROR",
-      "count": 3,
-      "first_seen": "2026-03-08T15:22:50Z",
-      "last_seen": "2026-03-09T06:01:45Z",
-      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
-      "tool_description_guidance": [
-        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
-        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-08T15:22:50Z",
-          "level": "ERROR",
-          "logger": "email_agent.llm_parser",
-          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 55121 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 55121 seconds before retrying.'}}",
-          "correlation_id": "782cc06a",
-          "request_id": "-",
-          "source": "runtime"
-        },
-        {
-          "timestamp": "2026-03-09T05:50:19Z",
-          "level": "ERROR",
-          "logger": "email_agent.llm_parser",
-          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3072 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 3072 seconds before retrying.'}}",
-          "correlation_id": "f060f533",
-          "request_id": "-",
-          "source": "runtime"
-        },
-        {
-          "timestamp": "2026-03-09T06:01:45Z",
-          "level": "ERROR",
-          "logger": "email_agent.llm_parser",
-          "message": "LLM chat error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 2386 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 2386 seconds before retrying.'}}",
-          "correlation_id": "3c1abda0",
-          "request_id": "-",
-          "source": "runtime"
-        }
-      ]
-    },
-    {
-      "fingerprint": "4787f008ab57d72d",
-      "category": "provider_rate_limit",
-      "logger": "workflows",
-      "normalized_message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}) — using keyword fallback",
-      "severity": "WARNING",
-      "count": 2,
-      "first_seen": "2026-03-08 17:38:36.376",
-      "last_seen": "2026-03-08T15:22:29Z",
-      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
-      "tool_description_guidance": [
-        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
-        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-08 17:38:36.376",
-          "level": "WARNING",
-          "logger": "workflows",
-          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66775 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66775 seconds before retrying.'}}) — using keyword fallback",
-          "correlation_id": "ea632b15",
-          "request_id": "-",
-          "source": "logs\\My_Assistant.log"
-        },
-        {
-          "timestamp": "2026-03-08T15:22:29Z",
-          "level": "WARNING",
-          "logger": "workflows",
-          "message": "Intent classification failed (Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 55142 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 55142 seconds before retrying.'}}) — using keyword fallback",
-          "correlation_id": "782cc06a",
-          "request_id": "-",
-          "source": "runtime"
-        }
-      ]
-    },
-    {
-      "fingerprint": "2ea9992d91394f05",
-      "category": "provider_rate_limit",
-      "logger": "workflows",
-      "normalized_message": "│ ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}}",
-      "severity": "ERROR",
-      "count": 1,
-      "first_seen": "2026-03-08 17:38:41.773",
-      "last_seen": "2026-03-08 17:38:41.773",
-      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
-      "tool_description_guidance": [
-        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
-        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-08 17:38:41.773",
-          "level": "ERROR",
-          "logger": "workflows",
-          "message": "│  ✗ ReAct LLM call failed at iteration 1: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66770 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66770 seconds before retrying.'}}",
-          "correlation_id": "ea632b15",
-          "request_id": "-",
-          "source": "logs\\My_Assistant.log"
-        }
-      ]
-    },
-    {
-      "fingerprint": "de211ddd766bf70e",
-      "category": "general_error",
-      "logger": "workflows",
-      "normalized_message": "run_workflow: DAG planning failed — falling back to ReAct loop",
-      "severity": "WARNING",
-      "count": 1,
-      "first_seen": "2026-03-08 17:38:39.772",
-      "last_seen": "2026-03-08 17:38:39.772",
-      "root_cause": "Unhandled or uncategorized runtime error captured from the application log.",
-      "tool_description_guidance": [
-        "Review related skill descriptions if this error maps to ambiguous tool selection or missing argument expectations."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-08 17:38:39.772",
-          "level": "WARNING",
-          "logger": "workflows",
-          "message": "run_workflow: DAG planning failed — falling back to ReAct loop",
-          "correlation_id": "ea632b15",
-          "request_id": "-",
-          "source": "logs\\My_Assistant.log"
-        }
-      ]
-    },
-    {
-      "fingerprint": "0284ce2bc6107777",
-      "category": "provider_rate_limit",
-      "logger": "workflows.dag",
-      "normalized_message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait <seconds> seconds before retrying.'}} — falling back",
-      "severity": "ERROR",
-      "count": 1,
-      "first_seen": "2026-03-08 17:38:39.767",
-      "last_seen": "2026-03-08 17:38:39.767",
-      "root_cause": "Provider quota or per-day model limit exhausted during routing, planning, synthesis, or memory enrichment.",
-      "tool_description_guidance": [
-        "Bias skill descriptions toward deterministic local tools and batch tools so fewer LLM calls are needed for common tasks.",
-        "Keep high-confidence tool wording explicit for report generation, latest-email retrieval, and file counting so the planner reaches the right local tool in one step."
-      ],
-      "samples": [
-        {
-          "timestamp": "2026-03-08 17:38:39.767",
-          "level": "ERROR",
-          "logger": "workflows.dag",
-          "message": "DAG planner: unexpected error: Error code: 429 - {'error': {'code': 'RateLimitReached', 'message': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66772 seconds before retrying.', 'details': 'Rate limit of 150 per 86400s exceeded for UserByModelByDay. Please wait 66772 seconds before retrying.'}} — falling back",
-          "correlation_id": "ea632b15",
-          "request_id": "-",
-          "source": "logs\\My_Assistant.log"
         }
       ]
     },

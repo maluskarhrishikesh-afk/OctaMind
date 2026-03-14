@@ -58,8 +58,105 @@ _MAX_HISTORY_FOR_LLM = 10  # messages sent to LLM each turn
 _CONV_PATH = migrate_legacy_runtime_state_file("hub_conversations.json")
 _conv_lock = threading.Lock()
 
+_FRESH_FILES_QUERY_RE = re.compile(
+    r"\b(are there|how many|do i have|find|search for|look for|show me|list|count)\b",
+    re.IGNORECASE,
+)
 
-def _persist_conversation(session_id: str, source: str, history: List[Dict[str, str]]) -> None:
+_STALE_FRESHNESS_ANSWER_RE = re.compile(
+    r"i\s+(?:currently\s+)?do(?:\s+not|n't)\s+have\s+real[- ]time\s+access"
+    r"|i\s+do(?:\s+not|n't)\s+have\s+real[- ]time\s+access"
+    r"|as\s+of\s+my\s+last\s+update"
+    r"|as\s+of\s+my\s+last\s+knowledge\s+cutoff"
+    r"|my\s+last\s+update\s+in\s+(?:october\s+)?20\d\d"
+    r"|recommend\s+checking\s+reliable\s+sources"
+    r"|recommend\s+checking\s+reliable\s+news\s+sources",
+    re.IGNORECASE,
+)
+
+_EXPLICIT_CURRENT_INFO_RE = re.compile(
+    r"\b(latest|current|recent|today|now|news|headline|headlines|update|updates)\b",
+    re.IGNORECASE,
+)
+
+_GOOGLE_AUTH_ERROR_RE = re.compile(
+    r"google\s+calendar.*authori[sz]"
+    r"|gmail.*authori[sz]"
+    r"|google\s+drive.*authori[sz]"
+    r"|unable\s+to\s+access\s+your\s+google\s+calendar"
+    r"|authorization\s+issues?"
+    r"|run\s+`?python\s+setup_google_auth\.py`?"
+    r"|credentials\.json\s+not\s+found",
+    re.IGNORECASE,
+)
+
+
+def _get_pa_skills(agent_id: str) -> Optional[set[str]]:
+    """Return the enabled skills for a Personal Assistant, if applicable."""
+    normalized = str(agent_id or "").strip()
+    if not normalized or normalized == "_collective_memory_":
+        return None
+
+    try:
+        from src.agent.hub.pa_manager import get_assistant
+
+        assistant = get_assistant(normalized)
+    except Exception:
+        return None
+
+    if not assistant:
+        return None
+    return {str(skill).strip() for skill in assistant.get("skills", []) if str(skill).strip()}
+
+
+def _format_missing_skills_reply(agent_name: str, missing_skills: List[str], source: str) -> str:
+    from src.agent.hub.skill_help import format_missing_skills_reply as _shared_format_missing_skills_reply
+
+    return _shared_format_missing_skills_reply(agent_name, missing_skills, source)
+
+
+def _is_fresh_files_query(message: str, agents: Optional[List[str]] = None) -> bool:
+    text = str(message or "").strip()
+    lowered = text.lower()
+    if agents is not None and "files" not in agents:
+        return False
+    if not _FRESH_FILES_QUERY_RE.search(text):
+        return False
+    if any(token in lowered for token in ("zip them", "zip those", "copy them", "send them", "mail them", "email them")):
+        return False
+    return any(token in lowered for token in (
+        "file", "files", "folder", "folders", "document", "documents", "image", "images",
+        "photo", "photos", "video", "videos", "pdf", "computer", "laptop", "pc", "drive", "drives",
+    ))
+
+
+def _looks_like_stale_freshness_answer(message: str) -> bool:
+    return bool(_STALE_FRESHNESS_ANSWER_RE.search(str(message or "")))
+
+
+def _is_fresh_public_web_query(message: str) -> bool:
+    try:
+        from src.agent.workflows.router import _looks_like_fresh_web_query
+
+        return bool(_looks_like_fresh_web_query(message))
+    except Exception:
+        return False
+
+
+def _needs_explicit_current_info(message: str) -> bool:
+    return bool(_EXPLICIT_CURRENT_INFO_RE.search(str(message or "")))
+
+
+def _looks_like_google_auth_error(message: str) -> bool:
+    return bool(_GOOGLE_AUTH_ERROR_RE.search(str(message or "")))
+
+
+def _persist_conversation(
+    session_id: str,
+    source: str,
+    history: List[Dict[str, str]],
+    agent_id: Optional[str] = None,
+) -> None:
     """Write/update session history in hub_conversations.json."""
     try:
         with _conv_lock:
@@ -73,6 +170,7 @@ def _persist_conversation(session_id: str, source: str, history: List[Dict[str, 
             sessions[session_id] = {
                 "source": source,
                 "session_id": session_id,
+                "agent_id": agent_id,
                 "last_updated": datetime.now(timezone.utc).isoformat(),
                 "messages": history,
             }
@@ -82,6 +180,70 @@ def _persist_conversation(session_id: str, source: str, history: List[Dict[str, 
             tmp.replace(_CONV_PATH)
     except Exception as exc:
         logger.debug("Could not persist conversation: %s", exc)
+
+
+def _mirror_turn_to_dashboard(
+    agent_id: str,
+    source: str,
+    user_message: str,
+    assistant_entry: Dict[str, Any],
+) -> None:
+    """Append one non-dashboard turn into the assistant's dashboard session."""
+    if not agent_id or source == "dashboard":
+        return
+
+    session_id = f"dashboard_{agent_id}"
+    turn_ts = str(assistant_entry.get("ts") or datetime.now(timezone.utc).isoformat())
+    mirrored_messages: List[Dict[str, Any]] = [
+        {
+            "role": "user",
+            "content": str(user_message),
+            "ts": turn_ts,
+            "channel_source": source,
+        },
+        {
+            "role": "assistant",
+            "content": str(assistant_entry.get("content", "")),
+            "ts": turn_ts,
+            "channel_source": source,
+        },
+    ]
+    if assistant_entry.get("file_artifacts"):
+        mirrored_messages[1]["artifact_paths"] = list(assistant_entry["file_artifacts"])
+
+    try:
+        with _conv_lock:
+            data: Dict[str, Any] = {}
+            if _CONV_PATH.exists():
+                try:
+                    data = json.loads(_CONV_PATH.read_text(encoding="utf-8"))
+                except Exception:
+                    data = {}
+            sessions = data.setdefault("sessions", {})
+            dashboard_session = sessions.get(session_id) or {
+                "source": "dashboard",
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "messages": [],
+            }
+            dashboard_history = list(dashboard_session.get("messages") or [])
+            dashboard_history.extend(mirrored_messages)
+            if len(dashboard_history) > _MAX_HISTORY:
+                dashboard_history = dashboard_history[-_MAX_HISTORY:]
+
+            sessions[session_id] = {
+                "source": "dashboard",
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "last_updated": turn_ts,
+                "messages": dashboard_history,
+            }
+            _CONV_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _CONV_PATH.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(_CONV_PATH)
+    except Exception as exc:
+        logger.debug("Could not mirror turn into dashboard chat: %s", exc)
 
 
 def _load_session_history() -> None:
@@ -574,7 +736,13 @@ class HubProcessor:
             _SESSION_HISTORY[session_id] = history[-_MAX_HISTORY:]
 
         # Persist to disk — makes conversations visible on the dashboard
-        _persist_conversation(session_id, source, _SESSION_HISTORY.get(session_id, history))
+        _persist_conversation(
+            session_id,
+            source,
+            _SESSION_HISTORY.get(session_id, history),
+            agent_id=agent_id,
+        )
+        _mirror_turn_to_dashboard(agent_id, source, message, _hist_entry)
 
         # Persist interaction to agent memory
         try:
@@ -639,6 +807,21 @@ class HubProcessor:
         except Exception:
             pass
 
+        pa_skills = _get_pa_skills(req.agent_id)
+        try:
+            from src.agent.hub.skill_help import maybe_get_skill_help_reply
+
+            skill_help_reply = maybe_get_skill_help_reply(
+                req.message,
+                source=req.source,
+                enabled_skills=pa_skills,
+            )
+        except Exception:
+            skill_help_reply = None
+
+        if skill_help_reply:
+            return skill_help_reply, [], "success", [], []
+
         # ── Unified intent classification ─────────────────────────────────────
         # classify_and_route() handles all three message patterns in one LLM call:
         #   CHAT              → "Do you know about cricket?"
@@ -688,19 +871,71 @@ class HubProcessor:
             # No pronoun, no agents — treat as a general chat question
             agents_needed = None
 
+        if agents_needed is not None and pa_skills is not None:
+            filtered_agents = [agent for agent in agents_needed if agent in pa_skills]
+            if not filtered_agents:
+                missing_agents = [agent for agent in agents_needed if agent not in pa_skills]
+                return (
+                    _format_missing_skills_reply(req.agent_name, missing_agents, req.source),
+                    [],
+                    "success",
+                    [],
+                    [],
+                )
+            agents_needed = filtered_agents
+
+        if req.source == "telegram" and agents_needed is not None:
+            try:
+                from src.agent.hub.google_auth_session import build_telegram_google_auth_reply
+
+                auth_reply = build_telegram_google_auth_reply(list(agents_needed), session_id=req.session_id)
+            except Exception:
+                auth_reply = None
+            if auth_reply:
+                return auth_reply, [], "success", [], []
+
         # ── 1. Conversational fallback ─────────────────────────────────────
         if agents_needed is None:
             _progress("💬 Thinking…")
             reply = self._chat_response(req, history)
+            reply, actions, file_artifacts, search_paths = self._maybe_recover_with_browser(
+                req,
+                history,
+                reply,
+                [],
+                source_agent="chat",
+            )
             _log_workflow_summary("💬 Chat", [], 1, time.perf_counter() - t_dispatch, "success")
-            return reply, [], "success", [], []
+            return reply, actions, "success", file_artifacts, search_paths
 
         # ── 2. Single-agent shortcut ───────────────────────────────────────
         if len(agents_needed) == 1:
             _progress(f"⚙️ Running {agents_needed[0].title()} skill…")
+            query_for_agent = enriched_query
+            if agents_needed[0] == "files" and _is_fresh_files_query(routing_message, agents_needed):
+                query_for_agent = routing_message
             # Pass the structurally-enriched query so the skill agent receives
             # resolved entities (ISO dates, 24h times …) from Session State.
-            reply, acts, artifacts, s_paths = self._run_single_agent(agents_needed[0], req, query=enriched_query)
+            reply, acts, artifacts, s_paths = self._run_single_agent(agents_needed[0], req, query=query_for_agent)
+            reply, acts, recovered_artifacts, recovered_search_paths = self._maybe_recover_with_browser(
+                req,
+                history,
+                reply,
+                acts,
+                source_agent=agents_needed[0],
+            )
+            if req.source == "telegram" and _looks_like_google_auth_error(reply):
+                try:
+                    from src.agent.hub.google_auth_session import build_telegram_google_auth_reply
+
+                    auth_reply = build_telegram_google_auth_reply([agents_needed[0]], force=True, session_id=req.session_id)
+                except Exception:
+                    auth_reply = None
+                if auth_reply:
+                    return auth_reply, acts, "success", [], []
+            if recovered_artifacts or recovered_search_paths:
+                artifacts = recovered_artifacts
+                s_paths = recovered_search_paths
             _llm_calls = acts[0].get("llm_calls", 1) if acts else 1
             _log_workflow_summary(
                 "⚙️ Skill DAG", agents_needed, _llm_calls,
@@ -711,10 +946,13 @@ class HubProcessor:
         # ── 3. Multi-agent workflow ────────────────────────────────────────
         _agents_str = " + ".join(a.title() for a in agents_needed)
         _progress(f"📋 Planning workflow: {_agents_str}…")
+        workflow_query = enriched_query
+        if _is_fresh_files_query(routing_message, agents_needed):
+            workflow_query = routing_message
         # Pass the enriched query (with ## Session State block) so the DAG
         # planner can resolve context references like 'them' / 'those files'
-        # from session state (last_found_folder, last_found_paths, etc.).
-        run_result = run_workflow(enriched_query)
+        # from compact session state such as bundle dir, file path, or manifest.
+        run_result = run_workflow(workflow_query)
         response_text = _render_workflow_output(run_result, req.message)
         actions = [
             {"agent": s.get("agent"), "tool": s.get("tool"), "status": s.get("status")}
@@ -765,6 +1003,16 @@ class HubProcessor:
             except Exception:
                 pass
 
+        if req.source == "telegram" and _looks_like_google_auth_error(response_text):
+            try:
+                from src.agent.hub.google_auth_session import build_telegram_google_auth_reply
+
+                auth_reply = build_telegram_google_auth_reply(list(agents_needed), force=True, session_id=req.session_id)
+            except Exception:
+                auth_reply = None
+            if auth_reply:
+                return auth_reply, actions, "success", [], []
+
         return response_text, actions, run_result.get("status", "error"), file_artifacts, search_paths
 
     # ------------------------------------------------------------------
@@ -807,6 +1055,47 @@ class HubProcessor:
 
     # ------------------------------------------------------------------
 
+    def _maybe_recover_with_browser(
+        self,
+        req: HubRequest,
+        history: List[Dict[str, str]],
+        reply: str,
+        actions: List[Dict[str, Any]],
+        *,
+        source_agent: str,
+    ) -> tuple[str, List[Dict[str, Any]], List[str], List[str]]:
+        del history
+
+        if source_agent == "browser":
+            return reply, actions, [], []
+        if not _is_fresh_public_web_query(req.message):
+            return reply, actions, [], []
+        if not _needs_explicit_current_info(req.message):
+            return reply, actions, [], []
+        if not _looks_like_stale_freshness_answer(reply):
+            return reply, actions, [], []
+
+        logger.info(
+            "[browser-recovery] stale freshness answer detected for query=%.120s source_agent=%s",
+            req.message,
+            source_agent,
+        )
+
+        browser_reply, browser_actions, browser_artifacts, browser_search_paths = self._run_single_agent(
+            "browser",
+            req,
+            query=req.message,
+        )
+
+        if not browser_reply or _looks_like_stale_freshness_answer(browser_reply):
+            logger.info("[browser-recovery] browser fallback did not improve the answer")
+            return reply, actions, [], []
+
+        recovered_actions = list(actions) + list(browser_actions)
+        return browser_reply, recovered_actions, browser_artifacts, browser_search_paths
+
+    # ------------------------------------------------------------------
+
     def _run_single_agent(self, agent: str, req: HubRequest, query: Optional[str] = None) -> tuple[str, list, list]:
         """
         Route to a single agent using the registry — no hardcoded agent names.
@@ -836,11 +1125,12 @@ class HubProcessor:
             # told to call collect_files_from_manifest).
             try:
                 from src.agent.manifest.context_manifest import inject_context_into_query as _ctxinj  # noqa: PLC0415
-                effective_query = _ctxinj(effective_query, current_agent=agent)
-                _ctx_marker = "## Context from Previous Turn"
-                if _ctx_marker in effective_query:
-                    _ctx_block = effective_query.split(_ctx_marker, 1)[1].split("## Session State", 1)[0].strip()
-                    logger.info("│  [CTX INJECT] agent=%s context_block=%.400s", agent, _ctx_block)
+                if not (agent == "files" and _is_fresh_files_query(effective_query, [agent])):
+                    effective_query = _ctxinj(effective_query, current_agent=agent)
+                    _ctx_marker = "## Context from Previous Turn"
+                    if _ctx_marker in effective_query:
+                        _ctx_block = effective_query.split(_ctx_marker, 1)[1].split("## Session State", 1)[0].strip()
+                        logger.info("│  [CTX INJECT] agent=%s context_block=%.400s", agent, _ctx_block)
             except Exception:
                 pass
             # ─────────────────────────────────────────────────────────────
@@ -879,14 +1169,30 @@ class HubProcessor:
                         write_context as _wc,
                     )
                     if _rc(agent=agent) is None:
+                        entities = {
+                            "found_count": len(search_paths),
+                        }
+                        bundle_dir = str(artifacts_out.get("search_bundle_dir") or result.get("search_bundle_dir") or "").strip()
+                        if bundle_dir:
+                            entities["search_bundle_dir"] = bundle_dir
+                        try:
+                            from src.agent.runtime_paths import get_runtime_state_path as _grp
+                            entities["file_manifest"] = str(_grp("octa_manifest.txt"))
+                        except Exception:
+                            pass
+                        if len(search_paths) <= 10:
+                            entities["listed_files"] = [
+                                {
+                                    "index": idx,
+                                    "path": path,
+                                    "name": _P(path).name,
+                                }
+                                for idx, path in enumerate(search_paths)
+                            ]
                         _wc(
                             agent=agent,
                             topic="auto_search_result",
-                            resolved_entities={
-                                "last_found_paths": search_paths,
-                                "last_found_folder": str(_P(search_paths[0]).parent),
-                                "count": len(search_paths),
-                            },
+                            resolved_entities=entities,
                             awaiting="file_action",
                         )
                         logger.info(

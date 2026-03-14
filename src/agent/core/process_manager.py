@@ -14,9 +14,11 @@ import signal
 from pathlib import Path
 from typing import Dict, Any, Optional
 
+from src.agent.runtime_paths import migrate_legacy_root_runtime_state_file
+
 # Path to persist running-agent state across Streamlit reruns
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-_STATE_FILE = _PROJECT_ROOT / "running_agents.json"
+_STATE_FILE = migrate_legacy_root_runtime_state_file("running_agents.json")
 
 # Port range for agent windows (8502 is reserved for the Hub REST API)
 _PORT_START = 8503
@@ -112,6 +114,7 @@ def start_agent(agent_id: str, agent_name: str, agent_type: str) -> Dict[str, An
     env["AGENT_NAME"] = agent_name
     env["AGENT_TYPE"] = agent_type
     env["PA_ID"] = agent_id   # personal_assistant/app.py uses PA_ID to scope to one PA
+    env["PA_EVENTS_PORT"] = str(port + 1000)
 
     logs_dir = _PROJECT_ROOT / "logs"
     logs_dir.mkdir(exist_ok=True)

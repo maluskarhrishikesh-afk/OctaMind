@@ -14,11 +14,10 @@ These are generated artifacts or transient runtime outputs and are safe to remov
 - `.pytest_cache/`
 - `build/`
 - `dist/`
-- `data/.last_context_prune`
-- `data/octa_manifest_1.txt`
-- files under `your_data/`
-- files under `data/calendar_exports/`
-- disposable packaging leftovers accidentally copied into `data/` such as `cacerts.txt` and `entry_points.txt`
+- `your_data/.last_context_prune`
+- `your_data/octa_manifest_1.txt`
+- disposable generated exports under `your_data/exports/` and `your_data/calendar_exports/`
+- disposable packaging leftovers accidentally copied into runtime folders such as `cacerts.txt` and `entry_points.txt`
 
 These should be treated as generated artifacts, not canonical source.
 
@@ -26,7 +25,7 @@ These should be treated as generated artifacts, not canonical source.
 
 ## Live State: Do Not Delete Blindly
 
-Canonical runtime state is now split between `your_data/` and legacy `data/` compatibility files. The following files should not be removed as part of generic cleanup:
+Canonical runtime state now lives in `your_data/`. Older installs may still contain legacy `data/` compatibility copies, but those are no longer the primary runtime store. The following files should not be removed as part of generic cleanup:
 
 - `assistants.json`
 - `action_items.json`
@@ -43,7 +42,7 @@ Canonical runtime state is now split between `your_data/` and legacy `data/` com
 - `whatsapp_scheduled.json`
 - per-agent PA state such as `tg_pa_*.json`
 
-For the migrated set above, prefer checking `your_data/` first. Legacy `data/` copies may still exist on older installs and are migrated forward on first use.
+For the migrated set above, treat `your_data/` as canonical. Legacy `data/` copies may still exist on older installs and are migrated forward on first use.
 
 If these need pruning, the cleanup should be feature-aware and age-aware, not a blind delete.
 
@@ -82,7 +81,7 @@ This turns operational failures into a durable tuning input for `skills.md`, `sk
 ## Recommended Maintenance Workflow
 
 1. Remove generated clutter from the safe cleanup list.
-2. Keep `data/` state unless the file is clearly export/cache/output only.
+2. Keep `your_data/` state unless the file is clearly export/cache/output only.
 3. Review [errors/log_error_registry.json](../../errors/log_error_registry.json) before changing tool descriptions.
 4. When a new recurring failure appears, add or refine the corresponding tool description or context rule rather than only patching symptoms.
 5. Keep docs in sync whenever cleanup rules or persistent runtime artifacts change.

@@ -1,4 +1,4 @@
-# Email Agent (Gmail) — Setup & Testing Guide
+# Email Agent (Gmail) ï¿½ Setup & Testing Guide
 
 This guide walks you through connecting Octa Bot to your Gmail account and testing every feature of the Email Agent.
 
@@ -6,21 +6,21 @@ This guide walks you through connecting Octa Bot to your Gmail account and testi
 
 ## Table of Contents
 
-- [Email Agent (Gmail) — Setup \& Testing Guide](#email-agent-gmail--setup--testing-guide)
+- [Email Agent (Gmail) ï¿½ Setup \& Testing Guide](#email-agent-gmail--setup--testing-guide)
   - [Table of Contents](#table-of-contents)
   - [Architecture Overview](#architecture-overview)
-  - [Step 1 — Create a Google Cloud Project](#step-1--create-a-google-cloud-project)
-  - [Step 2 — Enable the Gmail API](#step-2--enable-the-gmail-api)
-  - [Step 3 — Create OAuth Credentials](#step-3--create-oauth-credentials)
+  - [Step 1 ï¿½ Create a Google Cloud Project](#step-1--create-a-google-cloud-project)
+  - [Step 2 ï¿½ Enable the Gmail API](#step-2--enable-the-gmail-api)
+  - [Step 3 ï¿½ Create OAuth Credentials](#step-3--create-oauth-credentials)
     - [3a. Configure the OAuth Consent Screen (first time only)](#3a-configure-the-oauth-consent-screen-first-time-only)
     - [3b. Create the OAuth Client ID](#3b-create-the-oauth-client-id)
-  - [Step 4 — Place the Credentials File](#step-4--place-the-credentials-file)
-  - [Step 5 — Configure Octa Bot](#step-5--configure-Octa Bot)
-  - [Step 6 — First-Run Authentication](#step-6--first-run-authentication)
+  - [Step 4 ï¿½ Place the Credentials File](#step-4--place-the-credentials-file)
+  - [Step 5 ï¿½ Configure Octa Bot](#step-5--configure-Octa Bot)
+  - [Step 6 ï¿½ First-Run Authentication](#step-6--first-run-authentication)
     - [Trigger the consent flow](#trigger-the-consent-flow)
     - [What happens](#what-happens)
     - [Token refresh](#token-refresh)
-  - [Step 7 — Create a Gmail Agent in Octa Bot](#step-7--create-a-gmail-agent-in-Octa Bot)
+  - [Step 7 ï¿½ Create a Gmail Agent in Octa Bot](#step-7--create-a-gmail-agent-in-Octa Bot)
   - [Testing Each Tool Category](#testing-each-tool-category)
     - [Reading \& Counting](#reading--counting)
     - [Sending \& Drafts](#sending--drafts)
@@ -43,28 +43,28 @@ This guide walks you through connecting Octa Bot to your Gmail account and testi
 
 ```
 Octa Bot Email Agent
-        ¦
-        ¦  OAuth 2.0 (token.json)
+        ï¿½
+        ï¿½  OAuth 2.0 (token.json)
         ?
   Gmail API  ------------------------------------------------------?  Your Gmail inbox
   (googleapis.com)       read / send / draft / label / delete
-        ¦
+        ï¿½
         ?
   Local data files
-  data/action_items.json   ? extracted tasks from emails
-  data/exports/            ? exported contacts (CSV / JSON)
+  your_data/action_items.json ? extracted tasks from emails
+  your_data/               ? exported contacts, reports, archives, and other generated artifacts
 ```
 
 **Key points:**
-- **No webhook is needed** — the agent polls Gmail on demand rather than receiving push events
-- **All data stays local** — Octa Bot never stores emails; it calls the Gmail API at query time
+- **No webhook is needed** ï¿½ the agent polls Gmail on demand rather than receiving push events
+- **All data stays local** ï¿½ Octa Bot never stores emails; it calls the Gmail API at query time
 - Authentication uses the standard **OAuth 2.0 "Desktop application" flow**
 - The same `credentials.json` file is shared by both the Gmail agent and the Drive agent
 - Gmail and Drive use **separate token files** (`token.json` vs `drive_token.json`)
 
 ---
 
-## Step 1 — Create a Google Cloud Project
+## Step 1 ï¿½ Create a Google Cloud Project
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com/) and sign in with the **same Google account** you want the agent to access.
 
@@ -76,7 +76,7 @@ Octa Bot Email Agent
 
 ---
 
-## Step 2 — Enable the Gmail API
+## Step 2 ï¿½ Enable the Gmail API
 
 1. In the left menu, go to **APIs & Services ? Library**.
 
@@ -84,11 +84,11 @@ Octa Bot Email Agent
 
 3. Click **Enable**.
 
-> If you also want to set up the Drive agent (recommended), repeat for **"Google Drive API"** at this point — it uses the same `credentials.json`.
+> If you also want to set up the Drive agent (recommended), repeat for **"Google Drive API"** at this point ï¿½ it uses the same `credentials.json`.
 
 ---
 
-## Step 3 — Create OAuth Credentials
+## Step 3 ï¿½ Create OAuth Credentials
 
 ### 3a. Configure the OAuth Consent Screen (first time only)
 
@@ -115,29 +115,29 @@ Octa Bot Email Agent
 
 4. Give it a name (e.g. "Octa Bot Desktop") and click **Create**.
 
-5. A dialog appears with your Client ID and Client Secret — click **Download JSON**.
+5. A dialog appears with your Client ID and Client Secret ï¿½ click **Download JSON**.
 
 6. The downloaded file will be named something like `client_secret_xxxxxx.json`.
 
 ---
 
-## Step 4 — Place the Credentials File
+## Step 4 ï¿½ Place the Credentials File
 
 Rename the downloaded file to `credentials.json` and place it in the `config/` folder of the project:
 
 ```
 Octa Bot/
 +-- config/
-¦   +-- credentials.json    ? place it here  ?
-¦   +-- settings.json
-¦   +-- ...
+ï¿½   +-- credentials.json    ? place it here  ?
+ï¿½   +-- settings.json
+ï¿½   +-- ...
 ```
 
 > The fallback is the project root (`Octa Bot/credentials.json`), but `config/credentials.json` is preferred and is already listed in `.gitignore`.
 
 ---
 
-## Step 5 — Configure Octa Bot
+## Step 5 ï¿½ Configure Octa Bot
 
 Open `config/settings.json` and verify the `google` section exists (it should already be there):
 
@@ -159,15 +159,37 @@ Open `config/settings.json` and verify the `google` section exists (it should al
 
 You do not need to change these values unless you move the credentials file.
 
+### Optional: Public HTTPS Callback For Automatic Telegram Auth Completion
+
+If you want Google sign-in started from Telegram to finish automatically with no pasted redirect URL, add a public HTTPS base URL for the Hub API:
+
+```json
+{
+  "google": {
+    "oauth_callback_base_url": "https://your-public-octamind-domain.example.com"
+  }
+}
+```
+
+Requirements:
+
+- Your public URL must reverse-proxy to the Hub API on port `8502`.
+- The Google OAuth client in `config/credentials.json` must allow this exact redirect URI:
+  `https://your-public-octamind-domain.example.com/oauth/google/callback`
+- For this mode, `config/credentials.json` must be a **Google Web application OAuth client**, not the default Desktop client used for localhost auth.
+- `start.py` now starts the Hub API automatically, so the callback route is available locally at `http://localhost:8502/oauth/google/callback` and can be exposed via your HTTPS proxy.
+
+When this is configured, Telegram auth links complete automatically after Google redirects back to OctaMind's public callback page.
+
 ---
 
-## Step 6 — First-Run Authentication
+## Step 6 ï¿½ First-Run Authentication
 
 The first time any Gmail action is triggered, Octa Bot opens a browser window for the OAuth consent flow.
 
 ### Trigger the consent flow
 
-Start Octa Bot and launch a Gmail agent (see Step 7), then send it any command — for example:
+Start Octa Bot and launch a Gmail agent (see Step 7), then send it any command ï¿½ for example:
 
 ```
 How many emails do I have?
@@ -177,7 +199,7 @@ How many emails do I have?
 
 1. A browser window opens automatically showing Google's consent screen.
 2. Click your Gmail account (the one you added as a test user in Step 3a).
-3. Click **Continue** (you may see a warning that the app is unverified — click "Advanced ? Go to Octa Bot (unsafe)" for a personal test app).
+3. Click **Continue** (you may see a warning that the app is unverified ï¿½ click "Advanced ? Go to Octa Bot (unsafe)" for a personal test app).
 4. Grant the requested Gmail permissions and click **Allow**.
 5. The browser shows a success page; Octa Bot saves a `token.json` file in `config/` and retries your command.
 
@@ -189,15 +211,15 @@ config/
 +-- token.json          ? auto-generated on first Gmail auth  ?
 ```
 
-> ?? Never commit `credentials.json` or `token.json` — they give access to your Gmail account. Both are already in `.gitignore`.
+> ?? Never commit `credentials.json` or `token.json` ï¿½ they give access to your Gmail account. Both are already in `.gitignore`.
 
 ### Token refresh
 
-Tokens refresh automatically when they expire. If the token ever becomes invalid (e.g. you revoked access in your Google Account settings), delete `config/token.json` and send any command — the browser flow will run again.
+Tokens refresh automatically when they expire. If the token ever becomes invalid (e.g. you revoked access in your Google Account settings), delete `config/token.json` and send any command ï¿½ the browser flow will run again.
 
 ---
 
-## Step 7 — Create a Gmail Agent in Octa Bot
+## Step 7 ï¿½ Create a Gmail Agent in Octa Bot
 
 1. Start Octa Bot:
    ```bash
@@ -262,7 +284,7 @@ Expected: A numbered list of emails with IDs, subjects, and senders.
 | Cancel scheduled | `Cancel scheduled email <id>` |
 | Update scheduled | `Update scheduled email <id> to send tomorrow at 9am` |
 
-> ?? Scheduled emails are software-implemented (stored in a local JSON file). The Octa Bot process must be running at the scheduled send time — this is not a native Gmail scheduled send.
+> ?? Scheduled emails are software-implemented (stored in a local JSON file). The Octa Bot process must be running at the scheduled send time ï¿½ this is not a native Gmail scheduled send.
 
 ---
 
@@ -335,7 +357,7 @@ Expected: A numbered list of emails with IDs, subjects, and senders.
 
 ## Also Setting Up Google Drive
 
-The Drive agent uses the **same `credentials.json` file** — no need to go through the Google Cloud setup again.  It gets its own token file (`drive_token.json`), created on first use.
+The Drive agent uses the **same `credentials.json` file** ï¿½ no need to go through the Google Cloud setup again.  It gets its own token file (`drive_token.json`), created on first use.
 
 ### Enable the Drive API
 
@@ -346,7 +368,7 @@ The Drive agent uses the **same `credentials.json` file** — no need to go throug
 
 1. In the Agent Hub, click **+ New Agent** and choose **Google Drive**.
 2. Give it a name and start it.
-3. Send any command (e.g. `List my recent files`) — the browser auth flow will open again, this time requesting Drive access. Grant it.
+3. Send any command (e.g. `List my recent files`) ï¿½ the browser auth flow will open again, this time requesting Drive access. Grant it.
 4. `config/drive_token.json` is created automatically.
 
 **Files after both agents are authenticated:**
@@ -370,7 +392,7 @@ config/
 | `Token has been expired or revoked` | Token invalidated | Delete `config/token.json` and send any command to re-authenticate |
 | `credentials.json` not found error at startup | File in wrong location | Move it to `config/credentials.json` and confirm `settings.json` points there |
 | `Quota exceeded` Gmail API error | Too many calls in a short window | The free Gmail API has usage limits; wait a minute and retry |
-| Scheduled email never sent | Octa Bot was not running at send time | This is a software scheduler — keep Octa Bot running; restart and check `data/scheduled_emails.json` |
+| Scheduled email never sent | Octa Bot was not running at send time | This is a software scheduler ï¿½ keep Octa Bot running; restart and check `your_data/scheduled_emails.json` |
 | `download_attachment` saves to wrong place | Path is relative to server process | Use an absolute path, e.g. `C:/Users/YourName/Downloads/receipt.pdf` |
 | `export_to_calendar` only saves a file | Calendar write scope not granted | The `.ics` file can be imported manually into Google Calendar; full write requires re-auth after adding the Calendar API |
 | Agent shows "Rate limit reached" mid-conversation | GitHub Models free tier limit (150 req/day) | Wait for the daily counter to reset; or switch to a paid provider in `config/credentials.json` |
@@ -398,7 +420,7 @@ If this prints your name and email, Drive is healthy.
 To fully reset OAuth for Gmail:
 
 ```bash
-# Delete the Gmail token — next command will trigger browser auth again
+# Delete the Gmail token ï¿½ next command will trigger browser auth again
 del config\token.json
 ```
 

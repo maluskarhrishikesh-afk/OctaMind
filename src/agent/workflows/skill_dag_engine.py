@@ -38,11 +38,11 @@ Session state tokens
 --------------------
 Kwargs values can also reference the parsed ## Session State block with
 ``{__session__.field}`` tokens.  If the resolved value is a Python list
-(e.g. last_found_paths) the **entire kwarg** is replaced with the real list
-object — not a stringified version.  This lets the LLM plan reference up to
-hundreds of file paths without embedding them verbatim in the JSON plan:
+(for example a tool-produced list value) the **entire kwarg** is replaced with
+the real object — not a stringified version.  This lets the LLM plan pass
+structured values without embedding them verbatim in the JSON plan:
 
-    "kwargs": {"file_paths": "{__session__.last_found_paths}", "destination": "C:\\..."}
+    "kwargs": {"file_manifest": "{__session__.file_manifest}", "destination": "C:\\..."}
 
 Usage
 -----
@@ -71,16 +71,15 @@ from src.agent.runtime_paths import get_your_data_dir
 
 logger = logging.getLogger("workflows.skill_dag")
 
-
 def _get_authenticated_user_email() -> str:
     """Return the authenticated Gmail address when available."""
     try:
         from src.email.gmail_auth import get_gmail_service  # noqa: PLC0415
 
-        svc = get_gmail_service()
+        svc: Any = get_gmail_service()
         profile = svc.users().getProfile(userId="me").execute()
         return str(profile.get("emailAddress", "") or "").strip()
-    except Exception as exc:
+    except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.debug("│  [skill-dag] could not resolve authenticated email: %s", exc)
         return ""
 
@@ -91,8 +90,8 @@ def _get_authenticated_user_email() -> str:
 def _extract_session_state(user_query: str) -> Dict[str, Any]:
     """Parse the optional '## Session State' JSON block appended to the user query.
 
-    Returns a dict (possibly empty) with keys like last_found_paths,
-    last_found_folder, last_found_file_path, etc.
+    Returns a dict (possibly empty) with compact keys like last_found_bundle_dir,
+    last_found_folder, last_found_file_path, file_manifest, etc.
     """
     marker = "## Session State"
     if marker not in user_query:
@@ -111,35 +110,56 @@ def _extract_session_state(user_query: str) -> Dict[str, Any]:
                 data = json.loads(m.group(0))
                 if isinstance(data, dict):
                     return data
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 pass
     return {}
 
 
 def _merge_manifest_into_session(session_vars: Dict[str, Any]) -> Dict[str, Any]:
-    """Augment session_vars with paths from octa_manifest.txt.
+    """Augment session_vars with compact current file context.
 
-    The manifest is updated by every file search (including background jobs) and
-    always contains the MOST RECENT set of found paths.  Session state extracted
-    from conversation history can be stale (e.g. points at an old email report
-    folder) when a background job completed after the last conversation turn.
+    Detailed file lists should live in the files context / manifest, not in the
+    prompt-sized session state. This helper only injects compact fields the
+    planner can use safely:
+    - file_manifest
+    - found_count
+    - last_found_bundle_dir
+    - last_found_file_path for a single resolved item
 
-    Strategy:
-    - Read octa_manifest.txt (one absolute path per line).
-    - If the manifest has at least 1 path AND its modification time is more recent
-      than the session state's last_found_folder / last_found_paths, replace those
-      session fields with the manifest values.
-    - If session_vars is empty (no prior paths at all), still inject manifest paths
-      so that {__session__.last_found_paths} resolves correctly.
+    The manifest remains the fallback source of truth when no live files context
+    is present.
     """
     import os
     from pathlib import Path as _Path
+    from src.agent.manifest.context_manifest import read_context
+    from src.agent.runtime_paths import get_existing_runtime_state_path
 
     try:
-        workspace = _Path(__file__).resolve().parents[3]  # repo root
-        manifest_path = workspace / "data" / "octa_manifest.txt"
+        updated = dict(session_vars)
+
+        files_ctx = read_context(agent="files") or {}
+        entities = files_ctx.get("resolved_entities", {}) if isinstance(files_ctx, dict) else {}
+        if isinstance(entities, dict):
+            bundle_dir = str(entities.get("search_bundle_dir", "") or "").strip()
+            if bundle_dir:
+                updated["last_found_bundle_dir"] = bundle_dir
+            file_manifest = str(entities.get("file_manifest", "") or "").strip()
+            if file_manifest:
+                updated["file_manifest"] = file_manifest
+            found_count = entities.get("found_count")
+            if isinstance(found_count, int) and found_count > 0:
+                updated["found_count"] = found_count
+            listed_files = entities.get("listed_files", [])
+            if isinstance(listed_files, list) and len(listed_files) == 1 and isinstance(listed_files[0], dict):
+                single_path = str(listed_files[0].get("path", "") or "").strip()
+                if single_path:
+                    updated["last_found_file_path"] = single_path
+                    if str(listed_files[0].get("type", "") or "").strip().lower() == "folder":
+                        updated["last_found_folder"] = single_path
+
+        manifest_path = get_existing_runtime_state_path("octa_manifest.txt")
         if not manifest_path.exists():
-            return session_vars
+            return updated
 
         raw_paths = [
             p.strip()
@@ -147,28 +167,23 @@ def _merge_manifest_into_session(session_vars: Dict[str, Any]) -> Dict[str, Any]
             if p.strip()
         ]
         if not raw_paths:
-            return session_vars
+            return updated
 
-        # Only replace session state paths when the manifest file has been written
-        # more recently than the session state suggests paths were last found.
-        # As a heuristic: the manifest is "fresh" if it was modified in the last
-        # 30 minutes (1800 seconds).
         manifest_age_s = time.time() - os.path.getmtime(manifest_path)
         if manifest_age_s > 1800:
-            return session_vars  # manifest too old — keep session state as-is
+            return updated
 
-        updated = dict(session_vars)
-        updated["last_found_paths"] = raw_paths
-        updated["last_found_file_path"] = raw_paths[0]
-        # Derive last_found_folder from the first manifest path
-        first_parent = str(_Path(raw_paths[0]).parent)
-        updated["last_found_folder"] = first_parent
+        updated.setdefault("file_manifest", str(manifest_path))
+        updated.setdefault("found_count", len(raw_paths))
+        if len(raw_paths) == 1:
+            updated.setdefault("last_found_file_path", raw_paths[0])
+            updated.setdefault("last_found_folder", str(_Path(raw_paths[0]).parent))
         logger.info(
-            "│  [session-merge] manifest has %d path(s) (age=%.0fs) → updating last_found_paths",
+            "│  [session-merge] manifest has %d path(s) (age=%.0fs) → updating compact file context",
             len(raw_paths), manifest_age_s,
         )
         return updated
-    except Exception as exc:
+    except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.debug("│  [session-merge] manifest read failed: %s", exc)
         return session_vars
 
@@ -244,6 +259,32 @@ def _derive_email_report_title(fetch_step: Dict[str, Any], user_query: str) -> s
     return "Email Summary Report"
 
 
+def _looks_like_email_followup(user_query: str) -> bool:
+    lowered = str(user_query or "").lower()
+    if not any(token in lowered for token in ("summary", "summarize", "digest", "report", "send it", "email it", "mail it")):
+        return False
+    return any(token in lowered for token in ("them", "those", "these", "listed", "above", "selected", "first", "second", "third", "last"))
+
+
+def _apply_email_followup_constraints(user_query: str, fetch_step: Dict[str, Any]) -> None:
+    if not _looks_like_email_followup(user_query):
+        return
+    try:
+        from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+        ctx = read_context(agent="email")
+        if not ctx:
+            return
+        entities = ctx.get("resolved_entities", {}) or {}
+        listed = entities.get("listed_emails", []) or []
+        if listed and not fetch_step.get("kwargs", {}).get("max_results"):
+            fetch_step.setdefault("kwargs", {})["max_results"] = len(listed)
+        if entities.get("query") and not fetch_step.get("kwargs", {}).get("query"):
+            fetch_step.setdefault("kwargs", {})["query"] = entities["query"]
+    except (AttributeError, ImportError, KeyError, LookupError, OSError, RuntimeError, TypeError, ValueError):
+        return
+
+
 def _repair_email_pdf_delivery_plan(
     skill_name: str,
     user_query: str,
@@ -264,6 +305,7 @@ def _repair_email_pdf_delivery_plan(
 
     fetch_step = repaired[fetch_index]
     fetch_step_id = str(fetch_step.get("id", "s1"))
+    _apply_email_followup_constraints(user_query, fetch_step)
     report_slug = _derive_email_report_slug(fetch_step, user_query)
     report_title = _derive_email_report_title(fetch_step, user_query)
     report_path = str(get_your_data_dir("reports", f"email_summary_{report_slug}.pdf"))
@@ -395,7 +437,7 @@ def run_skill_dag(
     # ── Extract session state from enriched query (## Session State block) ──
     # Used to resolve {__session__.field} tokens in LLM-planned kwargs.
     session_vars = _extract_session_state(user_query)
-    # ── Augment last_found_paths from octa_manifest.txt when available ──
+    # ── Augment compact file context from octa_manifest.txt when available ──
     # Background jobs update the manifest but NOT the session state, which can
     # cause stale session state to point at old file paths (e.g. the email report
     # folder instead of the just-searched payslip files).
@@ -524,11 +566,11 @@ def run_skill_dag(
                                 "│    [%s] manifest saved (%d paths)",
                                 skill_name, len(artifacts_out["found_paths"]),
                             )
-                        except Exception as _me:
+                        except (AttributeError, ImportError, KeyError, LookupError, OSError, RuntimeError, TypeError, ValueError) as _me:
                             logger.warning("│    [%s] manifest save failed: %s", skill_name, _me)
 
                 logger.info("│    [%s] ✔ step=%s succeeded", skill_name, step_id)
-        except Exception as exc:
+        except (AttributeError, ImportError, KeyError, LookupError, OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.exception("│    [%s] ✗ step=%s tool=%s raised: %s", skill_name, step_id, tool_name, exc)
             step_results[step_id] = {"status": "error", "message": str(exc)}
             execution_error = True
@@ -560,7 +602,7 @@ def run_skill_dag(
             file_path=artifacts_out.get("file_path", ""),
             result_summary=final_message[:300],
         )
-    except Exception as _de:
+    except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as _de:
         logger.debug("Diary write skipped: %s", _de)
 
     return {
@@ -674,14 +716,14 @@ Planning rules:
   full result JSON string) or {{step_id.field}} to access a specific field, e.g.
   {{s1.results.0.path}} for the file path of the first search result from step s1.
   IMPORTANT: For file search results use .path (not .id) to get the actual file path.
-- If the user query includes a '## Session State' block, you can reference its fields with
-  {{__session__.<field>}} tokens.  For example, to pass ALL previously found file paths to
-  collect_files_to_folder without enumerating them: "file_paths": "{{__session__.last_found_paths}}"
-  The execution engine will replace this token with the actual Python list automatically.
-  ONLY use {{__session__.last_found_paths}} when the user refers to previously found files
-  using pronouns ("them", "those", "copy them", "send them", etc.).
-  If the user is making a FRESH SEARCH request ("Are there any X?", "Find Y", "Search for Z"),
-  IGNORE last_found_paths and plan normal search steps instead.
+- If the user query includes a '## Session State' block, you can reference its compact fields with
+    {{__session__.<field>}} tokens.
+    Prefer {{__session__.last_found_bundle_dir}} for previous-search zip/email follow-ups,
+    {{__session__.last_found_file_path}} for single-file follow-ups, and
+    {{__session__.file_manifest}} only as a manifest fallback when the files agent should call
+    collect_files_from_manifest() or zip_files_from_manifest().
+    If the user is making a FRESH SEARCH request ("Are there any X?", "Find Y", "Search for Z"),
+    IGNORE previous file-follow-up fields and plan normal search steps instead.
 - SEARCH STRATEGY: When the user asks for files by type ("image files", "video files", "pdf files"),
   ALWAYS search by extension — NEVER by name. Plan one search_by_extension step per extension.
   The execution engine automatically saves ALL results to the manifest — no explicit manifest step needed.
@@ -713,7 +755,7 @@ Authenticated user email:
             max_tokens=800,
         )
         raw = _strip_fences(response.choices[0].message.content.strip())
-    except Exception as exc:
+    except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.error("│  ✗ [%s] Planning LLM call failed: %s", skill_name, exc)
         return None, 1
 
@@ -742,7 +784,7 @@ def _parse_plan(
         if m:
             try:
                 plan = json.loads(m.group(0))
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 logger.warning("│  ✗ [%s] Could not parse planning response as JSON", skill_name)
                 return None
         else:
@@ -856,7 +898,7 @@ def _synthesize(
             logger.warning("│  ⚠ [%s] Synthesis returned empty message — using fallback", skill_name)
             raise ValueError("synthesis returned empty content")
         return message, 1
-    except Exception as exc:
+    except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.error("│  ✗ [%s] Synthesis LLM call failed: %s", skill_name, exc)
         # Fall back to a clean human-readable summary (no raw dicts)
         clean_lines: list = []
@@ -888,9 +930,9 @@ def _resolve_kwargs(
     kwargs values using accumulated step results.
 
     Also resolves ``{__session__.field}`` tokens using the parsed ## Session State
-    block.  When the resolved value is a Python list (e.g. last_found_paths) and
-    the *entire* kwarg value is the token, the kwarg is replaced with the real
-    list — not a string — so list-typed tool parameters receive proper values.
+    block. When the resolved value is structured data and the *entire* kwarg
+    value is the token, the kwarg is replaced with the real object rather than
+    a stringified version.
     """
     _sv = session_vars or {}
     _user_email = user_email or ""
@@ -903,7 +945,7 @@ def _resolve_kwargs(
             return value
         try:
             return json.loads(value)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             return value
 
     def _resolve_value(value: Any) -> Any:
@@ -991,7 +1033,7 @@ def _deep_get(
         if isinstance(data, dict):
             data = data.get(part)
         elif isinstance(data, list) and part in ("results", "emails", "messages", "items"):
-            data = data
+            continue
         elif isinstance(data, list) and part.isdigit():
             idx = int(part)
             data = data[idx] if idx < len(data) else None

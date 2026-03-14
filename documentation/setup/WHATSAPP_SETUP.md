@@ -32,7 +32,7 @@ Your Phone (WhatsApp)
   Meta Cloud API ----------? Webhook POST ----------? FastAPI receiver
   (graph.facebook.com)        to ngrok URL             (port 9001)
                                                               �
-                                                    writes to data/
+                                                    writes to your_data/
                                                     whatsapp_messages.json
                                                               �
                                                               ?
@@ -43,7 +43,7 @@ Your Phone (WhatsApp)
 **Key points:**
 - **Outbound messages** go directly: Octa Bot ? Meta API ? recipient
 - **Inbound messages** arrive via webhook: Meta ? your webhook server ? local JSON store
-- The local `data/whatsapp_messages.json` file is the single source of truth for message history
+- The local `your_data/whatsapp_messages.json` file is the single source of truth for message history
 - The webhook server runs as a parallel process (port 9001 by default)
 
 ---

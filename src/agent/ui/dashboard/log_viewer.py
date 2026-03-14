@@ -600,23 +600,15 @@ def show_log_viewer() -> None:
     """Main entry point — renders the full log analysis screen."""
     _inject_log_css()
 
-    # ── Header + Home button ─────────────────────────────────────────────
-    hdr_col, home_col = st.columns([5, 1])
-    with hdr_col:
-        st.markdown(
-            '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">'
-            '<span style="font-size:2rem;">📊</span>'
-            '<div><div style="font-size:1.6rem;font-weight:800;background:linear-gradient(135deg,#a5b4fc,#e91e8c);'
-            '-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Log Analyser</div>'
-            '<div style="color:#475569;font-size:0.85rem;">Live PA log viewer — turns, LLM calls, errors at a glance</div>'
-            '</div></div>',
-            unsafe_allow_html=True,
-        )
-    with home_col:
-        st.markdown("<div style='padding-top:6px;'></div>", unsafe_allow_html=True)
-        if st.button("🏠 Home", use_container_width=True, type="secondary", key="lv_home"):
-            st.session_state.show_log_viewer = False
-            st.rerun()
+    st.markdown(
+        '<div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">'
+        '<span style="font-size:2rem;">📊</span>'
+        '<div><div style="font-size:1.6rem;font-weight:800;background:linear-gradient(135deg,#a5b4fc,#e91e8c);'
+        '-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">Log Analyser</div>'
+        '<div style="color:#475569;font-size:0.85rem;">Live PA log viewer — turns, LLM calls, errors at a glance</div>'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
 
     _LOGS_DIR.mkdir(exist_ok=True)
     log_files = sorted(_LOGS_DIR.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)

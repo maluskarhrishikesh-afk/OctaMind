@@ -660,11 +660,11 @@ def _channel_badge_html(source: str) -> str:
 
 def _chat_container_height(message_count: int, embedded_mode: bool, processing: bool) -> int:
     """Return a tighter adaptive chat viewport height to avoid large empty gaps."""
-    max_height = 460 if embedded_mode else 560
-    min_height = 170 if embedded_mode else 320
-    estimated = 120 + min(message_count, 8) * 72
+    max_height = 640 if embedded_mode else 560
+    min_height = 320 if embedded_mode else 320
+    estimated = (220 if embedded_mode else 120) + min(message_count, 8) * 72
     if processing:
-        estimated += 120
+        estimated += 140 if embedded_mode else 120
     return max(min_height, min(max_height, estimated))
 
 
@@ -783,6 +783,35 @@ def _load_dashboard_chat(pa_id: str) -> list[dict]:
         seen.add(fingerprint)
         merged.append(item)
     return merged
+
+
+def _dashboard_composer_queue_path(pa_id: str):
+    from src.agent.runtime_paths import get_runtime_state_path
+
+    return get_runtime_state_path("runtime_state", "dashboard_composer", f"{pa_id}.json", create_parent=True)
+
+
+def _consume_dashboard_composer_command(pa_id: str) -> str | None:
+    queue_path = _dashboard_composer_queue_path(pa_id)
+    if not queue_path.exists():
+        return None
+
+    try:
+        payload = _json.loads(queue_path.read_text(encoding="utf-8"))
+    except Exception:
+        try:
+            queue_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return None
+
+    try:
+        queue_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    command = str((payload or {}).get("command") or "").strip()
+    return command or None
 
 
 def _append_chat_message(pa_id: str, state_key: str, role: str, content: str, **extras) -> None:
@@ -1202,22 +1231,23 @@ def _build_channel_status_pills_html(pa: dict) -> str:
 def _render_pa_chat(pa: dict) -> None:
     """Render an independent chat panel for one Personal Assistant.
 
-    Layout (ChatGPT-style, fully native Streamlit):
+        Layout (ChatGPT-style):
       ┌─────────────────────────────────────────┐
-      │  scrollable message area (container)    │
+            │  scrollable message area                │
       │  • all history messages                 │
       │  • live status placeholders when busy   │
       └─────────────────────────────────────────┘
-      [ chat_input — always anchored below ]
+            [ chat_input / composer — always anchored below ]
 
-    No JS injection needed.  st.container(height=…) gives a fixed-height
-    scrollable viewport; st.chat_input() placed after it auto-anchors to the
-    bottom of the page, always visible regardless of message count.
+        Standalone mode uses Streamlit's native chat footer. Embedded dashboard
+        mode constrains the page to a fixed viewport and lets the message history
+        own scrolling while the composer remains visible at the bottom.
     """
     pa_id   = pa["id"]
     pa_name = pa["name"]
     pa_skills = set(pa.get("skills", []))
     embedded_mode = str(st.query_params.get("embedded", "")).strip().lower() in {"1", "true", "yes", "on"}
+    external_composer = str(st.query_params.get("external_composer", "")).strip().lower() in {"1", "true", "yes", "on"}
 
     mk = lambda key: _pa_k(pa_id, key)
 
@@ -1258,6 +1288,22 @@ def _render_pa_chat(pa: dict) -> None:
         st.session_state[mk("command")] = None
     if mk("count") not in st.session_state:
         st.session_state[mk("count")] = 0
+
+    @st.fragment(run_every=1)
+    def _dashboard_composer_fragment() -> None:
+        if not (embedded_mode and external_composer):
+            return
+        if st.session_state[mk("processing")]:
+            return
+        queued_command = _consume_dashboard_composer_command(pa_id)
+        if not queued_command:
+            return
+        _append_chat_message(pa_id, mk("messages"), "user", queued_command)
+        st.session_state[mk("command")] = queued_command
+        st.session_state[mk("processing")] = True
+        st.rerun()
+
+    _dashboard_composer_fragment()
 
     # ── Gmail first-time / expired token notice ───────────────────────────────
     # Shown persistently at the top of the chat whenever the email skill is
@@ -1370,34 +1416,85 @@ def _render_pa_chat(pa: dict) -> None:
             f"""
             <script>
             (function() {{
-                function getHistoryNode() {{
+                var pinnedKey = "__octaChatPinned_{pa_id}";
+                var listenerKey = "__octaChatScrollBound_{pa_id}";
+                function getScrollParent(node) {{
+                    var current = node;
+                    while (current && current !== document.body) {{
+                        var style = window.getComputedStyle(current);
+                        if (style && (style.overflowY === 'auto' || style.overflowY === 'scroll') && current.scrollHeight > current.clientHeight) {{
+                            return current;
+                        }}
+                        current = current.parentElement;
+                    }}
+                    return null;
+                }}
+                function getHistoryRoot() {{
                     return document.querySelector('.st-key-chat_history_{pa_id}')
                         || document.querySelector('[data-testid="stVerticalBlockBorderWrapper"].st-key-chat_history_{pa_id}')
                         || document.querySelector('[class*="st-key-chat_history_{pa_id}"]');
                 }}
-                function scrollToBottom() {{
-                    var history = getHistoryNode();
-                    if (history) {{
-                        history.scrollTop = history.scrollHeight;
-                        var inner = history.querySelector('[data-testid="stVerticalBlock"]');
-                        if (inner) {{
-                            inner.scrollTop = inner.scrollHeight;
-                        }}
-                        return;
-                    }}
+                function getHistoryNode() {{
                     var anchor = document.getElementById("chat-bottom-{pa_id}");
                     if (anchor) {{
-                        anchor.scrollIntoView({{behavior: "instant", block: "end"}});
+                        var scrollParent = getScrollParent(anchor);
+                        if (scrollParent) {{
+                            return scrollParent;
+                        }}
+                    }}
+                    var root = getHistoryRoot();
+                    if (!root) {{
+                        return null;
+                    }}
+                    var candidates = [root].concat(Array.from(root.querySelectorAll('div')));
+                    for (var i = 0; i < candidates.length; i += 1) {{
+                        var node = candidates[i];
+                        var style = window.getComputedStyle(node);
+                        if (!style) {{
+                            continue;
+                        }}
+                        if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight >= node.clientHeight) {{
+                            return node;
+                        }}
+                    }}
+                    return root;
+                }}
+                function isNearBottom(node) {{
+                    if (!node) {{
+                        return true;
+                    }}
+                    return (node.scrollHeight - node.scrollTop - node.clientHeight) < 24;
+                }}
+                function bindScrollState() {{
+                    var history = getHistoryNode();
+                    if (!history || history[listenerKey]) {{
+                        return;
+                    }}
+                    history.addEventListener('scroll', function() {{
+                        window[pinnedKey] = isNearBottom(history);
+                    }}, {{ passive: true }});
+                    history[listenerKey] = true;
+                }}
+                function scrollToBottom(force) {{
+                    var history = getHistoryNode();
+                    if (!history) {{
+                        return;
+                    }}
+                    bindScrollState();
+                    if (force || window[pinnedKey] !== false) {{
+                        history.scrollTop = history.scrollHeight;
+                        window[pinnedKey] = true;
                     }}
                 }}
-                scrollToBottom();
-                setTimeout(scrollToBottom, 40);
-                setTimeout(scrollToBottom, 180);
+                window[pinnedKey] = true;
+                scrollToBottom(true);
+                setTimeout(function() {{ scrollToBottom(true); }}, 40);
+                setTimeout(function() {{ scrollToBottom(true); }}, 180);
                 if (!window.__octaChatBottomObserver_{pa_id}) {{
                     var observer = new MutationObserver(function() {{
-                        scrollToBottom();
+                        scrollToBottom(false);
                     }});
-                    var historyNode = getHistoryNode() || document.body;
+                    var historyNode = getHistoryRoot() || document.body;
                     observer.observe(historyNode, {{ childList: true, subtree: true }});
                     window.__octaChatBottomObserver_{pa_id} = observer;
                 }}
@@ -1436,108 +1533,9 @@ def _render_pa_chat(pa: dict) -> None:
         return _card_placeholder, _result_placeholder
 
     if embedded_mode:
-        st.markdown(
-            f"""
-            <style>
-            .st-key-chat_shell_{pa_id} {{
-                flex: 1 1 auto;
-                min-height: 0;
-            }}
-            .st-key-chat_shell_{pa_id} > div,
-            .st-key-chat_shell_{pa_id} > div[data-testid="stVerticalBlock"] {{
-                min-height: 0;
-                height: 100%;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-            }}
-            .st-key-chat_history_{pa_id} {{
-                flex: 1 1 auto;
-                min-height: 0;
-                overflow-y: auto;
-                overflow-x: hidden;
-                padding-right: 0.3rem;
-                padding-bottom: 0.35rem;
-                scroll-behavior: smooth;
-            }}
-            .st-key-chat_history_{pa_id} > div,
-            .st-key-chat_history_{pa_id} > div[data-testid="stVerticalBlock"] {{
-                min-height: min-content;
-            }}
-            .st-key-chat_composer_{pa_id} {{
-                flex: 0 0 auto;
-                position: relative;
-                padding-top: 0.45rem;
-                margin-top: auto;
-                background: linear-gradient(180deg, rgba(15,23,42,0) 0%, rgba(15,23,42,0.94) 20%, rgba(15,23,42,1) 100%);
-                z-index: 35;
-            }}
-            .st-key-chat_composer_{pa_id} form {{
-                background: rgba(15,23,42,0.72);
-                border: 1px solid rgba(99,102,241,0.16);
-                border-radius: 22px;
-                padding: 0.35rem 0.35rem 0.35rem 0.85rem;
-                box-shadow: 0 18px 40px rgba(2,6,23,0.28);
-                backdrop-filter: blur(14px);
-            }}
-            .st-key-chat_composer_{pa_id} input {{
-                border-radius: 18px !important;
-                min-height: 3.1rem !important;
-                border: none !important;
-                box-shadow: none !important;
-                background: transparent !important;
-                color: #e2e8f0 !important;
-                font-size: 0.98rem !important;
-            }}
-            .st-key-chat_composer_{pa_id} button {{
-                min-height: 3.1rem !important;
-                min-width: 3.1rem !important;
-                width: 3.1rem !important;
-                border-radius: 999px !important;
-                padding: 0 !important;
-                font-size: 1.25rem !important;
-                line-height: 1 !important;
-                box-shadow: 0 10px 24px rgba(79,70,229,0.28) !important;
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        with st.container(key=f"chat_shell_{pa_id}"):
-            with st.container(key=f"chat_history_{pa_id}"):
-                _card_ph, _result_ph = _render_message_stream()
-            with st.container(key=f"chat_composer_{pa_id}"):
-                with st.form(key=f"chat_form_{pa_id}", clear_on_submit=True, enter_to_submit=True):
-                    _input_cols = st.columns([8.8, 1.2])
-                    with _input_cols[0]:
-                        user_input = st.text_input(
-                            "Message",
-                            value="",
-                            placeholder=(
-                                f"Ask {pa_name}..." if not st.session_state[mk("processing")] else "Processing..."
-                            ),
-                            label_visibility="collapsed",
-                            disabled=st.session_state[mk("processing")],
-                            key=f"chat_text_input_{pa_id}",
-                        )
-                    with _input_cols[1]:
-                        submitted = st.form_submit_button(
-                            "↑",
-                            use_container_width=True,
-                            type="primary",
-                            disabled=st.session_state[mk("processing")],
-                        )
-                if submitted:
-                    user_input = (user_input or "").strip()
-                    if not user_input:
-                        st.toast("Type a message first.", icon="✍️")
-                    else:
-                        _append_chat_message(pa_id, mk("messages"), "user", user_input)
-                        st.session_state[mk("command")] = user_input
-                        st.session_state[mk("processing")] = True
-                        st.rerun()
+        with st.container(border=False):
+            _card_ph, _result_ph = _render_message_stream()
     else:
-        # ── Scrollable chat history area ──────────────────────────────────────
         _chat_height = _chat_container_height(
             len(st.session_state.get(mk("messages"), [])),
             embedded_mode,
@@ -1546,10 +1544,39 @@ def _render_pa_chat(pa: dict) -> None:
         with st.container(height=_chat_height, border=False):
             _card_ph, _result_ph = _render_message_stream()
 
-    if not embedded_mode:
+    user_input = None
+    if embedded_mode and not external_composer:
+        with st.form(f"embedded_chat_form_{pa_id}", clear_on_submit=True):
+            input_col, send_col = st.columns([8.5, 1.5])
+            with input_col:
+                user_input = st.text_input(
+                    "Message",
+                    placeholder=f"Ask {pa_name}…" if not st.session_state[mk("processing")] else "⏳ Processing…",
+                    key=f"embedded_chat_input_{pa_id}",
+                    label_visibility="collapsed",
+                    disabled=st.session_state[mk("processing")],
+                )
+            with send_col:
+                submitted = st.form_submit_button(
+                    "Send",
+                    use_container_width=True,
+                    disabled=st.session_state[mk("processing")],
+                    type="primary",
+                )
+        if submitted:
+            user_input = (user_input or "").strip()
+            if st.session_state[mk("processing")]:
+                st.toast("⏳ Still thinking — please wait for the current response.", icon="⏳")
+            elif user_input:
+                _append_chat_message(pa_id, mk("messages"), "user", user_input)
+                st.session_state[mk("command")] = user_input
+                st.session_state[mk("processing")] = True
+                st.rerun()
+    elif not embedded_mode:
         user_input = st.chat_input(
             f"Ask {pa_name}…" if not st.session_state[mk("processing")] else "⏳ Processing…",
             key=f"chat_input_{pa_id}",
+            disabled=st.session_state[mk("processing")],
         )
         if user_input:
             if st.session_state[mk("processing")]:
@@ -2279,9 +2306,8 @@ def main() -> None:
             st.markdown(
                 """
                 <style>
-                html, body, [data-testid="stAppViewContainer"], section.main {
-                    height: 100dvh;
-                    overflow: hidden !important;
+                *, *::before, *::after {
+                    box-sizing: border-box;
                 }
                 header[data-testid="stHeader"],
                 [data-testid="stToolbar"],
@@ -2290,22 +2316,28 @@ def main() -> None:
                 #MainMenu {
                     display: none !important;
                 }
+                html, body, [data-testid="stAppViewContainer"], section.main {
+                    height: auto !important;
+                    min-height: 0 !important;
+                    overflow: visible !important;
+                }
                 .block-container {
-                    padding-top: 0.9rem !important;
-                    padding-bottom: 0.6rem !important;
-                    padding-left: 0.9rem !important;
-                    padding-right: 0.9rem !important;
+                    padding-top: 0.35rem !important;
+                    padding-bottom: 0.75rem !important;
+                    padding-left: 0.75rem !important;
+                    padding-right: 0.75rem !important;
+                    box-sizing: border-box !important;
                     max-width: none !important;
-                    min-height: 100dvh !important;
-                    height: 100dvh !important;
-                    display: flex !important;
-                    flex-direction: column !important;
-                    overflow: hidden !important;
+                    min-height: 0 !important;
+                    height: auto !important;
+                    overflow: visible !important;
+                }
+                [data-testid="stMainBlockContainer"] {
+                    overflow: visible !important;
                 }
                 .block-container > div[data-testid="stVerticalBlock"] {
-                    flex: 1 1 auto !important;
                     min-height: 0 !important;
-                    overflow: hidden !important;
+                    overflow: visible !important;
                 }
                 div[data-testid="stVerticalBlockBorderWrapper"] {
                     margin-bottom: 0 !important;

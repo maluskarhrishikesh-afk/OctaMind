@@ -335,7 +335,7 @@ Turn 2:
 
 ### 4.2 File Manifest — Search Results
 
-**File:** `<workspace>/data/octa_manifest.txt`  
+**File:** `<workspace>/your_data/octa_manifest.txt`  
 **Status:** ✅ IMPLEMENTED
 
 **Purpose:** Store all file paths returned by a search so the next turn
@@ -382,7 +382,7 @@ skip the copy — instant zero-cost duplicate detection.
 
 ### 4.3 Operation Manifest — Undo / Rollback
 
-**File:** `<workspace>/data/operation_history.json`  
+**File:** `<workspace>/your_data/operation_history.json`  
 **Status:** ✅ LIVE (Phase 2 complete — March 2026)
 
 **Purpose:** Record every copy/collect operation so it can be reversed with
@@ -400,7 +400,7 @@ a single "undo" command, and reviewed via the audit history.
   },
   {
     "type":        "copy",
-    "destination": "C:\\Hrishikesh\\OctaMind\\data",
+    "destination": "C:\\Hrishikesh\\OctaMind\\your_data",
     "count":       601,
     "timestamp":   "2026-03-05T10:11:00",
     "undone":      true,
@@ -647,9 +647,9 @@ for entry in index["files"]:
 
 | Stream | File | Implementation |
 |--------|------|---------------|
-| Context audit | `<workspace>/data/octa_context_history.jsonl` | `src/agent/manifest/context_manifest.py` |
-| Operation audit | `<workspace>/data/operation_history.json` | `src/files/features/file_ops.py` |
-| Full event audit | `<workspace>/data/octa_audit.jsonl` | 🔲 PLANNED |
+| Context audit | `<workspace>/your_data/octa_context_history.jsonl` | `src/agent/manifest/context_manifest.py` |
+| Operation audit | `<workspace>/your_data/operation_history.json` | `src/files/features/file_ops.py` |
+| Full event audit | `<workspace>/your_data/octa_audit.jsonl` | 🔲 PLANNED |
 
 **Context audit** (LIVE): every `write_context()` appends a lightweight JSONL line
 (strips `resolved_entities` to keep size minimal). Auto-pruned to 30 days.
@@ -678,7 +678,7 @@ tool-call granularity. Below is the planned per-event schema:
 ## 5. The Full Manifest Folder Structure
 
 ```
-<workspace>/data/
+<workspace>/your_data/
 │
 ├── octa_manifest.txt              ← File search results (paths, one per line)
 │                                     OVERWRITTEN on each new search
@@ -834,7 +834,7 @@ Resolves the calendar / email / files "follow-up ambiguity" class of bugs.
   - `get_job(job_id) → dict | None`
   - `get_recent_jobs(limit) → list[dict]`
   - `get_jobs_for_session(session_id, limit) → list[dict]`
-  - File: `<workspace>/data/octa_jobs.json`, newest-first JSON array, 200-job cap
+  - File: `<workspace>/your_data/octa_jobs.json`, newest-first JSON array, 200-job cap
 - `src/agent/manifest/job_runner.py` — Background daemon thread pool
   - `submit_job(job_id, fn, session_id, pa_id)` — executes fn() in background thread
   - `_notify_user(session_id, pa_id, message)` — routes notification to Telegram or manifest poll

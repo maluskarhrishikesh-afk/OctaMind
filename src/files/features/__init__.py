@@ -10,6 +10,7 @@ from .file_ops import (
     create_folder,
     rename_file,
     open_file,
+    zip_files_from_manifest,
 )
 from .search import (
     search_by_name,
@@ -69,7 +70,7 @@ from .cross_agent import (
 __all__ = [
     # file_ops
     "list_directory", "get_file_info", "copy_file", "move_file",
-    "delete_file", "create_folder", "rename_file", "open_file",
+    "delete_file", "create_folder", "rename_file", "open_file", "zip_files_from_manifest",
     # search
     "search_by_name", "search_by_extension", "search_by_date",
     "search_by_size", "find_duplicates", "find_empty_folders",

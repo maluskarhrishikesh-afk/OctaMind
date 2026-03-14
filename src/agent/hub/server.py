@@ -29,12 +29,13 @@ _ROOT = Path(__file__).parent.parent.parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi import FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from src.agent.hub.processor import HubProcessor, _SESSION_HISTORY
+from src.agent.hub.google_auth_session import complete_google_auth_callback
 
 logger = logging.getLogger("hub_api")
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
@@ -107,6 +108,31 @@ def _check_auth(authorization: Optional[str]) -> None:
 async def health():
     """Liveness check."""
     return {"status": "ok", "version": "1.0.0"}
+
+
+@app.get("/oauth/google/callback", response_class=HTMLResponse, tags=["OAuth"])
+async def google_oauth_callback(
+    state: str = Query(default=""),
+    code: str = Query(default=""),
+    error: str = Query(default=""),
+    error_description: str = Query(default=""),
+):
+    ok, message = complete_google_auth_callback(
+        state=state,
+        code=code,
+        error=error,
+        error_description=error_description,
+    )
+    status_code = 200 if ok else 400
+    html = (
+        "<html><head><title>OctaMind Google Auth</title></head>"
+        "<body style='font-family:Segoe UI,Arial,sans-serif;padding:32px;line-height:1.5;'>"
+        f"<h2>{'Authorization complete' if ok else 'Authorization failed'}</h2>"
+        f"<p>{message}</p>"
+        "<p>You can close this tab and return to OctaMind.</p>"
+        "</body></html>"
+    )
+    return HTMLResponse(content=html, status_code=status_code)
 
 
 @app.post("/hub/chat", response_model=ChatResponse, tags=["Chat"])

@@ -165,6 +165,190 @@ class TestRouter:
         assert "drive" in result
         assert "email" in result
 
+    def test_latest_world_cup_routes_to_browser(self):
+        from src.agent.workflows.router import classify_and_route, detect_agents_needed
+
+        detected = detect_agents_needed("Who won the latest T20 World Cup?")
+        assert detected == ["browser"]
+
+        intent = classify_and_route("Who won the latest T20 World Cup?")
+        assert intent.category == "fresh_task"
+        assert intent.agents == ["browser"]
+
+    def test_latest_news_routes_to_browser_even_with_active_context(self):
+        from src.agent.workflows.router import classify_and_route, detect_agents_needed
+
+        detected = detect_agents_needed("What is the latest news on IRAN war?")
+        assert detected == ["browser"]
+
+        intent = classify_and_route(
+            "What is the latest news on IRAN war?",
+            active_context={
+                "agent": "files",
+                "topic": "auto_search_result",
+                "awaiting": "file_action",
+                "resolved_entities": {"found_count": 3},
+            },
+        )
+        assert intent.category == "fresh_task"
+        assert intent.agents == ["browser"]
+
+    def test_pronoun_followup_with_context_does_not_get_forced_to_browser(self):
+        from src.agent.workflows.router import classify_and_route
+
+        intent = classify_and_route(
+            "Can you send it to me?",
+            active_context={
+                "agent": "files",
+                "topic": "auto_search_result",
+                "awaiting": "file_action",
+                "resolved_entities": {"found_count": 1},
+            },
+        )
+        assert intent.agents != ["browser"]
+
+    def test_fresh_email_count_query_does_not_route_to_browser(self):
+        from src.agent.workflows.router import classify_and_route, detect_agents_needed
+
+        detected = detect_agents_needed("How many emails did I receive today?")
+        assert detected is not None
+        assert "browser" not in detected
+        assert "email" in detected
+
+        intent = classify_and_route("How many emails did I receive today?")
+        assert "browser" not in intent.agents
+        assert "email" in intent.agents
+
+
+class TestHubProcessorBrowserRecovery:
+    def test_browser_recovery_triggers_on_stale_current_news_answer(self, monkeypatch):
+        from src.agent.hub.processor import HubProcessor, HubRequest
+
+        processor = HubProcessor()
+        req = HubRequest(
+            message="What is the latest news on IRAN war?",
+            session_id="s1",
+            source="test",
+        )
+
+        def fake_run_single_agent(agent, request, query=None):
+            assert agent == "browser"
+            assert request is req
+            assert query == req.message
+            return (
+                "Reuters and BBC report fresh developments and a short summary of the latest situation.",
+                [{"agent": "browser", "action": "react_response", "llm_calls": 1}],
+                [],
+                [],
+            )
+
+        monkeypatch.setattr(processor, "_run_single_agent", fake_run_single_agent)
+
+        reply, actions, artifacts, search_paths = processor._maybe_recover_with_browser(
+            req,
+            [],
+            "I currently don't have real-time access to news updates, but I recommend checking reliable sources.",
+            [],
+            source_agent="chat",
+        )
+
+        assert "fresh developments" in reply
+        assert actions[-1]["agent"] == "browser"
+        assert artifacts == []
+        assert search_paths == []
+
+    def test_browser_recovery_triggers_on_old_knowledge_cutoff_answer(self, monkeypatch):
+        from src.agent.hub.processor import HubProcessor, HubRequest
+
+        processor = HubProcessor()
+        req = HubRequest(
+            message="Can you tell me who won the latest T20 cricket World Cup?",
+            session_id="s2",
+            source="test",
+        )
+
+        monkeypatch.setattr(
+            processor,
+            "_run_single_agent",
+            lambda agent, request, query=None: (
+                "India won the latest ICC Men's T20 World Cup, based on current web reports.",
+                [{"agent": "browser", "action": "react_response", "llm_calls": 1}],
+                [],
+                [],
+            ),
+        )
+
+        reply, actions, _, _ = processor._maybe_recover_with_browser(
+            req,
+            [],
+            "As of my last update in October 2023, England won the latest T20 World Cup in 2022.",
+            [],
+            source_agent="chat",
+        )
+
+        assert "India won" in reply
+        assert actions[-1]["agent"] == "browser"
+
+    def test_browser_recovery_skips_non_fresh_queries(self, monkeypatch):
+        from src.agent.hub.processor import HubProcessor, HubRequest
+
+        processor = HubProcessor()
+        req = HubRequest(
+            message="Who won the 2022 T20 cricket World Cup?",
+            session_id="s3",
+            source="test",
+        )
+
+        called = {"value": False}
+
+        def fake_run_single_agent(agent, request, query=None):
+            called["value"] = True
+            return ("browser answer", [], [], [])
+
+        monkeypatch.setattr(processor, "_run_single_agent", fake_run_single_agent)
+
+        reply, actions, _, _ = processor._maybe_recover_with_browser(
+            req,
+            [],
+            "As of my last update in October 2023, England won the latest T20 World Cup in 2022.",
+            [],
+            source_agent="chat",
+        )
+
+        assert called["value"] is False
+        assert "October 2023" in reply
+        assert actions == []
+
+    def test_browser_recovery_skips_when_browser_was_already_source(self, monkeypatch):
+        from src.agent.hub.processor import HubProcessor, HubRequest
+
+        processor = HubProcessor()
+        req = HubRequest(
+            message="What is the latest news on IRAN war?",
+            session_id="s4",
+            source="test",
+        )
+
+        called = {"value": False}
+
+        def fake_run_single_agent(agent, request, query=None):
+            called["value"] = True
+            return ("browser answer", [], [], [])
+
+        monkeypatch.setattr(processor, "_run_single_agent", fake_run_single_agent)
+
+        reply, actions, _, _ = processor._maybe_recover_with_browser(
+            req,
+            [],
+            "I don't have real-time access to current news updates.",
+            [],
+            source_agent="browser",
+        )
+
+        assert called["value"] is False
+        assert "real-time access" in reply
+        assert actions == []
+
 
 # ── WorkflowContext ───────────────────────────────────────────────────────────
 

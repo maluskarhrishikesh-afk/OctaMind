@@ -8,6 +8,7 @@ import sys
 import json
 import subprocess
 import socket
+from pathlib import Path
 
 
 def _project_root() -> str:
@@ -47,17 +48,40 @@ def _kill_port(port: int):
         pass  # Nothing listening on that port — fine
 
 
+def _stop_keep_awake(root: str) -> None:
+    state_file = Path(root) / 'your_data' / 'runtime_state' / 'keep_awake.json'
+    if not state_file.exists():
+        return
+
+    try:
+        state = json.loads(state_file.read_text(encoding='utf-8'))
+    except Exception:
+        state = {}
+
+    pid = state.get('pid')
+    if isinstance(pid, int) and pid > 0:
+        print(f"Stopping keep-awake helper (PID={pid})...")
+        _kill_pid(pid)
+
+    try:
+        state_file.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def main():
     root = _project_root()
-    state_file = os.path.join(root, 'running_agents.json')
+    state_file = Path(root) / 'your_data' / 'runtime_state' / 'running_agents.json'
+    legacy_state_file = Path(root) / 'running_agents.json'
+    if not state_file.exists() and legacy_state_file.exists():
+        state_file = legacy_state_file
 
     print("Stopping Octa Bot...")
 
     # 1. Kill all tracked agent processes from running_agents.json
-    if os.path.exists(state_file):
+    if state_file.exists():
         try:
-            with open(state_file, 'r', encoding='utf-8') as f:
-                state = json.load(f)
+            state = json.loads(state_file.read_text(encoding='utf-8'))
             if state:
                 print(f"Stopping {len(state)} agent(s)...")
                 for agent_id, info in state.items():
@@ -69,8 +93,7 @@ def main():
                     if port:
                         _kill_port(port)
             # Clear state file
-            with open(state_file, 'w', encoding='utf-8') as f:
-                json.dump({}, f, indent=2)
+            state_file.write_text(json.dumps({}, indent=2), encoding='utf-8')
         except Exception as e:
             print(f"Warning: could not read running_agents.json: {e}")
 
@@ -83,6 +106,8 @@ def main():
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if s.connect_ex(('localhost', port)) == 0:
                 _kill_port(port)
+
+    _stop_keep_awake(root)
 
     print("Octa Bot stopped. You can close this window.")
 

@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.agent.runtime_paths import get_your_data_dir
 from ..files_service import resolve_path, _file_dict, _is_safe_path, send_to_recycle_bin
 
 logger = logging.getLogger("files_agent")
@@ -628,9 +629,7 @@ def write_pdf_report(path: str, title: str, content: str) -> Dict[str, Any]:
         elif not isinstance(content, str):
             content = str(content)
 
-        def _normalise_report_text(text: str) -> str:
-            import textwrap
-
+        def _normalise_report_text(text: str) -> List[str]:
             text = text.replace("\r\n", "\n").replace("\r", "\n")
             text = text.replace("\t", "    ")
             text = text.replace("\u00a0", " ")
@@ -642,24 +641,49 @@ def write_pdf_report(path: str, title: str, content: str) -> Dict[str, Any]:
             text = text.replace("\u201c", '"')
             text = text.replace("\u201d", '"')
             text = re.sub(r"^```.*?$", "", text, flags=re.MULTILINE)
-            text = text.replace("### ", "\n")
-            text = text.replace("## ", "\n")
-            text = text.replace("**", "")
             text = text.replace("`", "")
-            text = "\n".join(line.rstrip() for line in text.split("\n"))
+            return [line.rstrip() for line in text.split("\n")]
 
-            wrapped_lines: List[str] = []
-            for raw_line in text.split("\n"):
-                line = raw_line.strip()
-                if not line:
-                    if not wrapped_lines or wrapped_lines[-1] != "":
-                        wrapped_lines.append("")
-                    continue
-                wrapped_lines.extend(
-                    textwrap.wrap(line, width=90, break_long_words=True, break_on_hyphens=False)
-                    or [line]
-                )
-            return "\n".join(wrapped_lines).strip() or "Report generated."
+
+        def _extract_line_style(line: str) -> Dict[str, Any]:
+            stripped = line.strip()
+            heading_level = 0
+            if stripped.startswith("### "):
+                heading_level = 3
+                stripped = stripped[4:]
+            elif stripped.startswith("## "):
+                heading_level = 2
+                stripped = stripped[3:]
+            elif stripped.startswith("# "):
+                heading_level = 1
+                stripped = stripped[2:]
+
+            bullet = False
+            if stripped.startswith("- "):
+                bullet = True
+                stripped = stripped[2:]
+
+            color_match = re.search(r'color\s*:\s*(#[0-9a-fA-F]{6})', stripped)
+            color = color_match.group(1) if color_match else None
+            strong = "<strong>" in stripped.lower() or "**" in stripped
+
+            stripped = re.sub(r"<[^>]+>", "", stripped)
+            stripped = stripped.replace("**", "")
+            stripped = stripped.strip()
+            if bullet and stripped:
+                stripped = f"- {stripped}"
+
+            return {
+                "text": stripped,
+                "heading_level": heading_level,
+                "color": color,
+                "strong": strong,
+            }
+
+
+        def _hex_to_rgb(value: str) -> tuple[int, int, int]:
+            value = value.lstrip("#")
+            return tuple(int(value[index:index + 2], 16) for index in (0, 2, 4))
 
         content = _normalise_report_text(content)
 
@@ -677,11 +701,39 @@ def write_pdf_report(path: str, title: str, content: str) -> Dict[str, Any]:
             pdf.cell(usable_width, 10, _pdf_safe(title), new_x="LMARGIN", new_y="NEXT", align="C")
             pdf.set_font("Helvetica", size=10)
             pdf.ln(4)
-            for line in content.split("\n"):
-                if not line.strip():
+            for raw_line in content:
+                if not raw_line.strip():
                     pdf.ln(4)
                     continue
-                pdf.multi_cell(usable_width, 6, _pdf_safe(line), new_x="LMARGIN", new_y="NEXT")
+                style = _extract_line_style(raw_line)
+                if not style["text"]:
+                    pdf.ln(3)
+                    continue
+
+                if style["heading_level"] == 1:
+                    pdf.set_font("Helvetica", "B", 15)
+                    pdf.set_text_color(17, 24, 39)
+                    pdf.multi_cell(usable_width, 9, _pdf_safe(style["text"]), new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(2)
+                elif style["heading_level"] == 2:
+                    pdf.set_font("Helvetica", "B", 13)
+                    pdf.set_text_color(29, 78, 216)
+                    pdf.multi_cell(usable_width, 8, _pdf_safe(style["text"]), new_x="LMARGIN", new_y="NEXT")
+                    pdf.ln(1)
+                elif style["heading_level"] == 3:
+                    pdf.set_font("Helvetica", "B", 11)
+                    pdf.set_text_color(8, 145, 178)
+                    pdf.multi_cell(usable_width, 7, _pdf_safe(style["text"]), new_x="LMARGIN", new_y="NEXT")
+                else:
+                    font_style = "B" if style["strong"] else ""
+                    pdf.set_font("Helvetica", font_style, 10)
+                    if style["color"]:
+                        red, green, blue = _hex_to_rgb(style["color"])
+                        pdf.set_text_color(red, green, blue)
+                    else:
+                        pdf.set_text_color(17, 24, 39)
+                    pdf.multi_cell(usable_width, 6, _pdf_safe(style["text"]), new_x="LMARGIN", new_y="NEXT")
+                pdf.set_text_color(17, 24, 39)
             pdf.output(str(out))
         except ImportError:
             return {
@@ -1875,7 +1927,8 @@ def list_running_apps() -> Dict[str, Any]:
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Manifest helpers — reliable cross-turn path bookkeeping
-# Stored in <workspace>/data/ so the path is consistent on Windows/Linux/macOS.
+# Stored in <workspace>/your_data/ so user-facing generated artifacts and
+# transient file manifests stay inside one workspace-local folder.
 # __file__ = src/files/features/file_ops.py
 #   parents[0] = src/files/features/
 #   parents[1] = src/files/
@@ -1883,13 +1936,108 @@ def list_running_apps() -> Dict[str, Any]:
 #   parents[3] = <workspace root>
 # ──────────────────────────────────────────────────────────────────────────────
 
-_DEFAULT_OCTAMIND_DIR = Path(__file__).resolve().parents[3] / "data"
+_DEFAULT_OCTAMIND_DIR = get_your_data_dir(create=True)
 _DEFAULT_MANIFEST     = _DEFAULT_OCTAMIND_DIR / "octa_manifest.txt"
 # Operation history (replaces single-entry last_operation.json).
 # JSON array, most-recent-first.  Entries older than 30 days are pruned
 # automatically on every write so the file stays small.
 _OP_HISTORY_FILE      = _DEFAULT_OCTAMIND_DIR / "operation_history.json"
 _OP_HISTORY_TTL_DAYS  = 30
+_ARCHIVE_EXTENSIONS   = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"}
+
+
+def _is_under_path(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _make_bundle_slug(value: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    return slug[:48] or "search_results"
+
+
+def _filter_stageable_paths(paths: List[Path]) -> tuple[List[Path], List[str], List[str]]:
+    archive_root = get_your_data_dir("archives", create=True)
+    non_archive_files = [path for path in paths if path.suffix.lower() not in _ARCHIVE_EXTENSIONS]
+    filtered_paths: List[Path] = []
+    skipped_generated: List[str] = []
+    filtered_archives: List[str] = []
+
+    for src_path in paths:
+        if _is_under_path(src_path, archive_root):
+            skipped_generated.append(str(src_path))
+            continue
+        if non_archive_files and src_path.suffix.lower() in _ARCHIVE_EXTENSIONS:
+            filtered_archives.append(str(src_path))
+            continue
+        filtered_paths.append(src_path)
+
+    if not filtered_paths:
+        filtered_paths = paths
+
+    return filtered_paths, skipped_generated, filtered_archives
+
+
+def _copy_into_bundle(paths: List[Path], destination: Path) -> List[str]:
+    copied_paths: List[str] = []
+    for src in paths:
+        target = destination / src.name
+        if target.exists():
+            stem, suffix = src.stem, src.suffix
+            for index in range(1, 10000):
+                candidate = destination / f"{stem}_{index}{suffix}"
+                if not candidate.exists():
+                    target = candidate
+                    break
+        shutil.copy2(str(src), str(target))
+        copied_paths.append(str(target))
+    return copied_paths
+
+
+def stage_search_results(
+    found_paths: List[str],
+    label: str = "",
+    category: str = "search_results",
+) -> Dict[str, Any]:
+    """Copy exact search results into a workspace-local archive staging folder."""
+    try:
+        existing_paths: List[Path] = []
+        missing_paths: List[str] = []
+        for src_str in found_paths:
+            src_path = Path(src_str)
+            if src_path.exists() and src_path.is_file():
+                existing_paths.append(src_path)
+            else:
+                missing_paths.append(src_str)
+
+        if not existing_paths:
+            return {
+                "status": "error",
+                "message": "No existing files were available to stage.",
+                "skipped": missing_paths,
+            }
+
+        filtered_paths, skipped_generated, filtered_archives = _filter_stageable_paths(existing_paths)
+        category_root = get_your_data_dir("archives", category, create=True)
+        bundle_dir = category_root / f"{_make_bundle_slug(label)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        staged_files = _copy_into_bundle(filtered_paths, bundle_dir)
+
+        return {
+            "status": "success",
+            "bundle_dir": str(bundle_dir),
+            "staged_files": staged_files,
+            "source_count": len(filtered_paths),
+            "skipped": missing_paths + skipped_generated,
+            "filtered_archives": filtered_archives,
+            "message": f"Staged {len(staged_files)} file(s) into '{bundle_dir}'.",
+        }
+    except Exception as exc:
+        logger.error("stage_search_results failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
 
 
 def _prune_op_history(records: list) -> list:
@@ -2166,4 +2314,97 @@ def collect_files_from_manifest(
         }
     except Exception as exc:
         logger.error("collect_files_from_manifest failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def zip_files_from_manifest(
+    manifest_path: str = "",
+    output_path: str = "",
+) -> Dict[str, Any]:
+    """
+    Read file paths from a manifest file and zip EXACTLY those paths.
+
+    This is the safest follow-up action after a search when the user says
+    "zip them" or "send those as a zip". It avoids zipping the entire parent
+    folder when only a subset of files matched the previous search.
+
+    Args:
+        manifest_path: Path to the manifest text file. Defaults to
+                       <workspace>/your_data/octa_manifest.txt.
+        output_path:   Destination zip path. Defaults to
+                       <workspace>/your_data/archives/search_results.zip.
+    """
+    try:
+        from .archives import zip_folder as _zip_folder
+
+        mf = Path(manifest_path).expanduser() if manifest_path else _DEFAULT_MANIFEST
+        if not mf.exists():
+            return {
+                "status": "error",
+                "message": f"Manifest file not found: '{mf}'. Run a search first.",
+            }
+
+        lines = [ln.strip() for ln in mf.read_text(encoding="utf-8").splitlines()]
+        manifest_paths = [ln for ln in lines if ln]
+        if not manifest_paths:
+            return {
+                "status": "error",
+                "message": f"Manifest file '{mf}' is empty. Run a search first.",
+            }
+
+        existing_paths: List[Path] = []
+        skipped: List[str] = []
+        for src_str in manifest_paths:
+            src_path = Path(src_str)
+            if src_path.exists() and src_path.is_file():
+                existing_paths.append(src_path)
+            else:
+                skipped.append(src_str)
+
+        if not existing_paths:
+            return {
+                "status": "error",
+                "message": f"No existing paths from manifest '{mf}' could be zipped.",
+                "skipped": skipped,
+            }
+
+        archive_root = get_your_data_dir("archives", create=True)
+
+        if output_path:
+            archive_path = Path(output_path).expanduser()
+        else:
+            archive_path = archive_root / "search_results.zip"
+
+        stage_result = stage_search_results(
+            [str(path) for path in existing_paths],
+            label=archive_path.stem or "search_results",
+            category="bundles",
+        )
+        if stage_result.get("status") != "success":
+            return stage_result
+
+        bundle_dir = Path(str(stage_result.get("bundle_dir", "")))
+        bundled_files = list(stage_result.get("staged_files", []))
+
+        result = _zip_folder(str(bundle_dir), str(archive_path))
+        if result.get("status") != "success":
+            return result
+
+        result["manifest_path"] = str(mf)
+        result["source_count"] = int(stage_result.get("source_count", len(bundled_files)))
+        result["bundle_dir"] = str(bundle_dir)
+        result["bundled_files"] = bundled_files
+        result["skipped"] = skipped + list(stage_result.get("skipped", []))
+        result["filtered_archives"] = list(stage_result.get("filtered_archives", []))
+
+        notes: List[str] = []
+        if result["skipped"]:
+            notes.append(f"Skipped {len(result['skipped'])} missing/generated path(s).")
+        if result["filtered_archives"]:
+            notes.append(f"Ignored {len(result['filtered_archives'])} archive input(s) because file results were also present.")
+        if notes:
+            result["message"] = f"{result.get('message', '').strip()} {' '.join(notes)}".strip()
+        return result
+    except Exception as exc:
+        logger.error("zip_files_from_manifest failed: %s", exc)
         return {"status": "error", "message": str(exc)}

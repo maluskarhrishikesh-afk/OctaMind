@@ -13,12 +13,316 @@ Key corrections vs. older version:
 from __future__ import annotations
 
 import re
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from src.agent.runtime_paths import get_your_data_dir
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
+
+_FILES_ORCHESTRATOR_ERRORS = (
+    AttributeError,
+    ImportError,
+    KeyError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
+_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "svg", "ico"]
+_VIDEO_EXTENSIONS = ["mp4", "avi", "mov", "mkv", "wmv", "flv", "webm"]
+_DOCUMENT_EXTENSIONS = ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt"]
+_ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"}
+_SKIP_RESULT_PARTS = {"__pycache__", ".pytest_cache"}
+_COMPUTER_SCOPE_RE = re.compile(
+    r"\b(on\s+my\s+(computer|laptop|pc|machine)|across\s+all\s+drives|all\s+drives|whole\s+(computer|system)|entire\s+(computer|laptop|system))\b",
+    re.IGNORECASE,
+)
+
+
+def _infer_extension_filter(user_query: str) -> Optional[List[str]]:
+    lowered = str(user_query or "").lower()
+    if any(token in lowered for token in ("image file", "image files", "photo", "photos", "picture", "pictures")):
+        return list(_IMAGE_EXTENSIONS)
+    if any(token in lowered for token in ("video file", "video files", "videos")):
+        return list(_VIDEO_EXTENSIONS)
+    if "pdf" in lowered:
+        return ["pdf"]
+    if any(token in lowered for token in ("document file", "document files", "documents")):
+        return list(_DOCUMENT_EXTENSIONS)
+    return None
+
+
+def _singularize_term(value: str) -> str:
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if lowered.endswith("ies") and len(text) > 3:
+        return text[:-3] + "y"
+    if lowered.endswith("s") and not lowered.endswith(("ss", "us")) and len(text) > 3:
+        return text[:-1]
+    return text
+
+
+def _parse_precise_full_computer_search(user_query: str) -> Optional[Dict[str, Any]]:
+    raw_query = str(user_query or "")
+    lowered = raw_query.lower()
+    if not _COMPUTER_SCOPE_RE.search(raw_query):
+        return None
+
+    named_match = re.search(
+        r"\b(?:an?\s+)?(?:image|video|pdf|document)?\s*(?:file|folder)?\s*named\s+[\"']?([^\"'?.\n]+?)[\"']?(?:\s+on\s+my\s+(?:computer|laptop|pc|machine)|\?|$)",
+        raw_query,
+        re.IGNORECASE,
+    )
+    if named_match:
+        term = named_match.group(1).strip().rstrip("?.!,")
+        return {
+            "mode": "named_search",
+            "term": term,
+            "extensions": _infer_extension_filter(raw_query),
+            "include_folders": "folder named" in lowered and "file named" not in lowered,
+            "limit": 50,
+        }
+
+    count_match = re.search(
+        r"\bhow\s+many\s+(.+?)\s+(?:are\s+there|do\s+i\s+have|exist)\b",
+        raw_query,
+        re.IGNORECASE,
+    )
+    if count_match:
+        phrase = count_match.group(1).strip().lower()
+        phrase = re.sub(r"\b(any|all|the|my)\b", " ", phrase)
+        phrase = re.sub(r"\b(files?|folders?|documents?|images?|videos?)\b", " ", phrase)
+        phrase = re.sub(r"\s+", " ", phrase).strip(" .?!,")
+        if phrase:
+            return {
+                "mode": "count_search",
+                "term": _singularize_term(phrase),
+                "extensions": _infer_extension_filter(raw_query),
+                "include_folders": False,
+                "limit": 0,
+            }
+    return None
+
+
+def _save_precise_search_context(result: Dict[str, Any], query: str) -> None:
+    try:
+        from src.agent.manifest.context_manifest import auto_save_files_context  # noqa: PLC0415
+        from src.files.features.file_ops import save_search_manifest  # noqa: PLC0415
+
+        auto_save_files_context(result, query)
+        paths = [str(item.get("path", "")).strip() for item in result.get("results", []) if str(item.get("path", "")).strip()]
+        if paths:
+            save_search_manifest(paths)
+    except (AttributeError, OSError, TypeError, ValueError):
+        pass
+
+
+def _query_prefers_archives(user_query: str) -> bool:
+    lowered = str(user_query or "").lower()
+    return any(token in lowered for token in ("zip", "archive", "compressed", "rar", "7z"))
+
+
+def _is_temp_or_test_artifact(path: Path) -> bool:
+    lowered_parts = [part.lower() for part in path.parts]
+    if any(part in _SKIP_RESULT_PARTS for part in lowered_parts):
+        return True
+    try:
+        temp_root = Path(tempfile.gettempdir()).resolve()
+        resolved_path = path.resolve()
+        resolved_path.relative_to(temp_root)
+        if any(part.startswith("pytest-") or part.startswith("pytest-of-") for part in lowered_parts):
+            return True
+        return True
+    except ValueError:
+        return False
+    except (OSError, RuntimeError):
+        return False
+
+
+def _is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _stage_precise_search_results(term: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    paths = [str(item.get("path", "") or "").strip() for item in result.get("results", []) if str(item.get("path", "") or "").strip()]
+    if not paths:
+        return result
+    try:
+        from src.files.features.file_ops import stage_search_results  # noqa: PLC0415
+
+        stage_result = stage_search_results(paths, label=term, category="search_results")
+        if stage_result.get("status") == "success":
+            enriched = dict(result)
+            enriched["search_bundle_dir"] = stage_result.get("bundle_dir", "")
+            enriched["search_bundle_files"] = stage_result.get("staged_files", [])
+            return enriched
+    except (AttributeError, OSError, TypeError, ValueError):
+        pass
+    return result
+
+
+def _filter_precise_search_results(user_query: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    matches = result.get("results", []) or []
+    if not matches or _query_prefers_archives(user_query):
+        return result
+
+    archive_root = get_your_data_dir("archives", create=True)
+    filtered_matches: List[Dict[str, Any]] = []
+
+    for item in matches:
+        path_str = str(item.get("path", "") or "").strip()
+        if not path_str:
+            filtered_matches.append(item)
+            continue
+        path_obj = Path(path_str)
+        if _is_temp_or_test_artifact(path_obj):
+            continue
+        is_archive = path_obj.suffix.lower() in _ARCHIVE_EXTENSIONS
+        is_generated_archive = _is_within(path_obj, archive_root)
+        if is_archive or is_generated_archive:
+            continue
+        filtered_matches.append(item)
+
+    if not filtered_matches:
+        return result
+
+    filtered_result = dict(result)
+    filtered_result["results"] = filtered_matches
+    filtered_result["count"] = len(filtered_matches)
+    first_path = str(filtered_matches[0].get("path", "") or "").strip() if filtered_matches else ""
+    filtered_result["file_path"] = first_path
+    filtered_result["filtered_archive_count"] = len(matches) - len(filtered_matches)
+    return filtered_result
+
+
+_FOLLOW_UP_ZIP_RE = re.compile(
+    r'\bzip\b.{0,80}\b(them|those|it|files?|results?|found|searched|previous search)\b'
+    r'|\b(previous search|searched|found)\b.{0,80}\bzip\b'
+    r'|\bzip searched\b',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _try_direct_zip_from_search_bundle(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = user_query.split("## Context from Previous Turn")[0]
+    raw_query = raw_query.split("## Session State")[0].strip()
+
+    if _FRESH_SEARCH_RE.search(raw_query):
+        return None
+    if not _FOLLOW_UP_ZIP_RE.search(raw_query):
+        return None
+
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+    from src.files.features.archives import zip_folder  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+    bundle_dir = Path(str(entities.get("search_bundle_dir", "") or "").strip())
+    if not bundle_dir.exists() or not bundle_dir.is_dir():
+        return None
+
+    archive_path = get_your_data_dir("archives", f"{bundle_dir.name}.zip")
+    result = zip_folder(str(bundle_dir), str(archive_path))
+
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Zip failed."),
+            "action": "react_response",
+        }
+
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = result.get("file_path", "")
+
+    return {
+        "status": "success",
+        "message": f"Created zip archive for the previous search results: {result.get('file_path', '')}",
+        "action": "react_response",
+        "file_path": result.get("file_path", ""),
+    }
+
+
+def _format_precise_search_response(mode: str, term: str, result: Dict[str, Any]) -> str:
+    matches = result.get("results", []) or []
+    count = int(result.get("count", 0) or 0)
+    lines: List[str] = []
+
+    if mode == "named_search":
+        if count == 0:
+            return f"I couldn't find any matching file named '{term}' on the detected drives."
+        if count == 1:
+            return f"Yes — I found 1 matching item named '{term}':\n{matches[0].get('path', '')}"
+        lines.append(f"Yes — I found {count} matching items named '{term}'.")
+    else:
+        if count == 0:
+            return f"I couldn't find any files with '{term}' in the filename on the detected drives."
+        lines.append(f"I found {count} file(s) with '{term}' in the filename on the detected drives.")
+
+    preview = matches[:10]
+    if preview:
+        lines.append("")
+        lines.append("Top matches:")
+        lines.extend(f"- {item.get('path', '')}" for item in preview)
+    if count > len(preview):
+        lines.append("")
+        lines.append(f"Showing {len(preview)} of {count} matches.")
+    return "\n".join(lines)
+
+
+def _try_precise_full_computer_search(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    parsed = _parse_precise_full_computer_search(user_query)
+    if not parsed:
+        return None
+
+    from src.files.features.search import search_file_all_drives  # noqa: PLC0415
+
+    result = search_file_all_drives(
+        query=parsed["term"],
+        extensions=parsed.get("extensions"),
+        limit=parsed.get("limit", 50),
+        include_folders=parsed.get("include_folders", True),
+    )
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Search failed."),
+            "action": "react_response",
+        }
+
+    result = _filter_precise_search_results(user_query, result)
+    result = _stage_precise_search_results(parsed["term"], result)
+
+    paths = [str(item.get("path", "") or "").strip() for item in result.get("results", []) if str(item.get("path", "") or "").strip()]
+
+    _save_precise_search_context(result, parsed["term"])
+    first_path = str(result.get("file_path", "") or "").strip()
+    if artifacts_out is not None and first_path:
+        artifacts_out["file_path"] = first_path
+    if artifacts_out is not None and paths:
+        artifacts_out["found_paths"] = paths
+    bundle_dir = str(result.get("search_bundle_dir", "") or "").strip()
+    if artifacts_out is not None and bundle_dir:
+        artifacts_out["search_bundle_dir"] = bundle_dir
+
+    return {
+        "status": "success",
+        "message": _format_precise_search_response(parsed["mode"], parsed["term"], result),
+        "action": "react_response",
+        "raw": result,
+    }
 
 def _build_skill_context() -> str:
     """Build the files-agent system prompt with real OS paths injected from skill_context.md."""
@@ -44,7 +348,7 @@ def _build_skill_context() -> str:
                     "  Folders at C:\\ root may include user project folders "
                     "(e.g. C:\\Hrishikesh, C:\\Projects, etc.) — these are NOT under Home.\n"
                 )
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             pass
 
     # Load user-defined personal folders from settings.json
@@ -62,7 +366,7 @@ def _build_skill_context() -> str:
                 "  Rule: when the user mentions one of these exact names (e.g. 'payslips', 'neo'),"
                 " call list_directory(<exact path>) DIRECTLY \u2014 never use search_file_all_drives for a known folder.  \n"
             )
-    except Exception:
+    except (OSError, TypeError, ValueError):
         pass
 
     # Load template and substitute placeholders.
@@ -97,7 +401,7 @@ def _build_all_tools() -> Dict[str, Any]:
         cleanup_app_caches, archive_old_files, resolve_shortcut,
         get_file_hash, list_running_apps,
         collect_files_to_folder,
-        save_search_manifest, collect_files_from_manifest,
+        save_search_manifest, collect_files_from_manifest, zip_files_from_manifest,
         undo_last_file_operation,
         list_file_operations,
     )
@@ -125,8 +429,7 @@ def _build_all_tools() -> Dict[str, Any]:
     def write_text_file(path: str, content: str) -> dict:
         """Write *content* as plain text to *path*, creating or overwriting the file."""
         try:
-            from pathlib import Path as _Path
-            _p = _Path(path).expanduser()
+            _p = Path(path).expanduser()
             _p.parent.mkdir(parents=True, exist_ok=True)
             _p.write_text(content, encoding="utf-8")
             return {
@@ -135,7 +438,7 @@ def _build_all_tools() -> Dict[str, Any]:
                 "bytes_written": len(content.encode("utf-8")),
                 "message": f"Written {len(content)} character(s) to '{_p}'.",
             }
-        except Exception as exc:
+        except (OSError, TypeError, ValueError) as exc:
             return {"status": "error", "message": f"Error writing file: {exc}"}
 
     return {
@@ -165,6 +468,7 @@ def _build_all_tools() -> Dict[str, Any]:
         # Archives & Compression
         "zip_folder":              zip_folder,
         "zip_files":               zip_files,
+        "zip_files_from_manifest": zip_files_from_manifest,
         "unzip_file":              unzip_file,
         "list_archive_contents":   list_archive_contents,
         # Write & Report
@@ -213,7 +517,7 @@ def _get_tool_map_for_react(
         filtered = {n: all_tools[n] for n in selected if n in all_tools}
         if filtered:
             return filtered
-    except Exception as exc:
+    except _FILES_ORCHESTRATOR_ERRORS as exc:
         import logging as _lg
         _lg.getLogger("files.orchestrator").warning(
             "[tool-map] FAISS filtering failed (%s) — using full tool map", exc
@@ -235,7 +539,7 @@ def _maybe_save_manifest(artifacts_out: Optional[Dict[str, Any]]) -> None:
         _lg.getLogger("files.orchestrator").info(
             "[manifest] saved %d paths to octa_manifest.txt", len(found)
         )
-    except Exception as exc:
+    except _FILES_ORCHESTRATOR_ERRORS as exc:
         import logging as _lg
         _lg.getLogger("files.orchestrator").warning("[manifest] save failed: %s", exc)
 
@@ -458,7 +762,7 @@ def _try_direct_copy_from_manifest(
         try:
             from src.agent.manifest.context_manifest import clear_context as _cc  # noqa: PLC0415
             _cc()
-        except Exception:
+        except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError):
             pass
     else:
         message = f"❌ Copy failed: {result.get('message', 'unknown error')}"
@@ -534,7 +838,7 @@ def _try_background_job(
     try:
         from src.agent.manifest.job_manifest import create_job, update_job  # noqa: PLC0415
         from src.agent.manifest.job_runner import submit_job                 # noqa: PLC0415
-    except Exception as exc:
+    except _FILES_ORCHESTRATOR_ERRORS as exc:
         import logging as _lg
         _lg.getLogger("files.orchestrator").warning(
             "[bg-scan] job manifest/runner unavailable (%s) — running synchronously", exc
@@ -618,7 +922,7 @@ def _try_background_job(
                     for child in c_root.iterdir():
                         if child.is_dir() and child.name.lower() not in _skip:
                             search_roots.append(str(child))
-            except Exception:
+            except (OSError, RuntimeError, ValueError):
                 pass
 
             # Add other drive roots (D:\, E:\, …)
@@ -630,7 +934,7 @@ def _try_background_job(
                         drive = Path(f"{d}:\\")
                         if drive.exists():
                             search_roots.append(str(drive))
-                except Exception:
+                except (OSError, RuntimeError, ValueError):
                     pass
 
             for i, ext in enumerate(_scan_exts):
@@ -646,7 +950,7 @@ def _try_background_job(
                             p = entry.get("path", "")
                             if p:
                                 all_paths.append(p)
-                    except Exception:
+                    except _FILES_ORCHESTRATOR_ERRORS:
                         pass
 
             # Deduplicate preserving order
@@ -703,7 +1007,7 @@ def _try_background_job(
                     user_query=_raw_query,
                     artifacts_out={},
                 )
-            except Exception:
+            except _FILES_ORCHESTRATOR_ERRORS:
                 res = run_skill_react(
                     skill_name="files",
                     skill_context=_skill_context,
@@ -764,17 +1068,27 @@ def execute_with_llm_orchestration(
     Primary path: DAG planner (2 LLM calls regardless of task length).
     Fallback:      ReAct loop (1 LLM call per step, up to 6 iterations).
     """
+    del agent_id
     # ── Pre-flight: copy-from-manifest bypass (no LLM needed) ────────────
     direct = _try_direct_copy_from_manifest(user_query, artifacts_out)
     if direct is not None:
         return direct
+
+    direct_zip = _try_direct_zip_from_search_bundle(user_query, artifacts_out)
+    if direct_zip is not None:
+        return direct_zip
+
+    # ── Pre-flight: deterministic targeted full-computer search ───────────
+    precise = _try_precise_full_computer_search(user_query, artifacts_out)
+    if precise is not None:
+        return precise
 
     # ── Background dispatch: heavy full-disk scans run async ──────────────
     try:
         bg = _try_background_job(user_query, artifacts_out)
         if bg is not None:
             return bg
-    except Exception as _bg_exc:
+    except _FILES_ORCHESTRATOR_ERRORS as _bg_exc:
         import logging as _bg_log
         _bg_log.getLogger("files.orchestrator").warning(
             "[bg-scan] background dispatch raised %s — running synchronously", _bg_exc
@@ -797,7 +1111,7 @@ def execute_with_llm_orchestration(
         )
         _maybe_save_manifest(artifacts_out)  # safety net — DAG engine already tries this
         return result
-    except Exception as dag_exc:
+    except _FILES_ORCHESTRATOR_ERRORS as dag_exc:
         import logging as _logging
         _logging.getLogger("files.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
@@ -813,9 +1127,13 @@ def execute_with_llm_orchestration(
         )
         _maybe_save_manifest(artifacts_out)  # ReAct engine does NOT auto-save manifest
         return result
-    except Exception as exc:
+    except _FILES_ORCHESTRATOR_ERRORS as exc:
         return {
             "status": "error",
             "message": f"❌ Files skill error: {exc}",
             "action": "react_response",
         }
+
+
+parse_precise_full_computer_search = _parse_precise_full_computer_search
+filter_precise_search_results = _filter_precise_search_results

@@ -4,6 +4,7 @@ Octa Bot Agent Hub — main Streamlit entry point.
 from __future__ import annotations
 
 import logging
+import json
 from copy import deepcopy
 
 import streamlit as st
@@ -11,7 +12,7 @@ import streamlit.components.v1 as components
 
 from src.agent.core.agent_manager import get_agent_manager
 from src.agent.core.process_manager import cleanup_stale, get_agent_status
-from src.agent.ui.dashboard.agent_card import show_agent_card
+from src.agent.runtime_paths import get_runtime_state_path
 from src.agent.ui.dashboard.configure_panel import show_configure_panel
 from src.agent.ui.dashboard.create_form import show_create_agent_form
 from src.agent.ui.dashboard.helpers import _logo_b64, _logo_icon
@@ -62,25 +63,85 @@ def _startup() -> None:
 _startup()
 
 
-def _get_available_pa_skill_keys(manager) -> list[str]:
-    """Return PA-attachable skills currently present on the dashboard."""
+def _get_available_pa_skill_keys() -> list[str]:
+    """Return all PA-attachable skills from the shared skill registry."""
     try:
         from src.agent.workflows.agent_registry import AGENT_REGISTRY
     except Exception:
         AGENT_REGISTRY = {}
 
-    created_skill_types = {
-        str(agent.get("type", "")).strip()
-        for agent in manager.list_agents()
-        if str(agent.get("type", "")).strip()
-        and str(agent.get("type", "")).strip() not in _PA_SKILL_EXCLUDED_TYPES
-    }
-
     return [
         key
         for key in AGENT_REGISTRY.keys()
-        if key in created_skill_types and key not in _PA_SKILL_EXCLUDED_TYPES
+        if key not in _PA_SKILL_EXCLUDED_TYPES
     ]
+
+
+def _build_skill_catalog(manager, assistants: list[dict]) -> list[dict]:
+    """Build the dashboard skill catalog from the shared skill registry."""
+    try:
+        from src.agent.workflows.agent_registry import AGENT_REGISTRY
+    except Exception:
+        AGENT_REGISTRY = {}
+    try:
+        from src.agent.hub.skill_help import get_skill_help_doc, get_skill_help_preview
+    except Exception:
+        get_skill_help_doc = None
+        get_skill_help_preview = None
+
+    agent_types = manager.get_agent_types()
+    usage_counts: dict[str, int] = {}
+    enabled_by_skill: dict[str, list[str]] = {}
+    for assistant in assistants:
+        for skill in assistant.get("skills", []) or []:
+            normalized = str(skill).strip()
+            if normalized:
+                usage_counts[normalized] = usage_counts.get(normalized, 0) + 1
+                enabled_by_skill.setdefault(normalized, []).append(str(assistant.get("id", "")).strip())
+
+    catalog = []
+    for key in _get_available_pa_skill_keys():
+        meta = agent_types.get(key, {})
+        help_doc = get_skill_help_doc(key) if get_skill_help_doc else None
+        description = get_skill_help_preview(key) if get_skill_help_preview else ""
+        if not description:
+            description = str(AGENT_REGISTRY.get(key, {}).get("description", "")).strip()
+        if not description:
+            description = str(meta.get("description", "")).strip()
+        catalog.append(
+            {
+                "key": key,
+                "name": str(help_doc.title if help_doc else meta.get("name", key.replace("_", " ").title())),
+                "icon": str(meta.get("icon", "🔧")),
+                "description": description,
+                "help_markdown": help_doc.body if help_doc else "",
+                "enabled_assistant_ids": enabled_by_skill.get(key, []),
+                "assistant_count": usage_counts.get(key, 0),
+            }
+        )
+    return catalog
+
+
+def _update_skill_assignments(skill_key: str, selected_pa_ids: list[str], assistants: list[dict]) -> bool:
+    """Enable or disable one skill across assistants from the dashboard."""
+    from src.agent.hub.pa_manager import update_assistant
+
+    selected = {str(pa_id).strip() for pa_id in selected_pa_ids if str(pa_id).strip()}
+    changed = False
+    for assistant in assistants:
+        pa_id = str(assistant.get("id", "")).strip()
+        if not pa_id:
+            continue
+        current_skills = [str(skill).strip() for skill in assistant.get("skills", []) if str(skill).strip()]
+        has_skill = skill_key in current_skills
+        should_have_skill = pa_id in selected
+        if should_have_skill and not has_skill:
+            update_assistant(pa_id, skills=current_skills + [skill_key])
+            changed = True
+        elif has_skill and not should_have_skill:
+            update_assistant(pa_id, skills=[skill for skill in current_skills if skill != skill_key])
+            changed = True
+    return changed
 
 
 def _current_nav_state() -> dict:
@@ -146,6 +207,19 @@ def _open_pa_workspace(pa_id: str, url: str | None = None, push_history: bool = 
     st.session_state.dashboard_scroll_target = None
 
 
+def _workspace_composer_queue_path(pa_id: str):
+    return get_runtime_state_path("runtime_state", "dashboard_composer", f"{pa_id}.json", create_parent=True)
+
+
+def _enqueue_workspace_command(pa_id: str, command: str) -> None:
+    payload = {
+        "pa_id": pa_id,
+        "command": command,
+    }
+    queue_path = _workspace_composer_queue_path(pa_id)
+    queue_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
 def _close_pa_workspace() -> None:
     """Return from the embedded assistant workspace back to the dashboard home."""
     _go_home(push_history=False)
@@ -159,6 +233,11 @@ def _render_pa_workspace(pa: dict, manager) -> None:
 
     st.markdown(
         f"""
+        <style>
+        .main .block-container {{
+            padding-bottom: 0.75rem !important;
+        }}
+        </style>
         <div id="workspace-toolbar-{pa['id']}" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
                     background:rgba(15,23,42,0.78);border:1px solid rgba(99,102,241,0.18);border-radius:16px;
                     padding:10px 14px;margin-bottom:12px;backdrop-filter:blur(10px);box-shadow:0 14px 36px rgba(15,23,42,0.22);">
@@ -168,11 +247,6 @@ def _render_pa_workspace(pa: dict, manager) -> None:
             </div>
             <div style="font-size:0.78rem;color:#64748b;">Dashboard workspace</div>
         </div>
-        <style>
-        .main .block-container {{
-            padding-bottom: 0.75rem !important;
-        }}
-        </style>
         """,
         unsafe_allow_html=True,
     )
@@ -203,7 +277,7 @@ def _render_pa_workspace(pa: dict, manager) -> None:
                 st.rerun()
 
     if st.session_state.get("configure_pa_id") == pa["id"]:
-        _render_pa_configure_panel(pa, manager)
+        _render_pa_configure_panel(pa)
 
     if not workspace_url:
         st.markdown(
@@ -216,12 +290,12 @@ def _render_pa_workspace(pa: dict, manager) -> None:
         return
 
     if "?" in workspace_url:
-        embedded_url = f"{workspace_url}&embedded=1"
+        embedded_url = f"{workspace_url}&embedded=1&external_composer=1"
     else:
-        embedded_url = f"{workspace_url}?embedded=1"
+        embedded_url = f"{workspace_url}?embedded=1&external_composer=1"
 
     st.markdown(
-        f"<div id='workspace-frame-wrap-{pa['id']}' style='background:rgba(15,23,42,0.75);border:1px solid rgba(99,102,241,0.18);border-radius:20px;padding:8px;box-shadow:0 18px 48px rgba(15,23,42,0.28);overflow:hidden;'></div>",
+        f"<div id='workspace-frame-wrap-{pa['id']}' style='background:rgba(15,23,42,0.75);border:1px solid rgba(99,102,241,0.18);border-radius:20px;padding:8px;box-shadow:0 18px 48px rgba(15,23,42,0.28);overflow:hidden;box-sizing:border-box;'></div>",
         unsafe_allow_html=True,
     )
     components.iframe(embedded_url, height=780, scrolling=False)
@@ -229,6 +303,29 @@ def _render_pa_workspace(pa: dict, manager) -> None:
         f"""
         <script>
         (function() {{
+            var resizeObserver = null;
+            var contentWindow = null;
+
+            function measureContentHeight(frame) {{
+                try {{
+                    var doc = frame.contentDocument || (frame.contentWindow && frame.contentWindow.document);
+                    if (!doc) {{
+                        return null;
+                    }}
+                    var body = doc.body;
+                    var html = doc.documentElement;
+                    return Math.max(
+                        body ? body.scrollHeight : 0,
+                        body ? body.offsetHeight : 0,
+                        html ? html.scrollHeight : 0,
+                        html ? html.offsetHeight : 0,
+                        html ? html.clientHeight : 0
+                    );
+                }} catch (error) {{
+                    return null;
+                }}
+            }}
+
             function applyWorkspaceLayout() {{
                 var parentDoc = window.parent.document;
                 var frame = Array.from(parentDoc.querySelectorAll('iframe')).find(function(node) {{
@@ -242,27 +339,44 @@ def _render_pa_workspace(pa: dict, manager) -> None:
                 if (frame.parentElement !== wrap) {{
                     wrap.appendChild(frame);
                 }}
-                var top = wrap.getBoundingClientRect().top;
-                var available = Math.max(520, window.parent.innerHeight - top - 18);
+                var frameHeight = measureContentHeight(frame) || 780;
                 frame.style.width = '100%';
-                frame.style.height = available + 'px';
+                frame.style.height = frameHeight + 'px';
                 frame.style.border = '0';
                 frame.style.borderRadius = '16px';
-                frame.setAttribute('height', String(available));
-                wrap.style.height = available + 'px';
+                frame.style.display = 'block';
+                frame.setAttribute('height', String(frameHeight));
+                wrap.style.height = 'auto';
+                wrap.style.maxHeight = 'none';
                 wrap.style.overflow = 'hidden';
+                wrap.style.boxSizing = 'border-box';
                 if (toolbar) {{
                     toolbar.style.position = 'sticky';
                     toolbar.style.top = '0';
                     toolbar.style.zIndex = '20';
                 }}
-                var appContainer = parentDoc.querySelector('[data-testid="stAppViewContainer"]');
-                if (appContainer) {{
-                    appContainer.style.overflowY = 'hidden';
+                if (contentWindow !== frame.contentWindow) {{
+                    contentWindow = frame.contentWindow;
+                    if (resizeObserver) {{
+                        resizeObserver.disconnect();
+                        resizeObserver = null;
+                    }}
+                    try {{
+                        var observedDoc = frame.contentDocument || (frame.contentWindow && frame.contentWindow.document);
+                        if (observedDoc && observedDoc.body && window.parent.ResizeObserver) {{
+                            resizeObserver = new window.parent.ResizeObserver(function() {{
+                                applyWorkspaceLayout();
+                            }});
+                            resizeObserver.observe(observedDoc.body);
+                        }}
+                    }} catch (error) {{
+                    }}
                 }}
-                window.parent.scrollTo({{ top: 0, behavior: 'instant' }});
             }}
+            window.addEventListener('load', applyWorkspaceLayout);
             applyWorkspaceLayout();
+            setTimeout(applyWorkspaceLayout, 120);
+            setTimeout(applyWorkspaceLayout, 450);
             window.parent.addEventListener('resize', applyWorkspaceLayout);
         }})();
         </script>
@@ -270,8 +384,52 @@ def _render_pa_workspace(pa: dict, manager) -> None:
         height=0,
     )
 
+    st.markdown(
+        f"""
+        <style>
+        .st-key-workspace_composer_shell_{pa['id']} {{
+            position: sticky;
+            bottom: 0;
+            z-index: 30;
+            padding-top: 0.6rem;
+            padding-bottom: 0.35rem;
+            background: linear-gradient(180deg, rgba(2,6,23,0) 0%, rgba(2,6,23,0.92) 20%, rgba(2,6,23,0.98) 100%);
+        }}
+        .st-key-workspace_composer_shell_{pa['id']} [data-testid="stHorizontalBlock"] {{
+            align-items: end;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-def _render_pa_configure_panel(pa: dict, manager) -> None:
+    with st.container(key=f"workspace_composer_shell_{pa['id']}"):
+        with st.form(f"workspace_composer_form_{pa['id']}", clear_on_submit=True):
+            input_col, send_col = st.columns([8.6, 1.4])
+            with input_col:
+                workspace_input = st.text_input(
+                    "Message",
+                    placeholder=f"Ask {pa['name']}…",
+                    key=f"workspace_composer_input_{pa['id']}",
+                    label_visibility="collapsed",
+                    disabled=not bool(status),
+                )
+            with send_col:
+                submitted = st.form_submit_button(
+                    "Send",
+                    use_container_width=True,
+                    type="primary",
+                    disabled=not bool(status),
+                )
+
+        if submitted:
+            workspace_input = (workspace_input or "").strip()
+            if workspace_input:
+                _enqueue_workspace_command(pa["id"], workspace_input)
+                st.rerun()
+
+
+def _render_pa_configure_panel(pa: dict) -> None:
     """Inline dashboard configure panel for a Personal Assistant."""
     from src.agent.hub.pa_manager import load_assistants, update_assistant
 
@@ -283,7 +441,7 @@ def _render_pa_configure_panel(pa: dict, manager) -> None:
         st.error(f"Could not load channel registry: {exc}")
         return
 
-    available_skills = _get_available_pa_skill_keys(manager)
+    available_skills = _get_available_pa_skill_keys()
     current_skills = [skill for skill in fresh.get("skills", []) if skill not in _PA_SKILL_EXCLUDED_TYPES]
     skill_options = list(dict.fromkeys(current_skills + available_skills))
     channel_options = ["dashboard", "telegram"]
@@ -302,7 +460,7 @@ def _render_pa_configure_panel(pa: dict, manager) -> None:
     )
 
     if not skill_options:
-        st.warning("No Dashboard skills are available yet. Add a skill first, then attach it to this assistant.")
+        st.warning("No assignable skills are available right now.")
 
     with st.form(f"dashboard_configure_pa_{fresh['id']}"):
         new_name = st.text_input("Assistant Name", value=fresh["name"])
@@ -310,7 +468,7 @@ def _render_pa_configure_panel(pa: dict, manager) -> None:
             "Skills",
             options=skill_options,
             default=[skill for skill in current_skills if skill in skill_options],
-            help="Only skills currently available on the Dashboard can be attached here.",
+            help="These are the shared skills available to this Personal Assistant.",
         )
         new_channels = st.multiselect(
             "Channels",
@@ -365,7 +523,7 @@ def _render_pa_configure_panel(pa: dict, manager) -> None:
                 st.rerun()
 
 
-def _render_create_pa_panel(manager) -> None:
+def _render_create_pa_panel() -> None:
     """Inline panel to create a Personal Assistant."""
     skill_meta = {
         "email": {
@@ -420,7 +578,7 @@ def _render_create_pa_panel(manager) -> None:
         },
     }
 
-    available_skill_keys = _get_available_pa_skill_keys(manager)
+    available_skill_keys = _get_available_pa_skill_keys()
     if "create_pa_skills" not in st.session_state:
         st.session_state.create_pa_skills = set()
     else:
@@ -431,7 +589,7 @@ def _render_create_pa_panel(manager) -> None:
         <div style="background:linear-gradient(135deg,rgba(99,102,241,0.12) 0%,rgba(139,92,246,0.08) 100%);
                     border:1px solid rgba(99,102,241,0.25);border-radius:16px;padding:18px 20px;margin:18px 0 20px 0;">
             <div style="font-size:1.2rem;font-weight:800;color:#e2e8f0;">🤖 Create Personal Assistant</div>
-            <div style="color:#94a3b8;font-size:0.84rem;margin-top:4px;">Only skills currently added to this Dashboard are available here.</div>
+            <div style="color:#94a3b8;font-size:0.84rem;margin-top:4px;">Choose from the shared skill catalog available to Personal Assistants.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -454,7 +612,7 @@ def _render_create_pa_panel(manager) -> None:
     )
 
     if not available_skill_keys:
-        st.warning("No Dashboard skills are available yet. Add at least one skill from 'Add Agent / Skill' before creating a Personal Assistant.")
+        st.warning("No assignable skills are available right now.")
     else:
         cols = st.columns(2)
         for idx, key in enumerate(available_skill_keys):
@@ -509,7 +667,7 @@ def _render_create_pa_panel(manager) -> None:
             if not pa_name.strip():
                 st.error("Please give your assistant a name.")
             elif not available_skill_keys:
-                st.error("Add at least one Dashboard skill first, then create the assistant.")
+                st.error("No assignable skills are available yet.")
             elif not selected_skills:
                 st.error("Enable at least one skill so your assistant can help you.")
             elif not tg_token.strip():
@@ -710,7 +868,8 @@ def main() -> None:
     from src.agent.hub.pa_manager import load_assistants
 
     assistants = load_assistants()
-    skill_count = sum(1 for agent in agents if agent["type"] not in {"telegram", "whatsapp"})
+    skill_catalog = _build_skill_catalog(manager, assistants)
+    skill_count = len(skill_catalog)
 
     with st.sidebar:
         st.markdown(
@@ -856,7 +1015,7 @@ def main() -> None:
         return
 
     if st.session_state.show_create_pa_panel:
-        _render_create_pa_panel(manager)
+        _render_create_pa_panel()
 
     if st.session_state.show_create_form:
         show_create_agent_form()
@@ -867,7 +1026,7 @@ def main() -> None:
 
     cfg_pa = next((assistant for assistant in assistants if assistant["id"] == st.session_state.configure_pa_id), None)
     if cfg_pa:
-        _render_pa_configure_panel(cfg_pa, manager)
+        _render_pa_configure_panel(cfg_pa)
 
     st.markdown("<div id='skills-section'></div>", unsafe_allow_html=True)
     st.markdown(
@@ -880,30 +1039,73 @@ def main() -> None:
     with search_col:
         search = st.text_input("Search skills", placeholder="Search by name or type", label_visibility="collapsed")
     with filter_col:
-        filter_types = [key for key in manager.get_agent_types().keys() if key not in {"telegram", "whatsapp"}]
+        filter_types = [skill["key"] for skill in skill_catalog]
         filter_type = st.selectbox("Filter by type", ["All"] + filter_types, label_visibility="collapsed")
 
-    visible_agents = [agent for agent in agents if agent["type"] not in {"telegram", "whatsapp"}]
+    visible_skills = list(skill_catalog)
     if search:
         query = search.lower()
-        visible_agents = [
-            agent
-            for agent in visible_agents
-            if query in agent["name"].lower() or query in agent["type"].lower()
+        visible_skills = [
+            skill
+            for skill in visible_skills
+            if query in skill["name"].lower()
+            or query in skill["key"].lower()
+            or query in skill["description"].lower()
         ]
     if filter_type != "All":
-        visible_agents = [agent for agent in visible_agents if agent["type"] == filter_type]
+        visible_skills = [skill for skill in visible_skills if skill["key"] == filter_type]
 
     st.markdown(
-        f"<div style='color:#64748b;font-size:0.85rem;margin:16px 0 20px 0;'>Showing {len(visible_agents)} of {skill_count} skill(s)</div>",
+        f"<div style='color:#64748b;font-size:0.85rem;margin:16px 0 20px 0;'>Showing {len(visible_skills)} of {skill_count} skill(s)</div>",
         unsafe_allow_html=True,
     )
 
-    if visible_agents:
-        cols = st.columns(4)
-        for idx, agent in enumerate(visible_agents):
-            with cols[idx % 4]:
-                show_agent_card(agent)
+    if visible_skills:
+        cols = st.columns(5)
+        for idx, skill in enumerate(visible_skills):
+            with cols[idx % 5]:
+                usage_count = skill["assistant_count"]
+                usage_badge = (
+                    f"<span style='background:rgba(34,197,94,0.16);color:#86efac;padding:2px 8px;border-radius:999px;font-size:0.68rem;font-weight:700;'>Enabled on {usage_count} assistant{'s' if usage_count != 1 else ''}</span>"
+                    if usage_count
+                    else "<span style='background:rgba(148,163,184,0.12);color:#94a3b8;padding:2px 8px;border-radius:999px;font-size:0.68rem;font-weight:700;'>Not enabled yet</span>"
+                )
+                with st.container(border=True):
+                    st.markdown(
+                        f"""
+                        <div style="border:1px solid rgba(99,102,241,0.22);border-radius:12px;padding:10px 10px 8px;background:rgba(15,23,42,0.28);margin-bottom:8px;">
+                        <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+                            <span style="font-size:1.1rem;line-height:1;margin-top:1px;">{skill['icon']}</span>
+                            <div>
+                                <div style="font-size:0.84rem;font-weight:800;color:#e2e8f0;line-height:1.15;">{skill['key']}-agent-skill</div>
+                                <div style="font-size:0.7rem;color:#94a3b8;line-height:1.2;">{skill['name']}</div>
+                            </div>
+                        </div>
+                        <div style="font-size:0.76rem;color:#94a3b8;line-height:1.4;margin-bottom:8px;min-height:52px;">
+                            {skill['description']}
+                        </div>
+                        <div style="margin-bottom:2px;">{usage_badge}</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    with st.expander("View Help"):
+                        st.markdown(skill["help_markdown"] or "Help content is not available for this skill yet.")
+                        st.caption("Assistant Access")
+                        pa_options = [assistant["id"] for assistant in assistants]
+                        selected_pa_ids = st.multiselect(
+                            "Enabled for assistants",
+                            options=pa_options,
+                            default=[pa_id for pa_id in skill["enabled_assistant_ids"] if pa_id in pa_options],
+                            format_func=lambda pa_id: next((assistant["name"] for assistant in assistants if assistant["id"] == pa_id), pa_id),
+                            key=f"skill_assign_{skill['key']}",
+                            help="Choose which Personal Assistants can use this skill.",
+                        )
+                        if st.button("Save Access", key=f"save_skill_assign_{skill['key']}", use_container_width=True):
+                            if _update_skill_assignments(skill["key"], selected_pa_ids, assistants):
+                                st.toast(f"Updated {skill['name']} access.", icon="✅")
+                                st.rerun()
+                            st.info("No changes to save.")
     else:
         st.markdown(
             "<div style='background:rgba(255,107,107,0.1);border:1px solid rgba(255,107,107,0.2);padding:20px;border-radius:12px;text-align:center;'><div style='color:#ff6b6b;font-weight:600;'>No skills match your filters</div><div style='color:#888;font-size:0.9rem;margin-top:6px;'>Try adjusting your search terms or filters.</div></div>",

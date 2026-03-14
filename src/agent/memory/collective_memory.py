@@ -15,9 +15,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from src.agent.runtime_paths import get_existing_root_runtime_state_path
+
 _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
-_AGENTS_JSON = _PROJECT_ROOT / "agents.json"
-_RUNNING_JSON = _PROJECT_ROOT / "running_agents.json"
+_AGENTS_JSON = get_existing_root_runtime_state_path("agents.json")
+_RUNNING_JSON = get_existing_root_runtime_state_path("running_agents.json")
 _MEMORY_BASE = _PROJECT_ROOT / "memory"
 
 # How much of each agent's episodic memory to include (last N chars = most recent)

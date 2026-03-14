@@ -22,8 +22,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Dict, List, Optional
+
+from src.agent.runtime_paths import get_your_data_dir
 
 logger = logging.getLogger("stock_service")
 
@@ -33,7 +35,7 @@ def _log_analysis_step(step: str, symbol: str, status: str) -> None:
     try:
         from src.agent.logging.log_manager import bind_request, new_request_id
         bind_request(new_request_id())
-    except Exception:
+    except (ImportError, OSError, RuntimeError, ValueError):
         pass
     logger.info("[stock_analysis] step=%s symbol=%s status=%s", step, symbol, status)
 
@@ -45,14 +47,49 @@ def _yf():
     try:
         import yfinance as yf
         return yf
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "yfinance is not installed. Run: pip install yfinance"
-        )
+        ) from exc
 
 
 def _ticker(symbol: str):
     return _yf().Ticker(symbol.upper().strip())
+
+
+def _score_quote_candidate(query: str, quote: Dict[str, Any]) -> int:
+    query_lower = str(query or "").strip().lower()
+    symbol = str(quote.get("symbol") or "")
+    exchange = str(quote.get("exchange") or "")
+    quote_type = str(quote.get("quoteType") or "")
+    shortname = str(quote.get("shortname") or "")
+    longname = str(quote.get("longname") or "")
+    prev_name = str(quote.get("prevName") or "")
+    haystack = f"{shortname} {longname} {prev_name}".lower()
+    tokens = [token for token in re.findall(r"[a-z0-9]+", query_lower) if len(token) > 1]
+
+    score = 0
+    if quote_type == "EQUITY":
+        score += 100
+
+    if exchange in ("NSI", "NSE") or symbol.endswith(".NS"):
+        score += 35
+    elif exchange in ("BSE", "BOM") or symbol.endswith(".BO"):
+        score += 30
+
+    if shortname.lower() == query_lower or longname.lower() == query_lower:
+        score += 80
+    elif shortname.lower().startswith(query_lower + " ") or longname.lower().startswith(query_lower + " "):
+        score += 55
+    elif query_lower and query_lower in haystack:
+        score += 25
+
+    score += sum(6 for token in tokens if token in haystack)
+
+    if prev_name and any(token in prev_name.lower() for token in tokens):
+        score += 10
+
+    return score
 
 
 def resolve_ticker(query: str) -> str:
@@ -83,26 +120,24 @@ def resolve_ticker(query: str) -> str:
         if not quotes:
             logger.warning("[resolve_ticker] No results for '%s' — using as-is", query)
             return query.upper()
-        # Prefer NSE equity (most Indian stocks are on NSE)
-        nse = [
-            q for q in quotes
-            if q.get("exchange") in ("NSI", "NSE") and q.get("quoteType") == "EQUITY"
-        ]
-        if nse:
-            symbol = nse[0]["symbol"]
-            logger.info("[resolve_ticker] '%s' → %s (NSE)", query, symbol)
-            return symbol
-        # Fallback: first equity result on any exchange
         equity = [q for q in quotes if q.get("quoteType") == "EQUITY"]
         if equity:
-            symbol = equity[0]["symbol"]
-            logger.info("[resolve_ticker] '%s' → %s", query, symbol)
+            ranked = sorted(
+                equity,
+                key=lambda item: (
+                    _score_quote_candidate(query, item),
+                    float(item.get("score") or 0),
+                ),
+                reverse=True,
+            )
+            symbol = ranked[0]["symbol"]
+            logger.info("[resolve_ticker] '%s' → %s (ranked equity)", query, symbol)
             return symbol
         # Last resort: first result regardless of type
         symbol = quotes[0]["symbol"]
         logger.info("[resolve_ticker] '%s' → %s (first result)", query, symbol)
         return symbol
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
         logger.warning("[resolve_ticker] Search failed for '%s': %s — using as-is", query, exc)
         return query.upper()
 
@@ -183,7 +218,7 @@ def get_quote(symbol: str) -> Dict[str, Any]:
             "sector":        info.get("sector", ""),
             "industry":      info.get("industry", ""),
         }
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:  # noqa: BLE001
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}
 
 
@@ -225,7 +260,7 @@ def get_historical_data(symbol: str, period: str = "1mo", interval: str = "1d") 
             "bars":     bars,
             "count":    len(bars),
         }
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}
 
 
@@ -302,7 +337,7 @@ def technical_analysis(symbol: str, period: str = "6mo") -> Dict[str, Any]:
                 "sma200": sma200, "vs_sma200": price_vs_ma(latest, sma200),
             },
         }
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}
 
 
@@ -496,7 +531,7 @@ def risk_score(symbol: str, period: str = "1y") -> Dict[str, Any]:
             "risk_score":            composite,
             "risk_level":            risk_level,
         }
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}
 
 
@@ -581,7 +616,7 @@ def pattern_detection(symbol: str, period: str = "3mo") -> Dict[str, Any]:
             info     = t.info
             w52_high = _safe_float(info.get("fiftyTwoWeekHigh"))
             w52_low  = _safe_float(info.get("fiftyTwoWeekLow"))
-        except Exception:
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):  # noqa: BLE001
             pass
 
         # ── VWAP — 5-day hourly rolling ────────────────────────────────────────
@@ -605,7 +640,7 @@ def pattern_detection(symbol: str, period: str = "3mo") -> Dict[str, Any]:
                             sum(((ih[i] + il[i] + ic[i]) / 3) * iv[i] for i in range(n)) / total_vol,
                             4,
                         )
-        except Exception:
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):  # noqa: BLE001
             pass
 
         # ── Volume Profile (POC + Value Area) ─────────────────────────────────
@@ -731,7 +766,7 @@ def pattern_detection(symbol: str, period: str = "3mo") -> Dict[str, Any]:
             "price_position":  price_position,
             "patterns":        patterns if patterns else ["No strong candlestick pattern detected"],
         }
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:  # noqa: BLE001
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}
 
 
@@ -811,7 +846,7 @@ def portfolio_analysis(symbols: List[str], period: str = "1y") -> Dict[str, Any]
             "diversification_score": diversity_score,
             "diversification":    diversity_label,
         }
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:  # noqa: BLE001
         return {"status": "error", "message": str(exc)}
 
 
@@ -888,7 +923,7 @@ def portfolio_suggestions(symbols: List[str]) -> Dict[str, Any]:
             "suggestions":    suggestions,
             "note":           "This is informational only. Not financial advice.",
         }
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:  # noqa: BLE001
         return {"status": "error", "message": str(exc)}
 
 
@@ -965,7 +1000,7 @@ def _llm_classify_headlines(titles: List[str]) -> Optional[List[Dict]]:
         if isinstance(parsed, list) and len(parsed) == len(titles):
             return parsed
         return None
-    except Exception as exc:
+    except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as exc:  # noqa: BLE001
         logger.warning("[sentiment_analysis] LLM classification failed: %s — using keyword fallback", exc)
         return None
 
@@ -1117,14 +1152,14 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
                         ts_epoch = datetime.strptime(
                             str(ts_raw)[:19], "%Y-%m-%dT%H:%M:%S"
                         ).timestamp()
-                    except Exception:
+                    except (TypeError, ValueError):  # noqa: BLE001
                         pass
                 if ts_epoch is not None:
                     try:
                         age_days = (now_ts - ts_epoch) / 86400
                         recency_weight = 1.0 if age_days <= 7 else (0.8 if age_days <= 14 else 0.6)
                         pub_date_str = datetime.utcfromtimestamp(ts_epoch).strftime("%Y-%m-%d")
-                    except Exception:
+                    except (OSError, OverflowError, TypeError, ValueError):  # noqa: BLE001
                         pass
 
             # ── Publisher reliability boost ───────────────────────────────────
@@ -1187,7 +1222,7 @@ def sentiment_analysis(symbol: str) -> Dict[str, Any]:
             "news_items":          scored_items,
             "note":                engine_note,
         }
-    except Exception as exc:
+    except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as exc:  # noqa: BLE001
         return {"status": "error", "symbol": symbol.upper(), "message": str(exc)}
 
 
@@ -1232,7 +1267,7 @@ def compare_stocks(symbols: List[str]) -> Dict[str, Any]:
                 "dividend_yield":_safe_float(info.get("dividendYield", 0), 4),
             })
         return {"status": "success", "symbols": [s.upper() for s in symbols], "comparison": comparison}
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:  # noqa: BLE001
         return {"status": "error", "message": str(exc)}
 
 
@@ -1299,7 +1334,7 @@ def market_overview(indices: Optional[List[str]] = None) -> Dict[str, Any]:
             "market_mood": mood,
             "note":    "SPY=S&P500, QQQ=Nasdaq, DIA=Dow Jones, IWM=Russell2000, VIX=Volatility",
         }
-    except Exception as exc:
+    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:  # noqa: BLE001
         return {"status": "error", "message": str(exc)}
 
 
@@ -1308,7 +1343,7 @@ def market_overview(indices: Optional[List[str]] = None) -> Dict[str, Any]:
 
 def generate_full_report(
     symbol: str,
-    output_dir: str = "data",
+    output_dir: str = "",
     send_to_email: Optional[str] = None,
     llm_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
@@ -1337,6 +1372,7 @@ def generate_full_report(
     Args:
         symbol:        Ticker symbol (e.g. "AAPL", "RELIANCE.NS").
         output_dir:    Directory in which to save the PDF (created if absent).
+                   Defaults to <workspace>/your_data/reports.
         send_to_email: If set, email the PDF to this address using the Gmail agent.
         llm_client:    Optional callable(prompt: str) -> str for narrative generation.
                        If None, an empty narrative is used.
@@ -1366,13 +1402,15 @@ def generate_full_report(
     errors = []
     sections_included = []
     generated_at = datetime.utcnow().isoformat() + "Z"
+    if not output_dir:
+        output_dir = str(get_your_data_dir("reports", create=True))
 
     # ── Step 1–6: Run all analyses (pure math, no LLM) ─────────────────────────
     # Bind a fresh correlation ID for the entire report pipeline
     try:
-        from src.agent.logging.log_manager import bind_correlation, bind_request, new_correlation_id, new_request_id
+        from src.agent.logging.log_manager import bind_correlation, new_correlation_id
         bind_correlation(new_correlation_id())
-    except Exception:
+    except (ImportError, OSError, RuntimeError, ValueError):  # noqa: BLE001
         pass
 
     _log_analysis_step("quote", symbol, "start")
@@ -1392,7 +1430,7 @@ def generate_full_report(
         _log_analysis_step("technical", symbol, "ok")
     else:
         errors.append(f"technical: {tech_data.get('message', 'unknown error')}")
-        _log_analysis_step("technical", symbol, f"error")
+        _log_analysis_step("technical", symbol, "error")
         tech_data = {}
 
     _log_analysis_step("risk", symbol, "start")
@@ -1453,7 +1491,7 @@ def generate_full_report(
                 symbol, quote_data, fund_data, tech_data, risk_data, pattern_data, sentiment_data, llm_client
             )
             _log_analysis_step("narrative_llm", symbol, f"ok chars={len(narrative)}")
-        except Exception as exc:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:  # noqa: BLE001
             errors.append(f"narrative_llm: {exc}")
             _log_analysis_step("narrative_llm", symbol, f"error:{exc}")
             narrative = ""
@@ -1494,7 +1532,7 @@ def generate_full_report(
             )
             emailed_to = send_to_email
             logger.info("[generate_full_report] Report emailed to %s", send_to_email)
-        except Exception as exc:
+        except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError) as exc:  # noqa: BLE001
             errors.append(f"email: {exc}")
 
     _log_analysis_step("build_pdf", symbol, "ok")
@@ -1537,7 +1575,7 @@ def generate_full_report(
             },
             importance="High",
         )
-    except Exception as _mem_err:
+    except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as _mem_err:  # noqa: BLE001
         logger.debug("[generate_full_report] Memory capture skipped: %s", _mem_err)
 
     return {
@@ -1623,6 +1661,6 @@ Plain prose only. Be factual and concise."""
     try:
         response = llm_client(prompt)
         return str(response).strip()
-    except Exception:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError):  # noqa: BLE001
         return ""
 

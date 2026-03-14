@@ -90,6 +90,54 @@ def _build_keyword_map() -> Dict[str, FrozenSet[str]]:
 
 _KEYWORD_MAP: Optional[Dict[str, FrozenSet[str]]] = None
 
+_FRESHNESS_CUES: FrozenSet[str] = frozenset(
+    {
+        "latest",
+        "current",
+        "recent",
+        "today",
+        "now",
+        "news",
+        "headline",
+        "headlines",
+        "update",
+        "updates",
+        "won",
+        "winner",
+        "results",
+        "score",
+    }
+)
+
+_FIRST_PARTY_DATA_HINTS: FrozenSet[str] = frozenset(
+    {
+        "email",
+        "emails",
+        "mail",
+        "gmail",
+        "inbox",
+        "outbox",
+        "attachment",
+        "attachments",
+        "calendar",
+        "meeting",
+        "meetings",
+        "event",
+        "events",
+        "drive",
+        "gdrive",
+        "file",
+        "files",
+        "folder",
+        "folders",
+        "whatsapp",
+        "telegram",
+        "linkedin",
+        "habit",
+        "habits",
+    }
+)
+
 
 def _get_keyword_map() -> Dict[str, FrozenSet[str]]:
     global _KEYWORD_MAP
@@ -233,6 +281,50 @@ def _stem(word: str) -> str:
     return word
 
 
+def _looks_like_fresh_web_query(command: str) -> bool:
+    """Heuristic for freshness-sensitive public-web questions.
+
+    This catches prompts like "who won the latest T20 world cup" even when the
+    user does not explicitly say "search online" or "browse".
+    """
+    lower = str(command or "").lower().strip()
+    if not lower:
+        return False
+
+    words = set(re.findall(r"[a-z]{3,}", lower))
+    stemmed_words = words | {_stem(word) for word in words}
+    if not (_FRESHNESS_CUES & stemmed_words):
+        return False
+
+    # Freshness-sensitive phrasing like "today" or "latest" should not hijack
+    # requests that are clearly about the user's own mailbox, files, calendar,
+    # or other first-party connected systems.
+    if _FIRST_PARTY_DATA_HINTS & stemmed_words:
+        return False
+
+    if re.search(r"\b(my|our)\b", lower):
+        return False
+
+    public_info_signals = (
+        r"\b(who|what|when|where|which|how)\b",
+        r"\b(tell me|show me|find|look up|search)\b",
+        r"\b(world cup|cup|match|tournament|election|news|headline|winner|won|result|score)\b",
+    )
+    return any(re.search(pattern, lower) for pattern in public_info_signals)
+
+
+def _looks_like_pronoun_followup(command: str) -> bool:
+    lower = str(command or "").lower().strip()
+    if not lower:
+        return False
+    return bool(
+        re.search(
+            r"\b(them|those|it|that|these|the files|the folder|the document|the documents|the email|the result|the results)\b",
+            lower,
+        )
+    )
+
+
 def keyword_pre_filter(command: str) -> bool:
     """
     Fast keyword pre-filter — runs BEFORE any LLM call.
@@ -283,6 +375,10 @@ def detect_agents_needed(command: str) -> Optional[List[str]]:
     from src.agent.workflows.agent_registry import registered_agents
 
     valid = set(registered_agents())
+
+    if _looks_like_fresh_web_query(command) and "browser" in valid:
+        logger.info("Router [freshness fast-path]: routing to browser")
+        return ["browser"]
 
     # ── Step 1: keyword pre-filter (0 LLM calls) ────────────────────────────
     if not keyword_pre_filter(command):
@@ -431,7 +527,7 @@ def _build_intent_prompt(
     if session_state:
         relevant = {
             k: v for k, v in session_state.items()
-            if k in ("last_found_paths", "last_found_folder", "last_assistant_action") and v
+            if k in ("last_found_file_path", "last_found_folder", "last_found_bundle_dir", "file_manifest", "found_count", "last_assistant_action") and v
         }
         if relevant:
             state_block = json.dumps(relevant, ensure_ascii=False)[:400]
@@ -527,15 +623,29 @@ def classify_and_route(
 
     valid = set(registered_agents())
 
-    # ── Fast-path: no context + no agent keywords → definite chat ────────────
-    # Saves one LLM call for the very common "casual question" case.
-    if active_context is None and not keyword_pre_filter(command):
-        logger.info("Router [fast-path]: no context, no agent keywords → chat")
+    if (
+        _looks_like_fresh_web_query(command)
+        and "browser" in valid
+        and not (active_context and _looks_like_pronoun_followup(command))
+    ):
+        logger.info("Router [freshness priority]: routing to browser")
         return IntentResult(
-            category="chat",
-            agents=[],
-            reason="fast-path: no agent keywords and no active context",
+            category="fresh_task",
+            agents=["browser"],
+            reason="freshness-priority: public-web query",
         )
+
+    # ── Fast-paths: no context → either freshness browser route or chat ─────
+    # Saves one LLM call for common casual questions while still routing
+    # freshness-sensitive public-web queries to the browser agent.
+    if active_context is None:
+        if not keyword_pre_filter(command):
+            logger.info("Router [fast-path]: no context, no agent keywords → chat")
+            return IntentResult(
+                category="chat",
+                agents=[],
+                reason="fast-path: no agent keywords and no active context",
+            )
 
     # ── LLM three-way classification ─────────────────────────────────────────
     try:
@@ -637,6 +747,14 @@ def classify_and_route(
                     agents=[ctx_agent],
                     reason="keyword fallback: pronoun + active context",
                 )
+
+    if not agents and _looks_like_fresh_web_query(command) and "browser" in valid:
+        logger.info("Router [keyword fallback]: freshness-sensitive query → browser")
+        return IntentResult(
+            category="fresh_task",
+            agents=["browser"],
+            reason="keyword fallback: freshness-sensitive public-web query",
+        )
 
     category = "fresh_task" if agents else "chat"
     logger.info("Router [keyword fallback]: category=%s  agents=%s", category, agents)

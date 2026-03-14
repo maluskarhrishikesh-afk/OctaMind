@@ -79,6 +79,7 @@ replacements.txt
 # Ignore local error notes generated during development
 errors/errors.txt
 errors/new_implementation.txt
+errors/new_features.txt
 
 # Research artifacts: keep only the published paper PDFs in Git
 research/*

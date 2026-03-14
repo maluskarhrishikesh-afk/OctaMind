@@ -290,6 +290,26 @@ details summary span,
 [data-testid="stExpanderDetails"] [data-testid="stWidgetLabel"],
 [data-testid="stExpanderDetails"] label p,
 [data-testid="stExpanderDetails"] label { color: #e0e0e0 !important; font-weight: 600 !important; }
+[data-testid="stExpanderDetails"] p,
+[data-testid="stExpanderDetails"] li,
+[data-testid="stExpanderDetails"] span,
+[data-testid="stExpanderDetails"] strong,
+[data-testid="stExpanderDetails"] em,
+[data-testid="stExpanderDetails"] code,
+[data-testid="stExpanderDetails"] h1,
+[data-testid="stExpanderDetails"] h2,
+[data-testid="stExpanderDetails"] h3,
+[data-testid="stExpanderDetails"] h4,
+[data-testid="stExpanderDetails"] [data-testid="stMarkdownContainer"],
+[data-testid="stExpanderDetails"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stExpanderDetails"] [data-testid="stMarkdownContainer"] li {
+    color: #e2e8f0 !important;
+}
+[data-testid="stExpanderDetails"] code {
+    background: rgba(99,102,241,0.16) !important;
+    border-radius: 6px !important;
+    padding: 0 4px !important;
+}
 /* Selectbox inside expanders */
 [data-testid="stExpanderDetails"] [data-baseweb="select"] > div {
     background: #1e2744 !important;
@@ -419,10 +439,24 @@ button[kind="primary"][aria-label*="▶️"] {
 hr { border-color: rgba(233,30,140,0.2) !important; }
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #0f172a; }
-::-webkit-scrollbar-thumb { background: rgba(233,30,140,0.4); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #e91e8c; }
+html, body, * {
+    scrollbar-width: auto;
+    scrollbar-color: #f472b6 #0f172a;
+}
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track {
+    background: #0f172a;
+    border-radius: 999px;
+}
+::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, #f472b6 0%, #e91e8c 100%);
+    border-radius: 999px;
+    border: 2px solid #0f172a;
+    min-height: 48px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #fb7185 0%, #ec4899 100%);
+}
 
 /* ── Forms (st.form container) ── */
 [data-testid="stForm"] {

@@ -9,9 +9,13 @@ import json
 import logging
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict
+
+from src.agent.runtime_paths import get_your_data_dir
 
 logger = logging.getLogger("email_agent.features.calendar_detect")
+
+_CALENDAR_DETECTOR_CACHE: Dict[str, "CalendarDetector"] = {}
 
 
 class CalendarDetector:
@@ -59,7 +63,7 @@ class CalendarDetector:
                 'body': body or msg.get('snippet', ''),
                 'thread_id': msg.get('threadId', '')
             }
-        except Exception as e:
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
             return {}
 
     def extract_calendar_events(self, message_id: str) -> Dict:
@@ -125,8 +129,8 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
             result['subject'] = content.get('subject', '')
             result['sender'] = content.get('sender', '')
             return result
-        except Exception as e:
-            logger.error(f"Calendar detection failed: {e}")
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as e:
+            logger.error("Calendar detection failed: %s", e)
             return {'status': 'error', 'message': str(e), 'events': []}
 
     def suggest_calendar_entry(self, message_id: str) -> Dict:
@@ -158,7 +162,7 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
             combined = f"{date_str} {time_str}".strip()
             dt = dateutil.parser.parse(combined, fuzzy=True)
             return dt.strftime('%Y-%m-%dT%H:%M:%S')
-        except Exception:
+        except (ImportError, OSError, TypeError, ValueError):
             from datetime import datetime
             return datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
@@ -183,9 +187,8 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
             event.get('time', '00:00')
         )
         try:
-            from datetime import datetime as _dt
-            start_dt = _dt.fromisoformat(start_iso)
-        except Exception:
+            start_dt = datetime.fromisoformat(start_iso)
+        except ValueError:
             start_dt = datetime.now()
 
         duration_str = event.get('duration', '')
@@ -198,7 +201,7 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
                 hours = int(hrs.group(1)) if hrs else 1
                 minutes = int(mins.group(1)) if mins else 0
                 end_dt = start_dt + timedelta(hours=hours, minutes=minutes)
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 end_dt = start_dt + timedelta(hours=1)
         else:
             end_dt = start_dt + timedelta(hours=1)
@@ -270,8 +273,7 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
         if save_ics:
             try:
                 ics_content = self.generate_ics_content(event)
-                ics_dir = Path(__file__).parent.parent.parent.parent / \
-                    'data' / 'calendar_exports'
+                ics_dir = get_your_data_dir('calendar_exports', create=True)
                 ics_dir.mkdir(parents=True, exist_ok=True)
                 safe_title = ''.join(
                     c if c.isalnum() or c in ' _-' else '_'
@@ -284,9 +286,9 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
                 results['ics_saved'] = True
                 results['ics_path'] = ics_path
                 results['ics_content'] = ics_content
-                logger.info(f"Saved .ics file: {ics_path}")
-            except Exception as e:
-                logger.error(f"Failed to save .ics file: {e}")
+                logger.info("Saved .ics file: %s", ics_path)
+            except (OSError, RuntimeError, TypeError, ValueError) as e:
+                logger.error("Failed to save .ics file: %s", e)
                 results['ics_saved'] = False
                 results['ics_error'] = str(e)
 
@@ -301,8 +303,9 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
 
             creds = None
             if Path(TOKEN_PATH).exists():
-                with open(TOKEN_PATH, 'r') as f:
-                    creds = Credentials.from_authorized_user_info(json.load(f))
+                creds = Credentials.from_authorized_user_info(
+                    json.loads(Path(TOKEN_PATH).read_text(encoding='utf-8'))
+                )
 
             if not creds or not hasattr(creds, 'scopes') or (
                 creds.scopes and CALENDAR_SCOPE not in creds.scopes
@@ -318,7 +321,7 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
                     from google.auth.transport.requests import Request
                     creds.refresh(Request())
 
-                cal_service = build('calendar', 'v3', credentials=creds)
+                cal_service: Any = build('calendar', 'v3', credentials=creds)
 
                 # Build the event body
                 start_iso = self._parse_event_datetime(
@@ -345,16 +348,15 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
                 results['google_calendar'] = 'created'
                 results['google_event_id'] = created.get('id', '')
                 results['google_event_link'] = created.get('htmlLink', '')
-                logger.info(
-                    f"Created Google Calendar event: {created.get('id', '')}")
+                logger.info("Created Google Calendar event: %s", created.get('id', ''))
 
         except ImportError:
             results['google_calendar'] = 'unavailable'
             results['google_calendar_note'] = 'Google API client not available'
-        except Exception as e:
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError) as e:
             results['google_calendar'] = 'error'
             results['google_calendar_note'] = str(e)
-            logger.warning(f"Google Calendar export failed: {e}")
+            logger.warning("Google Calendar export failed: %s", e)
 
         if ics_path:
             results['message'] = (
@@ -367,16 +369,13 @@ If no events found: {{"events": [], "has_events": false, "confidence": "high"}}"
         return results
 
 
-# Singleton + convenience functions
-_detector: Optional[CalendarDetector] = None
-
-
 def _get_detector() -> CalendarDetector:
-    global _detector
-    if _detector is None:
+    detector = _CALENDAR_DETECTOR_CACHE.get('default')
+    if detector is None:
         from src.email.gmail_auth import get_gmail_service
-        _detector = CalendarDetector(get_gmail_service())
-    return _detector
+        detector = CalendarDetector(get_gmail_service())
+        _CALENDAR_DETECTOR_CACHE['default'] = detector
+    return detector
 
 
 def extract_calendar_events(message_id: str) -> Dict:

@@ -8,6 +8,25 @@ import streamlit as st
 
 from src.agent.core.agent_manager import get_agent_manager
 
+_NAV_STATE_KEYS = (
+    "show_create_form",
+    "configure_agent_id",
+    "configure_pa_id",
+    "show_log_viewer",
+    "show_create_pa_panel",
+    "active_pa_id",
+    "active_pa_url",
+    "dashboard_scroll_target",
+)
+
+
+def _push_nav_state() -> None:
+    """Push the current dashboard navigation state for sidebar back-navigation."""
+    current = {key: st.session_state.get(key) for key in _NAV_STATE_KEYS}
+    history = st.session_state.setdefault("nav_history", [])
+    if not history or history[-1] != current:
+        history.append(current)
+
 # Plain-language abilities per agent type — shown in the hover tooltip
 _SKILL_ABILITIES: dict[str, list[str]] = {
     "email": [
@@ -155,11 +174,13 @@ def show_agent_card(agent: dict) -> None:
         is_configuring = st.session_state.get("configure_agent_id") == agent_id
         cfg_label = "✖ Close" if is_configuring else "⚙️ Configure"
         if st.button(cfg_label, key=f"config_{agent_id}", use_container_width=True):
+            _push_nav_state()
             if is_configuring:
                 st.session_state.configure_agent_id = None
             else:
                 st.session_state.configure_agent_id = agent_id
                 st.session_state.show_create_form = False
+                st.session_state.dashboard_scroll_target = None
             st.rerun()
 
     with col2:

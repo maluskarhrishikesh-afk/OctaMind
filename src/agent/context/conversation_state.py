@@ -32,6 +32,8 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from src.agent.manifest.context_manifest import read_context
+
 logger = logging.getLogger("agent.context.conversation_state")
 
 # ---------------------------------------------------------------------------
@@ -89,6 +91,8 @@ _PATH_RE = re.compile(
 
 # E-mail addresses
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}")
+
+_MAX_MENTIONED_FILES = 10
 
 # The previous assistant action verb, used to tag "last_action"
 _ACTION_VERB_RE = re.compile(
@@ -332,7 +336,7 @@ class ConversationStateTracker:
             f.lower() for f in _FILE_RE.findall(all_text)
         ))
         if mentioned_files:
-            state["mentioned_files"] = mentioned_files
+            state["mentioned_files"] = mentioned_files[:_MAX_MENTIONED_FILES]
 
         # ── last found file paths (full absolute paths from assistant tool results) ──
         # Extract paths that the files/drive agent reported back, so follow-up
@@ -342,15 +346,15 @@ class ConversationStateTracker:
             "[CST] build() history=%d recent=%d command=%.80s",
             len(history), len(recent), current_command or "",
         )
-        last_found_paths: List[str] = []
+        last_found_file_path: str = ""
         for msg in reversed(recent):
             if msg.get("role") == "assistant":
                 # Prefer search_paths (search results, context-only — not delivered files).
                 # Fall back to file_artifacts (legacy or explicitly delivered files).
                 artifacts = msg.get("search_paths") or msg.get("file_artifacts", [])
                 if artifacts:
-                    last_found_paths = list(dict.fromkeys(str(p) for p in artifacts))
-                    logger.debug("[CST] last_found_paths from search_paths/file_artifacts: %s", last_found_paths)
+                    last_found_file_path = str(artifacts[0])
+                    logger.debug("[CST] last_found_file_path from search_paths/file_artifacts: %s", last_found_file_path)
                     break
                 # Fall back: regex-parse the assistant's text response
                 content = msg.get("content", "")
@@ -360,28 +364,39 @@ class ConversationStateTracker:
                     content.replace("\n", " "), paths,
                 )
                 if paths:
-                    # Most recent assistant message that mentioned paths wins;
-                    # deduplicate, preserve order.
-                    last_found_paths = list(dict.fromkeys(paths))
+                    last_found_file_path = str(paths[0])
                     break
-        if last_found_paths:
-            state["last_found_paths"] = last_found_paths
-            # Convenience: expose the single best path as a scalar too
-            state["last_found_file_path"] = last_found_paths[0]
-            # Derive the common parent folder — used by DAG planner for "zip them"
-            # If all files share the same parent, record it as last_found_folder.
+        if last_found_file_path:
+            state["last_found_file_path"] = last_found_file_path
             try:
                 from pathlib import Path as _PPath
-                parent_counts: dict = {}
-                for fp in last_found_paths:
-                    parent = str(_PPath(fp).parent)
-                    parent_counts[parent] = parent_counts.get(parent, 0) + 1
-                if parent_counts:
-                    # Most common parent wins; ties pick the one with most files
-                    best_folder = max(parent_counts.items(), key=lambda kv: kv[1])[0]
-                    state["last_found_folder"] = best_folder
+                state["last_found_folder"] = str(_PPath(last_found_file_path).parent)
             except Exception:
                 pass
+
+        try:
+            files_ctx = read_context(agent="files")
+            entities = (files_ctx or {}).get("resolved_entities", {}) if isinstance(files_ctx, dict) else {}
+            bundle_dir = str(entities.get("search_bundle_dir", "") or "").strip()
+            if bundle_dir:
+                state["last_found_bundle_dir"] = bundle_dir
+            file_manifest = str(entities.get("file_manifest", "") or "").strip()
+            if file_manifest:
+                state["file_manifest"] = file_manifest
+            found_count = entities.get("found_count")
+            if isinstance(found_count, int) and found_count > 0:
+                state["found_count"] = found_count
+            listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+            if isinstance(listed_files, list) and len(listed_files) == 1:
+                only_item = listed_files[0] if isinstance(listed_files[0], dict) else {}
+                only_path = str(only_item.get("path", "") or "").strip()
+                if only_path:
+                    state["last_found_file_path"] = only_path
+                    item_type = str(only_item.get("type", "") or "").strip().lower()
+                    if item_type == "folder":
+                        state["last_found_folder"] = only_path
+        except Exception:
+            pass
 
         # ── e-mail recipients ──────────────────────────────────────────
         all_emails = list(dict.fromkeys(_EMAIL_RE.findall(all_text)))

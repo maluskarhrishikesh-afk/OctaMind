@@ -10,7 +10,13 @@
   "google": {
     "oauth_credentials_path": "config/credentials.json",
     "gmail_token_path": "config/token.json",
-    "drive_token_path": "config/drive_token.json"
+    "drive_token_path": "config/drive_token.json",
+    "calendar_token_path": "config/calendar_token.json",
+    "oauth_callback_base_url": "https://your-public-octamind-domain.example.com"
+  },
+
+  "runtime": {
+    "keep_awake_when_running": true
   },
 
   "whatsapp": {

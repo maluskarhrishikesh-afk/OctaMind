@@ -67,7 +67,7 @@ User Message
 | File | Written by | Read by | Purpose |
 |---|---|---|---|
 | `your_data/octa_context.json` | Agent orchestrators (after tool results) | `_dispatch` + agent orchestrators | Cross-turn context: found files, listed emails, etc. |
-| `data/octa_manifest.txt` | Files agent (`search_files` tool) | Files agent (`collect_files_from_manifest`) | Full list of file paths from the last search |
+| `your_data/octa_manifest.txt` | Files agent (`search_files` tool) | Files agent (`collect_files_from_manifest`) | Full list of file paths from the last search |
 | `your_data/octa_context_history.jsonl` | `write_context()` | Audit/debug only | Append-only history of every context write |
 | `your_data/hub_conversations.json` | HubProcessor | HubProcessor | Full turn history per session |
 
@@ -266,7 +266,7 @@ After the search tool returns results, the files agent orchestrator calls
 }
 ```
 
-Simultaneously, `data/octa_manifest.txt` is written:
+Simultaneously, `your_data/octa_manifest.txt` is written:
 ```
 C:\Hrishikesh\Neo\Payslips\Payslip_2025_Dec.pdf
 C:\Hrishikesh\Neo\Payslips\Payslip_2025_Nov.pdf
@@ -362,7 +362,7 @@ Can you zip that and mail it to me?
 
 ### Step 3 — Context Manifest Read
 
-`read_context()` loads `data/octa_context.json` (written in Scenario A, still valid).
+`read_context()` loads `your_data/octa_context.json` (written in Scenario A, still valid).
 
 ```python
 _active_ctx = {
@@ -788,7 +788,7 @@ natural-language descriptions.
 
 Before each agent call, `inject_context_into_query()` runs:
 
-1. Reads `data/octa_context.json`
+1. Reads `your_data/octa_context.json`
 2. Checks `agent` field matches the current executing agent (prevents cross-agent
    tool hallucination — the drive agent should not see file-action instructions)
 3. If matched and not expired, prepends a block to the query:
@@ -907,7 +907,7 @@ The DAG planner reads `scope` and makes the strategy choice deterministically.
 #### Gap 4 — Writing Context for One Agent Wiped Another Agent's Context
 **Status: ✅ FIXED** — `src/agent/manifest/context_manifest.py`
 
-**What was wrong:** `data/octa_context.json` was a flat object — one agent's write
+**What was wrong:** `your_data/octa_context.json` was a flat object — one agent's write
 wiped the previous agent's context.
 
 **What was fixed:** The file is now a **keyed store** — each agent owns its own slot:

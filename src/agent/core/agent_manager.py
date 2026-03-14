@@ -6,12 +6,13 @@ configure, and manage specialized agents for different services.
 """
 
 import json
-import os
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pathlib import Path
 import uuid
 import shutil
+
+from src.agent.runtime_paths import migrate_legacy_root_runtime_state_file
 
 # ── Personality helpers ────────────────────────────────────────────────────────
 
@@ -181,28 +182,31 @@ class AgentManager:
         }
     }
 
-    def __init__(self, storage_path: str = "agents.json"):
+    def __init__(self, storage_path: Optional[str] = None):
         """Initialize agent manager with storage path"""
-        self.storage_path = storage_path
+        self.storage_path = (
+            migrate_legacy_root_runtime_state_file("agents.json")
+            if storage_path is None
+            else Path(storage_path)
+        )
         self._ensure_storage_exists()
 
     def _ensure_storage_exists(self):
         """Create storage file if it doesn't exist"""
-        if not os.path.exists(self.storage_path):
+        if not self.storage_path.exists():
             self._save_agents({'agents': []})
 
     def _load_agents(self) -> Dict[str, Any]:
         """Load agents from storage"""
         try:
-            with open(self.storage_path, 'r') as f:
-                return json.load(f)
+            return json.loads(self.storage_path.read_text(encoding='utf-8'))
         except (FileNotFoundError, json.JSONDecodeError):
             return {'agents': []}
 
     def _save_agents(self, data: Dict[str, Any]):
         """Save agents to storage"""
-        with open(self.storage_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        self.storage_path.write_text(json.dumps(data, indent=2), encoding='utf-8')
 
     def create_agent(
         self,

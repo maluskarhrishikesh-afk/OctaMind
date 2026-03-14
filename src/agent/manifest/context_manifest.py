@@ -108,12 +108,14 @@ _AWAITING_INSTRUCTIONS: Dict[str, str] = {
     "file_action": (
         "The user is acting on files from the previous search. "
         "File paths are stored in the file manifest (octa_manifest.txt). "
-        "Call collect_files_from_manifest() to copy, or use files from `listed_files` "
+        "If `search_bundle_dir` is present, prefer that staged folder for zip/send follow-ups. "
+        "Call collect_files_from_manifest() to copy, call zip_files_from_manifest() to zip EXACTLY those files, or use files from `listed_files` "
         "in this context. Do NOT run a new search — the files are already resolved.\n"
         "FOLDER SHORTCUT: If `listed_files` contains a single entry with type=folder "
         "(e.g. {\"path\": \"C:\\\\Users\\\\...\\\\Text\", \"type\": \"folder\"}), "
         "call zip_folder(folder_path=<that path>) DIRECTLY — do NOT call "
         "collect_files_from_manifest for a folder path.\n"
+        "SUBSET ZIP RULE: If the previous search returned multiple files and the user says 'zip them' or 'send them as a zip', do NOT zip `last_found_folder` because that may include unrelated files. Prefer `search_bundle_dir` when present; otherwise use zip_files_from_manifest() unless the previous result was a single folder path.\n"
         "DESTINATION RULES — resolve in this order and NEVER ask the user:\n"
         "  1. Absolute path given (e.g. 'C:\\\\Users\\\\...') → use as-is.\n"
         "  2. 'a folder named X' / 'a folder called X' / 'called X' → "
@@ -807,7 +809,7 @@ def auto_save_calendar_context(
         # Compact event list — strip bulky description / html_link to save space
         entities["events"] = [
             {k: v for k, v in ev.items() if k in ("id", "title", "start", "end", "location")}
-            for ev in events[:20]
+            for ev in events[:200]
         ]
         write_context(
             agent=agent,
@@ -911,6 +913,9 @@ def auto_save_files_context(result: Any, query: str = "") -> Any:
             "found_count":   count,
             "file_manifest": str(_MANIFEST_DIR / "octa_manifest.txt"),
         }
+        bundle_dir = str(result.get("search_bundle_dir", "") or "").strip()
+        if bundle_dir:
+            entities["search_bundle_dir"] = bundle_dir
         # Embed compact file list for manageable result sets so the LLM can
         # resolve references like 'the second PDF' or 'report.pdf' in follow-up turns.
         if results_list and count <= 50:

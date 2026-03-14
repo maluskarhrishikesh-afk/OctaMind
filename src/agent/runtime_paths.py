@@ -60,3 +60,34 @@ def migrate_legacy_runtime_state_file(*parts: str) -> Path:
     if not target.exists() and legacy.exists() and legacy.is_file():
         shutil.copy2(legacy, target)
     return target
+
+
+def get_root_runtime_state_dir(*parts: str, create: bool = False) -> Path:
+    """Return the dedicated folder for legacy root-level runtime state files."""
+    return get_runtime_state_dir("runtime_state", *parts, create=create)
+
+
+def get_root_runtime_state_path(*parts: str, create_parent: bool = False) -> Path:
+    """Return the canonical path for runtime state migrated from the repo root."""
+    target = get_root_runtime_state_dir(*parts)
+    if create_parent:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def get_existing_root_runtime_state_path(*parts: str) -> Path:
+    """Return the canonical root-runtime path, falling back to the legacy repo root file."""
+    target = get_root_runtime_state_path(*parts)
+    legacy = get_workspace_root().joinpath(*parts)
+    if target.exists() or not legacy.exists():
+        return target
+    return legacy
+
+
+def migrate_legacy_root_runtime_state_file(*parts: str) -> Path:
+    """Copy a legacy repo-root runtime state file into your_data/runtime_state on first use."""
+    target = get_root_runtime_state_path(*parts, create_parent=True)
+    legacy = get_workspace_root().joinpath(*parts)
+    if not target.exists() and legacy.exists() and legacy.is_file():
+        shutil.copy2(legacy, target)
+    return target

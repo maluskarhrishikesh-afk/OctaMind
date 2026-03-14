@@ -42,6 +42,7 @@ Prefer `delete_file(path, permanent=False)` (moves to recycle bin) unless the us
 
 - Whole folder → `zip_folder(folder_path, output_path=...)`
 - Specific files → `zip_files(sources=[...], output_path=...)`
+- Previous search results / "zip them" follow-up → `zip_files_from_manifest(output_path=...)`
 - When zipping for email/delivery: always write the zip inside `${data_dir}\archives` →
   `output_path="${data_dir}\archives\<Name>.zip"`
 - Folder path unknown? → call `search_file_all_drives('folder_name')` **first**, then zip the result.
@@ -114,7 +115,7 @@ Phrases that mean "send me the file": *"send it to me", "download this", "give m
 
 **Multi-file delivery — 3-step workflow (always follow this):**
 1. `collect_files_to_folder()` or `collect_files_from_manifest()` → gather all files into one folder
-2. `zip_folder()` or `zip_files()` → create a single `.zip`
+2. `zip_files_from_manifest()` when acting on previous search results, otherwise `zip_folder()` or `zip_files()` → create a single `.zip`
 3. `deliver_file(zip_path)` — call **once** on the `.zip`; never loop `deliver_file` over individual files
 
 When searching for a file to deliver: use `search_file_all_drives` first; skip `.lnk` shortcut files.
@@ -147,6 +148,8 @@ When files are scattered across different locations:
 1. `collect_files_to_folder(file_paths=[...], destination=...)` → gather into one folder
 2. `zip_folder(destination)` → compress
 3. *(optional)* `deliver_file(zip_path)` → send to user
+
+When the user says "zip them" right after a search, do **not** zip the whole parent folder unless the previous result itself was a single folder path. Prefer the staged previous-search folder when available; otherwise use `zip_files_from_manifest()` so only the matched files go into the archive.
 
 **Default destination:** always use `${data_dir}` unless the user explicitly names a different folder. Never use generic names like `CollectedImages` or `Output`.
 
@@ -189,8 +192,8 @@ The user query may include a `## Session State` JSON block injected from the pre
 
 ### Session State Keys
 
-- **`last_found_paths`** — list of file paths from the previous search.
-  Use **only** for follow-up actions (never for fresh searches).
+- **`file_manifest`** — manifest path for the previous search results.
+  Use for multi-file follow-up actions when the staged bundle folder is not available.
   - *"copy them"* → `collect_files_from_manifest(destination=<if named>)`
   - *"put in folder"* → resolve destination, then collect
   - ⛔ Never use `copy_file(source=last_found_folder)` — that copies the entire parent folder.
@@ -198,5 +201,11 @@ The user query may include a `## Session State` JSON block injected from the pre
 - **`last_found_folder`** — parent folder of those files.
   Use only when the user explicitly wants to copy/zip the **whole** folder.
 
+- **`last_found_bundle_dir`** — staged folder under `your_data/archives/search_results` containing the exact files from the previous search.
+  Prefer this for follow-up zip/email actions on previous search results.
+
 - **`last_found_file_path`** — the single most-recently found file.
   Use for single-file operations.
+
+- **`found_count`** — number of files found in the previous search.
+  Use only as a compact hint for planning, not as a source of exact file paths.

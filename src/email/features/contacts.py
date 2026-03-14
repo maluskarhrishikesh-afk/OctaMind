@@ -9,7 +9,7 @@ import logging
 import re
 from collections import defaultdict
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 logger = logging.getLogger("email_agent.features.contacts")
 
@@ -39,9 +39,10 @@ class ContactIntelligence:
     def _get_user_email(self) -> str:
         """Get the authenticated user's email address."""
         try:
-            profile = self.gmail_service.users().getProfile(userId=self.user_id).execute()
+            gmail_service: Any = self.gmail_service
+            profile = gmail_service.users().getProfile(userId=self.user_id).execute()
             return profile.get('emailAddress', '').lower()
-        except Exception:
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
             return ''
 
     def get_frequent_contacts(self, limit: int = 10, max_scan: int = 200) -> Dict:
@@ -96,7 +97,7 @@ class ContactIntelligence:
                                 names[email] = _extract_name(from_h)
                                 last_seen[email] = date_h
                                 directions[email].append('received')
-                    except Exception:
+                    except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
                         pass
 
             # Sort by count
@@ -122,8 +123,8 @@ class ContactIntelligence:
                 'contacts': contacts,
                 'total_unique_contacts': len(counts)
             }
-        except Exception as e:
-            logger.error(f"Get frequent contacts failed: {e}")
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as e:
+            logger.error("Get frequent contacts failed: %s", e)
             return {'status': 'error', 'message': str(e)}
 
     def get_contact_summary(self, email_address: str) -> Dict:
@@ -164,7 +165,7 @@ class ContactIntelligence:
                         (h['value'] for h in headers if h['name'].lower() == 'subject'), '')
                     latest_date = next(
                         (h['value'] for h in headers if h['name'].lower() == 'date'), '')
-                except Exception:
+                except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError):
                     pass
 
             return {
@@ -177,8 +178,8 @@ class ContactIntelligence:
                 'latest_interaction': latest_date,
                 'is_vip': (received_count + sent_count) >= 10
             }
-        except Exception as e:
-            logger.error(f"Get contact summary failed: {e}")
+        except (AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError) as e:
+            logger.error("Get contact summary failed: %s", e)
             return {'status': 'error', 'message': str(e)}
 
     def suggest_vip_contacts(self) -> Dict:
@@ -194,12 +195,12 @@ class ContactIntelligence:
             'count': len(vip)
         }
 
-    def export_contacts(self, format: str = 'csv', limit: int = 100) -> Dict:
+    def export_contacts(self, output_format: str = 'csv', limit: int = 100, **kwargs: str) -> Dict:
         """
         Export contact intelligence data to CSV or JSON file.
 
         Args:
-            format: 'csv' or 'json'
+            output_format: 'csv' or 'json'
             limit: Maximum number of contacts to export
 
         Returns:
@@ -207,7 +208,8 @@ class ContactIntelligence:
         """
         import csv
         from io import StringIO
-        from pathlib import Path
+
+        from src.agent.runtime_paths import get_runtime_state_dir
 
         result = self.get_frequent_contacts(limit=limit, max_scan=500)
         if result.get('status') == 'error':
@@ -217,13 +219,11 @@ class ContactIntelligence:
         if not contacts:
             return {'status': 'error', 'message': 'No contacts found to export'}
 
-        export_dir = Path(
-            __file__).parent.parent.parent.parent / 'data' / 'exports'
+        export_dir = get_runtime_state_dir('exports', create=True)
         export_dir.mkdir(parents=True, exist_ok=True)
 
-        from datetime import datetime
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        fmt = format.lower().strip()
+        fmt = str(kwargs.get('format', output_format)).lower().strip()
 
         if fmt == 'json':
             export_file = export_dir / f'contacts_{timestamp}.json'
@@ -246,7 +246,7 @@ class ContactIntelligence:
                 writer.writerow(c)
             export_file.write_text(output.getvalue(), encoding='utf-8')
         else:
-            return {'status': 'error', 'message': f"Unsupported format '{format}'. Use 'csv' or 'json'."}
+            return {'status': 'error', 'message': f"Unsupported format '{fmt}'. Use 'csv' or 'json'."}
 
         return {
             'status': 'success',
@@ -258,15 +258,16 @@ class ContactIntelligence:
 
 
 # Singleton + convenience functions
-_intelligence: Optional[ContactIntelligence] = None
+_INTELLIGENCE_CACHE: Dict[str, ContactIntelligence] = {}
 
 
 def _get_intelligence() -> ContactIntelligence:
-    global _intelligence
-    if _intelligence is None:
+    intelligence = _INTELLIGENCE_CACHE.get('default')
+    if intelligence is None:
         from src.email.gmail_auth import get_gmail_service
-        _intelligence = ContactIntelligence(get_gmail_service())
-    return _intelligence
+        intelligence = ContactIntelligence(get_gmail_service())
+        _INTELLIGENCE_CACHE['default'] = intelligence
+    return intelligence
 
 
 def get_frequent_contacts(limit: int = 10) -> Dict:
@@ -282,6 +283,6 @@ def suggest_vip_contacts() -> Dict:
     return _get_intelligence().suggest_vip_contacts()
 
 
-def export_contacts(format: str = 'csv', limit: int = 100) -> Dict:
+def export_contacts(output_format: str = 'csv', limit: int = 100, **kwargs: str) -> Dict:
     """Export contact data to CSV or JSON file."""
-    return _get_intelligence().export_contacts(format, limit)
+    return _get_intelligence().export_contacts(output_format, limit, **kwargs)

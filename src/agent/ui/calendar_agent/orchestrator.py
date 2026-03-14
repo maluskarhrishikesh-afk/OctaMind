@@ -12,6 +12,8 @@ from src.agent.workflows.skill_dag_engine import run_skill_dag
 
 
 _SESSION_STATE_MARKER = "## Session State"
+_CONTEXT_MARKER = "## Context from Previous Turn"
+_DIARY_MARKER = "## Conversation Diary"
 _MONTH_NAMES = {
     "january": 1,
     "february": 2,
@@ -30,7 +32,7 @@ _OVERVIEW_NOISE_TOKENS = {
     "a", "an", "and", "appointments", "appointment", "are", "booked", "calendar",
     "count", "current", "do", "event", "events", "for", "have", "how", "i", "in",
     "is", "list", "many", "meeting", "meetings", "month", "my", "number", "of", "on",
-    "scheduled", "schedule", "show", "this", "upcoming", "what", "which", "current",
+    "scheduled", "schedule", "show", "this", "upcoming", "what", "which",
     "next", "last", "previous",
     *_MONTH_NAMES.keys(),
 }
@@ -62,7 +64,172 @@ def _extract_session_state(user_query: str) -> Dict[str, Any]:
 
 
 def _strip_session_state(user_query: str) -> str:
-    return user_query.split(_SESSION_STATE_MARKER, 1)[0].strip()
+    text = str(user_query or "")
+    cut_points = [
+        idx for idx in (
+            text.find(_CONTEXT_MARKER),
+            text.find(_DIARY_MARKER),
+            text.find(_SESSION_STATE_MARKER),
+        )
+        if idx != -1
+    ]
+    if cut_points:
+        text = text[: min(cut_points)]
+    return text.strip()
+
+
+def _read_calendar_context() -> Dict[str, Any]:
+    try:
+        from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+        context = read_context(agent="calendar")
+        return context if isinstance(context, dict) else {}
+    except Exception:
+        return {}
+
+
+_ORDINAL_WORDS = {
+    "first": 1,
+    "second": 2,
+    "third": 3,
+    "fourth": 4,
+    "fifth": 5,
+    "sixth": 6,
+    "seventh": 7,
+    "eighth": 8,
+    "ninth": 9,
+    "tenth": 10,
+    "eleventh": 11,
+    "twelfth": 12,
+    "thirteenth": 13,
+    "fourteenth": 14,
+    "fifteenth": 15,
+    "sixteenth": 16,
+    "seventeenth": 17,
+    "eighteenth": 18,
+    "nineteenth": 19,
+    "twentieth": 20,
+}
+
+
+def _extract_ordinal_positions(query_text: str) -> list[int]:
+    lowered = query_text.lower()
+    positions: list[int] = []
+
+    for match in re.finditer(r"\b(\d{1,3})(?:st|nd|rd|th)\b", lowered):
+        try:
+            positions.append(int(match.group(1)))
+        except Exception:
+            continue
+
+    for word, value in _ORDINAL_WORDS.items():
+        if re.search(rf"\b{word}\b", lowered):
+            positions.append(value)
+
+    seen: set[int] = set()
+    ordered: list[int] = []
+    for value in positions:
+        if value < 1 or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def _handle_ordinal_event_delete_query(user_query: str, tool_map: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    from src.agent.manifest.context_manifest import write_context  # noqa: PLC0415
+
+    raw_text = _strip_session_state(user_query)
+    lowered = raw_text.lower()
+    if not re.search(r"\b(cancel|delete|remove|clear)\b", lowered):
+        return None
+    if not re.search(r"\b(meeting|meetings|event|events|appointment|appointments|booking|bookings)\b", lowered):
+        return None
+
+    positions = _extract_ordinal_positions(raw_text)
+    if not positions:
+        return None
+
+    context = _read_calendar_context()
+    entities = context.get("resolved_entities", {}) if isinstance(context, dict) else {}
+    events = list(entities.get("events") or [])
+    if not events:
+        return None
+
+    missing = [position for position in positions if position > len(events)]
+    matched_positions = [position for position in positions if 1 <= position <= len(events)]
+    if not matched_positions:
+        return {
+            "status": "error",
+            "message": (
+                f"I could not match those references to the current event list. "
+                f"The saved list only contains {len(events)} event(s)."
+            ),
+            "action": "react_response",
+        }
+
+    deleted_titles: list[tuple[int, str]] = []
+    failed: list[str] = []
+    delete_indices = sorted({position - 1 for position in matched_positions}, reverse=True)
+    remaining_events = list(events)
+
+    for index in delete_indices:
+        event = events[index]
+        event_id = str(event.get("id") or "").strip()
+        title = str(event.get("title") or f"Event #{index + 1}")
+        if not event_id:
+            failed.append(f"{index + 1}. {title} (missing event id)")
+            continue
+        result = tool_map["delete_event"](event_id)
+        if isinstance(result, dict) and result.get("status") == "success":
+            deleted_titles.append((index + 1, title))
+            if index < len(remaining_events):
+                remaining_events.pop(index)
+        else:
+            message = result.get("message", "unknown error") if isinstance(result, dict) else "unknown error"
+            failed.append(f"{index + 1}. {title} ({message})")
+
+    if deleted_titles:
+        try:
+            updated_entities = dict(entities)
+            updated_entities["events"] = remaining_events
+            write_context(
+                agent="calendar",
+                topic=str(context.get("topic") or "calendar_query"),
+                resolved_entities=updated_entities,
+                awaiting="event_selection" if remaining_events else "time_selection",
+            )
+        except Exception:
+            pass
+
+    message_lines: list[str] = []
+    if deleted_titles:
+        label = "meeting" if len(deleted_titles) == 1 else "meetings"
+        message_lines.append(f"Deleted {len(deleted_titles)} {label} from the saved list:")
+        message_lines.extend(
+            f"- {position}. {title}" for position, title in sorted(deleted_titles, key=lambda item: item[0])
+        )
+    if missing:
+        if message_lines:
+            message_lines.append("")
+        message_lines.append(
+            f"These positions were outside the saved list range: {', '.join(str(value) for value in missing)}."
+        )
+    if failed:
+        if message_lines:
+            message_lines.append("")
+        message_lines.append("I could not delete these event(s):")
+        message_lines.extend(f"- {item}" for item in failed)
+
+    return {
+        "status": "success" if deleted_titles and not failed else "error" if failed and not deleted_titles else "success",
+        "message": "\n".join(message_lines) if message_lines else "No matching events were deleted.",
+        "action": "react_response",
+        "file_path": "",
+        "found_paths": [],
+        "results": [{"position": position, "title": title} for position, title in deleted_titles],
+        "_fast_path": "ordinal_event_delete",
+    }
 
 
 def _get_reference_date(user_query: str):
@@ -329,6 +496,9 @@ def execute_with_llm_orchestration(
     artifacts_out: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     all_tools = _build_all_tools(user_query)
+    ordinal_delete_result = _handle_ordinal_event_delete_query(user_query, all_tools)
+    if ordinal_delete_result is not None:
+        return ordinal_delete_result
     fast_path_result = _handle_month_overview_query(user_query, all_tools)
     if fast_path_result is not None:
         return fast_path_result

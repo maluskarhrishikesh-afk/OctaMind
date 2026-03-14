@@ -22,6 +22,7 @@ import base64
 import logging
 import mimetypes
 import os
+import re
 from typing import Dict, List
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -31,6 +32,7 @@ from email import encoders as _email_encoders
 # Import authentication module
 from .gmail_auth import get_gmail_service
 from .email_summarizer import EmailSummarizer
+from src.agent.runtime_paths import migrate_legacy_runtime_state_file
 
 # Setup logger
 logger = logging.getLogger("email_agent.gmail_service")
@@ -986,6 +988,42 @@ class GmailServiceClient:
 
             from collections import Counter
 
+            def _normalise_preview(preview_text: str) -> str:
+                text = (preview_text or "").replace("\r", "\n")
+                text = re.sub(r"https?://\S+", "", text)
+                text = re.sub(r"Read More:\s*", "", text, flags=re.IGNORECASE)
+                text = re.sub(r"To unsubscribe.*", "", text, flags=re.IGNORECASE)
+                text = re.sub(r"To control which emails we send you.*", "", text, flags=re.IGNORECASE)
+                lines = [line.strip() for line in text.split("\n") if line.strip()]
+                cleaned: List[str] = []
+                for line in lines:
+                    lowered = line.lower()
+                    if lowered in {"top stories for hrishikesh", "trending stories from simmer"}:
+                        continue
+                    if len(line) < 4:
+                        continue
+                    cleaned.append(line)
+                    if len(" ".join(cleaned)) >= 320:
+                        break
+                summary_text = " ".join(cleaned)
+                return re.sub(r"\s+", " ", summary_text).strip()[:320]
+
+            def _extract_key_points(subject: str, preview: str) -> List[str]:
+                sentences = re.split(r"(?<=[.!?])\s+", preview)
+                points: List[str] = []
+                for sentence in sentences:
+                    candidate = sentence.strip(" -\u2022")
+                    if len(candidate) < 35:
+                        continue
+                    if candidate.lower() in subject.lower():
+                        continue
+                    points.append(candidate[:180].rstrip())
+                    if len(points) == 2:
+                        break
+                if not points and preview:
+                    points.append(preview[:180].rstrip())
+                return points
+
             def _classify_theme(subject: str, preview: str, sender: str) -> str:
                 blob = f"{subject} {preview} {sender}".lower()
                 if any(tok in blob for tok in ("calendar", "meeting", "invite", "appointment", "schedule")):
@@ -1015,19 +1053,26 @@ class GmailServiceClient:
             )
             action_items: List[str] = []
             email_sections: List[str] = []
+            sender_domains = Counter()
 
             for item in items:
                 subject = item.get("subject", "No Subject")
                 sender = item.get("sender", "Unknown")
                 date = item.get("date", "")
-                preview = item.get("body_preview", "").replace("\n", " ").strip()
+                preview = _normalise_preview(item.get("body_preview", ""))
                 theme = _classify_theme(subject, preview, sender)
                 needs_action = _needs_action(subject, preview)
+                sender_domain_match = re.search(r"@([A-Za-z0-9.-]+)", sender)
+                if sender_domain_match:
+                    sender_domains[sender_domain_match.group(1).lower()] += 1
+                key_points = _extract_key_points(subject, preview)
                 email_sections.extend([
-                    f"### {subject} — {date}".strip(),
+                    f"### {subject}",
+                    f"Date: {date}" if date else "Date: Unknown",
                     f"From: {sender}",
                     f"Theme: {theme}",
-                    f"Key points: {preview[:260] or 'No preview available.'}",
+                    "What stands out:",
+                    *([f"- {point}" for point in key_points] if key_points else ["- No meaningful preview was available."]),
                     f"Action required: {'Yes' if needs_action else 'No'}",
                     "",
                 ])
@@ -1036,6 +1081,17 @@ class GmailServiceClient:
 
             top_senders = ", ".join(f"{name} ({count})" for name, count in senders.most_common(3))
             top_themes = ", ".join(f"{name} ({count})" for name, count in themes.most_common(3))
+            top_domains = ", ".join(f"{name} ({count})" for name, count in sender_domains.most_common(3))
+
+            digest_observations: List[str] = []
+            if themes:
+                digest_observations.append(f"The dominant pattern is {themes.most_common(1)[0][0]} content.")
+            if action_items:
+                digest_observations.append(f"{len(action_items)} email(s) look actionable from the preview text.")
+            else:
+                digest_observations.append("No obvious action items stand out from the preview text.")
+            if top_domains:
+                digest_observations.append(f"Most messages came from: {top_domains}.")
 
             overview = (
                 f"Processed {len(items)} email(s) for query '{query_text}'. "
@@ -1058,13 +1114,16 @@ class GmailServiceClient:
                 action_block = ["1. No obvious follow-up actions were detected from the email previews."]
 
             return "\n".join([
-                "## Overview",
+                "## Executive Summary",
                 overview,
+                "",
+                "## What This Batch Tells You",
+                *[f"- {note}" for note in digest_observations],
                 "",
                 "## Additional Insights",
                 *insights,
                 "",
-                "## Emails (newest first)",
+                "## Per-Email Digest",
                 *email_sections,
                 "## Action Items",
                 *action_block,
@@ -1087,11 +1146,23 @@ class GmailServiceClient:
         ]
 
         structured: List[Dict] = []
+
+        def _clean_body_preview(body_text: str) -> str:
+            text = (body_text or "").replace("\r", "\n")
+            text = re.sub(r"https?://\S+", "", text)
+            text = re.sub(r"Read More:.*", "", text, flags=re.IGNORECASE)
+            text = re.sub(r"To unsubscribe.*", "", text, flags=re.IGNORECASE)
+            text = re.sub(r"To control which emails we send you.*", "", text, flags=re.IGNORECASE)
+            lines = [line.strip() for line in text.split("\n") if line.strip()]
+            filtered = [line for line in lines if len(line) > 3][:6]
+            return re.sub(r"\s+", " ", " ".join(filtered)).strip()[:420]
+
         for i, em in enumerate(emails, 1):
             subject = em.get('subject', 'No Subject')
             sender  = em.get('sender', 'Unknown')
             date    = em.get('date', '')
             body    = em.get('body', em.get('snippet', '')).strip()
+            body_preview = _clean_body_preview(body)
 
             lines += [
                 "---",
@@ -1107,7 +1178,7 @@ class GmailServiceClient:
                 'subject': subject,
                 'sender': sender,
                 'date': date,
-                'body_preview': body[:300],
+                'body_preview': body_preview,
                 'message_id': em.get('id', ''),
             })
 
@@ -1127,7 +1198,7 @@ class GmailServiceClient:
             'emails': structured,
             'content': content,
             'report_content': report_content,
-            'summary': report_content.split("## Emails", 1)[0].strip(),
+            'summary': report_content.split("## Per-Email Digest", 1)[0].strip(),
             'file_path': file_path,
             'message': (
                 f"Fetched {len(emails)} email(s) for '{query}'. "
@@ -1484,11 +1555,10 @@ class GmailServiceClient:
     # ── Email Templates ───────────────────────────────────────────────────────
 
     def save_email_template(self, name: str, subject: str, body: str) -> Dict:
-        """Save an email template to data/email_templates.json.
+        """Save an email template to your_data/email_templates.json.
         Use {{variable}} placeholders in subject/body."""
         import json
-        from pathlib import Path as _P
-        tpl_file = _P("data/email_templates.json")
+        tpl_file = migrate_legacy_runtime_state_file("email_templates.json")
         try:
             templates = json.loads(tpl_file.read_text(encoding='utf-8')) if tpl_file.exists() else {}
             templates[name] = {'subject': subject, 'body': body}
@@ -1499,10 +1569,9 @@ class GmailServiceClient:
             return {'status': 'error', 'message': f"Error saving template: {exc}"}
 
     def list_email_templates(self) -> Dict:
-        """List all saved email templates from data/email_templates.json."""
+        """List all saved email templates from your_data/email_templates.json."""
         import json
-        from pathlib import Path as _P
-        tpl_file = _P("data/email_templates.json")
+        tpl_file = migrate_legacy_runtime_state_file("email_templates.json")
         try:
             if not tpl_file.exists():
                 return {'status': 'success', 'templates': [], 'count': 0,
@@ -1525,8 +1594,7 @@ class GmailServiceClient:
             variables:     Dict of placeholder values e.g. {"name": "John", "date": "5 March"}.
         """
         import json
-        from pathlib import Path as _P
-        tpl_file = _P("data/email_templates.json")
+        tpl_file = migrate_legacy_runtime_state_file("email_templates.json")
         try:
             templates = json.loads(tpl_file.read_text(encoding='utf-8')) if tpl_file.exists() else {}
             if template_name not in templates:
