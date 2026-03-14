@@ -80,4 +80,9 @@ replacements.txt
 errors/errors.txt
 errors/new_implementation.txt
 
+# Research artifacts: keep only the published paper PDFs in Git
+research/*
+!research/LLM_DAG_Orchestration.pdf
+!research/Markdown_Native_Memory_FAISS_Architecture.pdf
+
 

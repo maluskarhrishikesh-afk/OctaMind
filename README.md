@@ -13,8 +13,8 @@ An AI-powered platform for managing Gmail, Google Drive, WhatsApp, Telegram, and
 	Sources: [research/LLM_DAG_ORCHESTRATION.md](research/LLM_DAG_ORCHESTRATION.md) · [research/LLM_DAG_ORCHESTRATION.pdf](research/LLM_DAG_ORCHESTRATION.pdf)
 
 - **Markdown-Native Agent Memory and Skill Retrieval with FAISS: Building Persistent AI Systems Without a Traditional Database**  
-	Zenodo upload pending  
-	Source: [research/MARKDOWN_NATIVE_MEMORY_FAISS_ARCHITECTURE.md](research/MARKDOWN_NATIVE_MEMORY_FAISS_ARCHITECTURE.md)
+	Zenodo DOI: [10.5281/zenodo.19018414](https://doi.org/10.5281/zenodo.19018414)  
+	PDF: [research/Markdown_Native_Memory_FAISS_Architecture.pdf](research/Markdown_Native_Memory_FAISS_Architecture.pdf)
 
 ---
 
@@ -31,6 +31,8 @@ python start.py
 ```
 
 `start.py` (or `start.exe`) launches the Agent Hub dashboard at **http://localhost:8501**, truncates all log files for a clean session, and opens the browser automatically.
+
+On Windows, OctaMind now also starts a lightweight keep-awake helper by default so Telegram and other external channels remain reachable while the machine is locked. You can disable that behavior with `runtime.keep_awake_when_running: false` in `config/settings.json` or `OCTAMIND_KEEP_AWAKE_WHEN_RUNNING=0`.
 
 Google sign-in is completed on first use per service. OctaMind now supports local browser callback, Telegram `/authcomplete`, or a public HTTPS callback when `google.oauth_callback_base_url` is configured in `config/settings.json`.
 
