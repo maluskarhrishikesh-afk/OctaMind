@@ -9,8 +9,7 @@ An AI-powered platform for managing Gmail, Google Drive, WhatsApp, Telegram, and
 - **LLM-Driven DAG Planning with Topological Execution for Multi-Agent AI Orchestration**  
     [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18911464.svg)](https://doi.org/10.5281/zenodo.18911464)  
 	Zenodo DOI: [10.5281/zenodo.18911464](https://doi.org/10.5281/zenodo.18911464)  
-	Sources: [research/LLM_DAG_ORCHESTRATION.md](research/LLM_DAG_ORCHESTRATION.md) · [research/LLM_DAG_ORCHESTRATION.pdf](research/LLM_DAG_ORCHESTRATION.pdf)
-
+	PDF: [research/LLM_DAG_Orchestration.pdf](research/LLM_DAG_Orchestration.pdf)
 - **Markdown-Native Agent Memory and Skill Retrieval with FAISS: Building Persistent AI Systems Without a Traditional Database**  
     [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19018414.svg)](https://doi.org/10.5281/zenodo.19018414)  
 	Zenodo DOI: [10.5281/zenodo.19018414](https://doi.org/10.5281/zenodo.19018414)  
