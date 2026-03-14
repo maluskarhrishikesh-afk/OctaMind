@@ -22,6 +22,11 @@
 - **description**: List events for one explicit date in `YYYY-MM-DD` format. Use when the user mentions a specific day like "March 12", "Friday", or "2026-03-12" and wants to see scheduled events for that date.
 - **tags**: date, specific day, events on date, Friday, March 12, explicit date, calendar date lookup
 
+### get_events_for_month
+- **signature**: `get_events_for_month(year, month, max_results=200)`
+- **description**: List events for one calendar month using an explicit month boundary. Use when the user asks "what do I have this month", "how many meetings are scheduled in March", or "show my April calendar" and you need the full month instead of a 7-day upcoming window.
+- **tags**: this month, current month, next month, March calendar, monthly view, monthly count, whole month
+
 ### search_events
 - **signature**: `search_events(query, days=30, max_results=10)`
 - **description**: Search existing calendar events by title, attendee, keyword, or meeting topic. Use when the user says "find my appraisal meeting", "search calendar for dentist", "look for finance review", or "show meetings with Raj".

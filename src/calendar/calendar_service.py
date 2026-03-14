@@ -21,6 +21,7 @@ Quick reference of functions exported:
 from __future__ import annotations
 
 import logging
+import calendar as _calendar_mod
 from datetime import datetime, timedelta, date, timezone
 from typing import Any
 
@@ -235,6 +236,35 @@ def get_events_for_date(date_str: str, calendar_id: str = "primary") -> dict:
     if result["status"] == "success":
         result["results"] = result.get("events", [])
         result["message"] = f"Found {result['count']} event(s) on {date_str}."
+    return result
+
+
+def get_events_for_month(
+    year: int,
+    month: int,
+    max_results: int = 200,
+    calendar_id: str = "primary",
+) -> dict:
+    """Fetch events in a specific calendar month using local timezone bounds."""
+    if month < 1 or month > 12:
+        return {"status": "error", "message": f"Invalid month: {month}. Expected 1-12."}
+
+    tz = _local_tz()
+    month_start = datetime(year, month, 1, 0, 0, 0, tzinfo=tz)
+    next_year = year + 1 if month == 12 else year
+    next_month = 1 if month == 12 else month + 1
+    month_end = datetime(next_year, next_month, 1, 0, 0, 0, tzinfo=tz)
+    month_name = _calendar_mod.month_name[month]
+
+    result = list_events(
+        time_min=_rfc3339(month_start),
+        time_max=_rfc3339(month_end),
+        max_results=max_results,
+        calendar_id=calendar_id,
+    )
+    if result["status"] == "success":
+        result["results"] = result.get("events", [])
+        result["message"] = f"Found {result['count']} event(s) in {month_name} {year}."
     return result
 
 
