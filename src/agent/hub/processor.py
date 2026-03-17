@@ -22,6 +22,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from src.agent.runtime_paths import migrate_legacy_runtime_state_file
+from src.agent.security.security_policy import evaluate_inbound_request
+from src.agent.workflows.confirmation_policy import (
+    clear_pending_confirmation,
+    get_pending_confirmation,
+    parse_confirmation_reply,
+    set_pending_confirmation,
+)
 
 logger = logging.getLogger("hub_processor")
 
@@ -246,6 +253,43 @@ def _mirror_turn_to_dashboard(
         logger.debug("Could not mirror turn into dashboard chat: %s", exc)
 
 
+def log_external_turn(
+    session_id: str,
+    source: str,
+    agent_id: str,
+    user_message: str,
+    assistant_message: str,
+    *,
+    file_artifacts: Optional[List[str]] = None,
+    search_paths: Optional[List[str]] = None,
+) -> None:
+    """Persist a completed externally handled turn into shared history."""
+    if not session_id:
+        return
+
+    history = _SESSION_HISTORY.setdefault(session_id, [])
+    turn_ts = datetime.now(timezone.utc).isoformat()
+    history.append({"role": "user", "content": str(user_message), "ts": turn_ts})
+
+    assistant_entry: Dict[str, Any] = {
+        "role": "assistant",
+        "content": str(assistant_message),
+        "ts": turn_ts,
+    }
+    if file_artifacts:
+        assistant_entry["file_artifacts"] = list(file_artifacts)
+    if search_paths:
+        assistant_entry["search_paths"] = list(search_paths)
+    history.append(assistant_entry)
+
+    if len(history) > _MAX_HISTORY:
+        history = history[-_MAX_HISTORY:]
+        _SESSION_HISTORY[session_id] = history
+
+    _persist_conversation(session_id, source, history, agent_id=agent_id)
+    _mirror_turn_to_dashboard(agent_id, source, user_message, assistant_entry)
+
+
 def _load_session_history() -> None:
     """Restore _SESSION_HISTORY from hub_conversations.json on startup.
 
@@ -314,6 +358,7 @@ class HubResponse:
     elapsed: float = 0.0
     # Local file paths produced as side-effects (e.g. downloaded zip, exported PDF)
     file_artifacts: List[str] = field(default_factory=list)
+    channel_payloads: Dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +587,7 @@ def _render_workflow_output(run_result: dict, original_command: str = "") -> str
     status = run_result.get("status", "error")
 
     # ReAct orchestrator already composed the final answer — use it directly
-    if run_result.get("final_answer") and status in ("success", "partial"):
+    if run_result.get("final_answer") and status in ("success", "partial", "confirmation_required"):
         return run_result["final_answer"]
 
     if status == "success":
@@ -566,6 +611,14 @@ def _render_workflow_output(run_result: dict, original_command: str = "") -> str
         parts.append(_render_step_result(s))
 
     return "\n".join(parts)
+
+
+def _extract_confirmation_from_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    for action in actions or []:
+        confirmation = action.get("confirmation")
+        if isinstance(confirmation, dict) and confirmation.get("action_key"):
+            return confirmation
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -700,17 +753,81 @@ class HubProcessor:
         # Build conversation history for this session
         history = _SESSION_HISTORY.setdefault(session_id, [])
 
-        try:
-            response_text, actions, status, file_artifacts, search_paths = self._dispatch(
-                req, history, on_progress=on_progress
-            )
-        except Exception as exc:
-            logger.exception("[HubProcessor] Unhandled error: %s", exc)
-            response_text = f"❌ An unexpected error occurred: {exc}"
-            actions = []
+        pending_confirmation = get_pending_confirmation(session_id)
+        reply_decision = parse_confirmation_reply(message)
+        confirmed_action_keys: List[str] = []
+        if pending_confirmation:
+            expected_key = str(pending_confirmation.get("action_key", "") or "").strip()
+            if reply_decision:
+                reply_key = str(reply_decision.get("action_key", "") or "").strip()
+                if reply_key and expected_key and reply_key != expected_key:
+                    clear_pending_confirmation(session_id)
+                elif reply_decision.get("decision") == "cancel":
+                    clear_pending_confirmation(session_id)
+                    return HubResponse(
+                        response=f"Cancelled destructive action: {pending_confirmation.get('message', 'delete operation')}.",
+                        source=source,
+                        actions_taken=[{"action": "destructive_action_cancelled", "confirmation": pending_confirmation}],
+                        status="success",
+                        elapsed=round(time.perf_counter() - t0, 2),
+                    )
+                else:
+                    clear_pending_confirmation(session_id)
+                    confirmed_action_keys = [expected_key] if expected_key else []
+                    req = HubRequest(
+                        message=str(pending_confirmation.get("original_message", message) or message),
+                        session_id=session_id,
+                        source=str(pending_confirmation.get("source", source) or source),
+                        agent_id=str(pending_confirmation.get("agent_id", agent_id) or agent_id),
+                        agent_name=str(pending_confirmation.get("agent_name", agent_name) or agent_name),
+                    )
+            else:
+                clear_pending_confirmation(session_id)
+
+        security_decision = evaluate_inbound_request(
+            message=message,
+            session_id=session_id,
+            source=source,
+            agent_id=agent_id,
+            is_confirmation_reply=bool(reply_decision),
+        )
+        if security_decision.decision == "allow":
+            try:
+                response_text, actions, status, file_artifacts, search_paths, channel_payloads = self._dispatch(
+                    req, history, on_progress=on_progress, confirmed_action_keys=confirmed_action_keys
+                )
+            except Exception as exc:
+                logger.exception("[HubProcessor] Unhandled error: %s", exc)
+                response_text = f"❌ An unexpected error occurred: {exc}"
+                actions = []
+                status = "error"
+                file_artifacts = []
+                search_paths = []
+                channel_payloads = {}
+        else:
+            response_text = security_decision.user_message
+            actions = [{
+                "action": "security_guardrail",
+                "security": security_decision.to_dict(),
+            }]
             status = "error"
             file_artifacts = []
             search_paths = []
+            channel_payloads = {}
+
+        if status == "confirmation_required":
+            confirmation = _extract_confirmation_from_actions(actions)
+            if confirmation:
+                set_pending_confirmation(
+                    session_id,
+                    {
+                        **confirmation,
+                        "original_message": req.message,
+                        "source": req.source,
+                        "agent_id": req.agent_id,
+                        "agent_name": req.agent_name,
+                    },
+                )
 
         # Update session history with timestamps
         _ts = datetime.now(timezone.utc).isoformat()
@@ -764,6 +881,7 @@ class HubProcessor:
             status=status,
             elapsed=round(time.perf_counter() - t0, 2),
             file_artifacts=file_artifacts,
+            channel_payloads=channel_payloads,
         )
 
     # ------------------------------------------------------------------
@@ -773,14 +891,15 @@ class HubProcessor:
         req: HubRequest,
         history: List[Dict[str, str]],
         on_progress: Optional[Callable[[str], None]] = None,
-    ) -> tuple[str, list, str, list]:
+        confirmed_action_keys: Optional[List[str]] = None,
+    ) -> tuple[str, list, str, list, list, Dict[str, Any]]:
         """
         Route the message:
           1. Neither agent → conversational LLM reply
           2. Single agent  → direct agent orchestrator
           3. Multi-agent   → workflow planner + runner
 
-        Returns (response_text, actions, status, file_artifacts).
+        Returns (response_text, actions, status, file_artifacts, search_paths, channel_payloads).
         """
         from src.agent.workflows import classify_and_route, run_workflow
 
@@ -820,7 +939,7 @@ class HubProcessor:
             skill_help_reply = None
 
         if skill_help_reply:
-            return skill_help_reply, [], "success", [], []
+            return skill_help_reply, [], "success", [], [], {}
 
         # ── Unified intent classification ─────────────────────────────────────
         # classify_and_route() handles all three message patterns in one LLM call:
@@ -866,7 +985,7 @@ class HubProcessor:
                     "Could you be more specific? For example:\n"
                     "- *'Search for my payslip files and email them to me'*\n"
                     "- *'Find the project report and send it to my email'*",
-                    [], "success", [], [],
+                    [], "success", [], [], {},
                 )
             # No pronoun, no agents — treat as a general chat question
             agents_needed = None
@@ -881,6 +1000,7 @@ class HubProcessor:
                     "success",
                     [],
                     [],
+                    {},
                 )
             agents_needed = filtered_agents
 
@@ -892,7 +1012,7 @@ class HubProcessor:
             except Exception:
                 auth_reply = None
             if auth_reply:
-                return auth_reply, [], "success", [], []
+                return auth_reply, [], "success", [], [], {}
 
         # ── 1. Conversational fallback ─────────────────────────────────────
         if agents_needed is None:
@@ -906,7 +1026,7 @@ class HubProcessor:
                 source_agent="chat",
             )
             _log_workflow_summary("💬 Chat", [], 1, time.perf_counter() - t_dispatch, "success")
-            return reply, actions, "success", file_artifacts, search_paths
+            return reply, actions, "success", file_artifacts, search_paths, {}
 
         # ── 2. Single-agent shortcut ───────────────────────────────────────
         if len(agents_needed) == 1:
@@ -916,7 +1036,9 @@ class HubProcessor:
                 query_for_agent = routing_message
             # Pass the structurally-enriched query so the skill agent receives
             # resolved entities (ISO dates, 24h times …) from Session State.
-            reply, acts, artifacts, s_paths = self._run_single_agent(agents_needed[0], req, query=query_for_agent)
+            reply, acts, artifacts, s_paths, channel_payloads = self._run_single_agent(
+                agents_needed[0], req, query=query_for_agent, confirmed_action_keys=confirmed_action_keys
+            )
             reply, acts, recovered_artifacts, recovered_search_paths = self._maybe_recover_with_browser(
                 req,
                 history,
@@ -932,16 +1054,16 @@ class HubProcessor:
                 except Exception:
                     auth_reply = None
                 if auth_reply:
-                    return auth_reply, acts, "success", [], []
+                    return auth_reply, acts, "success", [], [], {}
             if recovered_artifacts or recovered_search_paths:
                 artifacts = recovered_artifacts
                 s_paths = recovered_search_paths
             _llm_calls = acts[0].get("llm_calls", 1) if acts else 1
             _log_workflow_summary(
                 "⚙️ Skill DAG", agents_needed, _llm_calls,
-                time.perf_counter() - t_dispatch, "success",
+                time.perf_counter() - t_dispatch, acts[0].get("status", "success") if acts else "success",
             )
-            return reply, acts, "success", artifacts, s_paths
+            return reply, acts, acts[0].get("status", "success") if acts else "success", artifacts, s_paths, channel_payloads
 
         # ── 3. Multi-agent workflow ────────────────────────────────────────
         _agents_str = " + ".join(a.title() for a in agents_needed)
@@ -952,12 +1074,23 @@ class HubProcessor:
         # Pass the enriched query (with ## Session State block) so the DAG
         # planner can resolve context references like 'them' / 'those files'
         # from compact session state such as bundle dir, file path, or manifest.
-        run_result = run_workflow(workflow_query)
+        run_result = run_workflow(workflow_query, confirmed_action_keys=confirmed_action_keys)
         response_text = _render_workflow_output(run_result, req.message)
         actions = [
-            {"agent": s.get("agent"), "tool": s.get("tool"), "status": s.get("status")}
+            {
+                "agent": s.get("agent"),
+                "tool": s.get("tool"),
+                "status": s.get("status"),
+                "confirmation": ((s.get("result") or {}).get("confirmation") if isinstance(s.get("result"), dict) else None),
+            }
             for s in run_result.get("steps", [])
         ]
+        channel_payloads: Dict[str, Any] = {}
+        for step in run_result.get("steps", []):
+            result = step.get("result") or {}
+            if step.get("status") == "confirmation_required" and isinstance(result, dict):
+                channel_payloads = result.get("channel_payloads", {}) or {}
+                break
         # Gather file artifacts from step results
         # file_artifacts: explicitly delivered files (zip, report, deliver_file output) — sent to Telegram
         # search_paths:   individual search hits (for context/follow-up) — NOT auto-sent
@@ -1011,9 +1144,9 @@ class HubProcessor:
             except Exception:
                 auth_reply = None
             if auth_reply:
-                return auth_reply, actions, "success", [], []
+                return auth_reply, actions, "success", [], [], {}
 
-        return response_text, actions, run_result.get("status", "error"), file_artifacts, search_paths
+        return response_text, actions, run_result.get("status", "error"), file_artifacts, search_paths, channel_payloads
 
     # ------------------------------------------------------------------
 
@@ -1081,11 +1214,12 @@ class HubProcessor:
             source_agent,
         )
 
-        browser_reply, browser_actions, browser_artifacts, browser_search_paths = self._run_single_agent(
+        browser_run = self._run_single_agent(
             "browser",
             req,
             query=req.message,
         )
+        browser_reply, browser_actions, browser_artifacts, browser_search_paths = browser_run[:4]
 
         if not browser_reply or _looks_like_stale_freshness_answer(browser_reply):
             logger.info("[browser-recovery] browser fallback did not improve the answer")
@@ -1096,7 +1230,7 @@ class HubProcessor:
 
     # ------------------------------------------------------------------
 
-    def _run_single_agent(self, agent: str, req: HubRequest, query: Optional[str] = None) -> tuple[str, list, list]:
+    def _run_single_agent(self, agent: str, req: HubRequest, query: Optional[str] = None, confirmed_action_keys: Optional[List[str]] = None) -> tuple[str, list, list, list, Dict[str, Any]]:
         """
         Route to a single agent using the registry — no hardcoded agent names.
         Falls back to a generic executor call if no dedicated response composer exists.
@@ -1104,15 +1238,14 @@ class HubProcessor:
         query: if provided, use this instead of req.message for agent execution.
                Allows callers to pass an enriched/resolved command.
 
-        Returns (reply_text, actions, file_artifacts).
+        Returns (reply_text, actions, file_artifacts, search_paths, channel_payloads).
         """
         try:
             from src.agent.workflows.agent_registry import get_executor
-            from pathlib import Path as _P  # noqa: PLC0415  # late import to avoid circular
 
             executor = get_executor(agent)
             if executor is None:
-                return f"❌ Agent '{agent}' is registered but could not be loaded.", [], [], []
+                return f"❌ Agent '{agent}' is registered but could not be loaded.", [], [], [], {}
 
             effective_query = query if query is not None else req.message
             # ── Context Manifest injection ────────────────────────────────
@@ -1142,14 +1275,17 @@ class HubProcessor:
                 "_pa_id": req.agent_id,
                 "_source": req.source,
             }
+            if confirmed_action_keys:
+                artifacts_out["_confirmed_action_keys"] = list(confirmed_action_keys)
             result = executor(effective_query, agent_id=None, artifacts_out=artifacts_out)
             action = result.get("action", "react_response")
+            channel_payloads = result.get("channel_payloads", {}) if isinstance(result, dict) else {}
 
             # Explicit deliveries only: file_path is set by deliver_file() — sent to Telegram/Dashboard
             file_artifacts: List[str] = []
             _seen_fa: set = set()
             fp = artifacts_out.get("file_path") or result.get("file_path")
-            if fp and isinstance(fp, str) and _P(fp).exists() and fp not in _seen_fa:
+            if fp and isinstance(fp, str) and Path(fp).exists() and fp not in _seen_fa:
                 file_artifacts.append(fp)
                 _seen_fa.add(fp)
             # Search results (found_paths) — for context / follow-up only, NOT auto-delivered
@@ -1168,24 +1304,24 @@ class HubProcessor:
                         read_context as _rc,
                         write_context as _wc,
                     )
+                    from src.files.features.file_ops import save_search_manifest as _save_search_manifest
                     if _rc(agent=agent) is None:
                         entities = {
                             "found_count": len(search_paths),
                         }
+                        manifest_result = _save_search_manifest(search_paths, label=req.message or "search_results")
+                        if manifest_result.get("status") == "success":
+                            entities["file_manifest"] = str(manifest_result.get("manifest_path", "") or "")
+                            entities["manifest_id"] = str(manifest_result.get("manifest_id", "") or "")
                         bundle_dir = str(artifacts_out.get("search_bundle_dir") or result.get("search_bundle_dir") or "").strip()
                         if bundle_dir:
                             entities["search_bundle_dir"] = bundle_dir
-                        try:
-                            from src.agent.runtime_paths import get_runtime_state_path as _grp
-                            entities["file_manifest"] = str(_grp("octa_manifest.txt"))
-                        except Exception:
-                            pass
                         if len(search_paths) <= 10:
                             entities["listed_files"] = [
                                 {
                                     "index": idx,
                                     "path": path,
-                                    "name": _P(path).name,
+                                            "name": Path(path).name,
                                 }
                                 for idx, path in enumerate(search_paths)
                             ]
@@ -1205,11 +1341,20 @@ class HubProcessor:
             # ReAct / NL orchestrators return a ready-made message
             if action == "react_response" or "message" in result:
                 _llm = result.get("llm_calls", 1)
+                action_record = {
+                    "agent": agent,
+                    "action": action,
+                    "llm_calls": _llm,
+                    "status": result.get("status", "success"),
+                }
+                if isinstance(result, dict) and isinstance(result.get("confirmation"), dict):
+                    action_record["confirmation"] = result.get("confirmation")
                 return (
                     result.get("message", str(result)),
-                    [{"agent": agent, "action": action, "llm_calls": _llm}],
+                    [action_record],
                     file_artifacts,
                     search_paths,
+                    channel_payloads,
                 )
 
             # Try to find a dedicated response composer for richer formatting
@@ -1221,19 +1366,26 @@ class HubProcessor:
                 if compose_fn:
                     reply = compose_fn(result, action, req.message)
                     _llm = result.get("llm_calls", 1)
-                    return reply, [{"agent": agent, "action": action, "llm_calls": _llm}], file_artifacts, search_paths
+                    action_record = {"agent": agent, "action": action, "llm_calls": _llm, "status": result.get("status", "success")}
+                    if isinstance(result.get("confirmation"), dict):
+                        action_record["confirmation"] = result.get("confirmation")
+                    return reply, [action_record], file_artifacts, search_paths, channel_payloads
             except Exception:
                 pass
 
             # Last resort: stringify the result
             _llm = result.get("llm_calls", 1)
+            action_record = {"agent": agent, "action": action, "llm_calls": _llm, "status": result.get("status", "success")}
+            if isinstance(result.get("confirmation"), dict):
+                action_record["confirmation"] = result.get("confirmation")
             return (
                 str(result.get("message", result)),
-                [{"agent": agent, "action": action, "llm_calls": _llm}],
+                [action_record],
                 file_artifacts,
                 search_paths,
+                channel_payloads,
             )
 
         except Exception as exc:
             logger.exception("Single-agent error (%s): %s", agent, exc)
-            return f"❌ {agent.title()} agent error: {exc}", [{"agent": agent, "status": "error"}], [], []
+            return f"❌ {agent.title()} agent error: {exc}", [{"agent": agent, "status": "error"}], [], [], {}

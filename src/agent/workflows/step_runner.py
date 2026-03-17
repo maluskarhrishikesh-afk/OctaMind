@@ -12,172 +12,36 @@ import json
 import logging
 from typing import Any, Callable, Dict, Optional
 
+from src.agent.workflows.agent_registry import get_runtime_tool_map
 from src.agent.workflows.workflow_context import WorkflowContext, WorkflowStep
 from src.agent.workflows import file_bridge
 
 logger = logging.getLogger("workflows")
 
-# ---------------------------------------------------------------------------
-# Drive tool registry
-# ---------------------------------------------------------------------------
-
-
-def _build_drive_registry() -> Dict[str, Callable]:
-    try:
-        from src.drive import (
-            list_files, search_files, get_file_info, upload_file, download_file,
-            create_folder, move_file, copy_file, trash_file, restore_file,
-            star_file, get_storage_quota,
-            share_file, list_permissions, remove_permission, update_permission,
-            make_public, remove_public,
-            summarize_file, summarize_folder,
-            find_duplicates, trash_duplicates,
-            suggest_organization, auto_organize, bulk_rename,
-            list_versions, get_version_info, restore_version, delete_old_versions,
-            storage_breakdown, list_large_files, list_old_files,
-            list_recently_modified, find_orphaned_files, sharing_report,
-            generate_drive_report, get_usage_insights,
-        )
-        return {
-            "list_files": list_files,
-            "search_files": search_files,
-            "get_file_info": get_file_info,
-            "upload_file": upload_file,
-            "download_file": download_file,
-            "create_folder": create_folder,
-            "move_file": move_file,
-            "copy_file": copy_file,
-            "trash_file": trash_file,
-            "restore_file": restore_file,
-            "star_file": star_file,
-            "get_storage_quota": get_storage_quota,
-            "share_file": share_file,
-            "list_permissions": list_permissions,
-            "remove_permission": remove_permission,
-            "update_permission": update_permission,
-            "make_public": make_public,
-            "remove_public": remove_public,
-            "summarize_file": summarize_file,
-            "summarize_folder": summarize_folder,
-            "find_duplicates": find_duplicates,
-            "trash_duplicates": trash_duplicates,
-            "suggest_organization": suggest_organization,
-            "auto_organize": auto_organize,
-            "bulk_rename": bulk_rename,
-            "list_versions": list_versions,
-            "get_version_info": get_version_info,
-            "restore_version": restore_version,
-            "delete_old_versions": delete_old_versions,
-            "storage_breakdown": storage_breakdown,
-            "list_large_files": list_large_files,
-            "list_old_files": list_old_files,
-            "list_recently_modified": list_recently_modified,
-            "find_orphaned_files": find_orphaned_files,
-            "sharing_report": sharing_report,
-            "generate_drive_report": generate_drive_report,
-            "get_usage_insights": get_usage_insights,
-        }
-    except ImportError as exc:
-        logger.warning("Drive module not available: %s", exc)
-        return {}
-
-
-# ---------------------------------------------------------------------------
-# Email tool registry
-# ---------------------------------------------------------------------------
-def _build_email_registry() -> Dict[str, Callable]:
-    try:
-        from src.email import (
-            send_email, send_email_with_attachment, list_emails, get_inbox_count, get_todays_emails,
-            delete_emails, extract_action_items, get_all_pending_actions,
-            generate_reply_suggestions, quick_reply,
-            create_draft, list_drafts, send_draft, delete_draft,
-            list_attachments, download_attachment, search_emails_with_attachments,
-            auto_categorize_email, apply_smart_labels,
-            extract_calendar_events, suggest_calendar_entry,
-            mark_for_followup, get_pending_followups, check_unanswered_emails,
-            schedule_email, list_scheduled_emails, cancel_scheduled_email,
-            get_frequent_contacts, get_contact_summary,
-            detect_urgent_emails, auto_prioritize,
-            detect_newsletters, extract_unsubscribe_link,
-            get_email_stats, get_productivity_insights,
-            calculate_response_time, visualize_patterns, generate_weekly_report,
-            mark_action_complete, get_saved_tasks, create_category_rules,
-            export_to_calendar, send_followup_reminder, mark_followup_done,
-            dismiss_followup, update_scheduled_email,
-            suggest_vip_contacts, export_contacts,
-        )
-        return {
-            "send_email": send_email,
-            "send_email_with_attachment": send_email_with_attachment,
-            "list_emails": list_emails,
-            "get_inbox_count": get_inbox_count,
-            "get_todays_emails": get_todays_emails,
-            "delete_emails": delete_emails,
-            "extract_action_items": extract_action_items,
-            "get_all_pending_actions": get_all_pending_actions,
-            "generate_reply_suggestions": generate_reply_suggestions,
-            "quick_reply": quick_reply,
-            "create_draft": create_draft,
-            "list_drafts": list_drafts,
-            "send_draft": send_draft,
-            "delete_draft": delete_draft,
-            "list_attachments": list_attachments,
-            "download_attachment": download_attachment,
-            "search_emails_with_attachments": search_emails_with_attachments,
-            "auto_categorize_email": auto_categorize_email,
-            "apply_smart_labels": apply_smart_labels,
-            "extract_calendar_events": extract_calendar_events,
-            "suggest_calendar_entry": suggest_calendar_entry,
-            "mark_for_followup": mark_for_followup,
-            "get_pending_followups": get_pending_followups,
-            "check_unanswered_emails": check_unanswered_emails,
-            "schedule_email": schedule_email,
-            "list_scheduled_emails": list_scheduled_emails,
-            "cancel_scheduled_email": cancel_scheduled_email,
-            "get_frequent_contacts": get_frequent_contacts,
-            "get_contact_summary": get_contact_summary,
-            "detect_urgent_emails": detect_urgent_emails,
-            "auto_prioritize": auto_prioritize,
-            "detect_newsletters": detect_newsletters,
-            "extract_unsubscribe_link": extract_unsubscribe_link,
-            "get_email_stats": get_email_stats,
-            "get_productivity_insights": get_productivity_insights,
-            "calculate_response_time": calculate_response_time,
-            "visualize_patterns": visualize_patterns,
-            "generate_weekly_report": generate_weekly_report,
-            "mark_action_complete": mark_action_complete,
-            "get_saved_tasks": get_saved_tasks,
-            "create_category_rules": create_category_rules,
-            "export_to_calendar": export_to_calendar,
-            "send_followup_reminder": send_followup_reminder,
-            "mark_followup_done": mark_followup_done,
-            "dismiss_followup": dismiss_followup,
-            "update_scheduled_email": update_scheduled_email,
-            "suggest_vip_contacts": suggest_vip_contacts,
-            "export_contacts": export_contacts,
-        }
-    except ImportError as exc:
-        logger.warning("Email module not available: %s", exc)
-        return {}
-
-
-# Lazy singletons — built once on first use
+_TOOL_REGISTRIES: Dict[str, Dict[str, Callable]] = {}
 _DRIVE_REGISTRY: Optional[Dict[str, Callable]] = None
 _EMAIL_REGISTRY: Optional[Dict[str, Callable]] = None
+
+
+def _get_registry(agent_name: str) -> Dict[str, Callable]:
+    registry = _TOOL_REGISTRIES.get(agent_name)
+    if registry is None:
+        registry = get_runtime_tool_map(agent_name)
+        _TOOL_REGISTRIES[agent_name] = registry
+    return registry
 
 
 def _get_drive_registry() -> Dict[str, Callable]:
     global _DRIVE_REGISTRY
     if _DRIVE_REGISTRY is None:
-        _DRIVE_REGISTRY = _build_drive_registry()
+        _DRIVE_REGISTRY = _get_registry("drive")
     return _DRIVE_REGISTRY
 
 
 def _get_email_registry() -> Dict[str, Callable]:
     global _EMAIL_REGISTRY
     if _EMAIL_REGISTRY is None:
-        _EMAIL_REGISTRY = _build_email_registry()
+        _EMAIL_REGISTRY = _get_registry("email")
     return _EMAIL_REGISTRY
 
 
@@ -314,15 +178,11 @@ def run_step(step: WorkflowStep, ctx: WorkflowContext) -> Dict[str, Any]:
         list(step.params.keys()),
     )
 
-    # Select registry
-    if step.agent == "drive":
-        registry = _get_drive_registry()
-    elif step.agent == "email":
-        registry = _get_email_registry()
-    else:
+    registry = _get_registry(step.agent)
+    if not registry:
         return {
             "status": "error",
-            "error": f"Unknown agent type: '{step.agent}'",
+            "error": f"Unknown agent type or empty runtime tool map: '{step.agent}'",
             "step": step.step_num,
         }
 

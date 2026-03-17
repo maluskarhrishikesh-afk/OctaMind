@@ -34,6 +34,8 @@ import re
 import time
 from typing import Any, Callable, Dict, Optional
 
+from src.agent.workflows.confirmation_policy import maybe_guard_destructive_tool_call
+
 logger = logging.getLogger("workflows.skill_react")
 
 _MAX_ITERATIONS_DEFAULT = 6
@@ -171,6 +173,18 @@ def run_skill_react(
             callable_fn = tool_map[tool_name]
             try:
                 logger.info("│    [%s] → calling tool=%s  kwargs=%s", skill_name, tool_name, str(kwargs)[:120])
+                confirmation = maybe_guard_destructive_tool_call(
+                    skill_name=skill_name,
+                    tool_name=tool_name,
+                    kwargs=kwargs if isinstance(kwargs, dict) else {},
+                    artifacts_out=artifacts_out,
+                )
+                if confirmation:
+                    confirmation.setdefault("action", tool_name)
+                    confirmation["llm_calls"] = _llm_calls
+                    confirmation["file_path"] = artifacts_out.get("file_path", "")
+                    confirmation["found_paths"] = artifacts_out.get("found_paths", [])
+                    return confirmation
                 result = callable_fn(**kwargs) if kwargs else callable_fn()
                 # Merge any file path into artifacts_out for cross-agent handoff
                 # Always stored under "file_path" so {step_id.file_path} tokens resolve

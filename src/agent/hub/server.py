@@ -81,6 +81,7 @@ class ChatResponse(BaseModel):
     status: str
     elapsed: float
     actions_taken: List[Dict[str, Any]] = []
+    channel_payloads: Dict[str, Any] = {}
     session_id: str
 
 
@@ -165,6 +166,7 @@ async def chat(
         status=result.status,
         elapsed=result.elapsed,
         actions_taken=result.actions_taken,
+        channel_payloads=result.channel_payloads,
         session_id=body.session_id,
     )
 

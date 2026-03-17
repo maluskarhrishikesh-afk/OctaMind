@@ -68,6 +68,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from src.agent.runtime_paths import get_your_data_dir
+from src.agent.workflows.confirmation_policy import maybe_guard_destructive_tool_call
 
 logger = logging.getLogger("workflows.skill_dag")
 
@@ -132,7 +133,7 @@ def _merge_manifest_into_session(session_vars: Dict[str, Any]) -> Dict[str, Any]
     import os
     from pathlib import Path as _Path
     from src.agent.manifest.context_manifest import read_context
-    from src.agent.runtime_paths import get_existing_runtime_state_path
+    from src.files.features.file_ops import get_active_file_manifest_metadata, resolve_file_manifest_path
 
     try:
         updated = dict(session_vars)
@@ -157,7 +158,9 @@ def _merge_manifest_into_session(session_vars: Dict[str, Any]) -> Dict[str, Any]
                     if str(listed_files[0].get("type", "") or "").strip().lower() == "folder":
                         updated["last_found_folder"] = single_path
 
-        manifest_path = get_existing_runtime_state_path("octa_manifest.txt")
+        active_manifest = get_active_file_manifest_metadata()
+        manifest_candidate = str(active_manifest.get("manifest_path", "") or "").strip()
+        manifest_path = _Path(manifest_candidate) if manifest_candidate else resolve_file_manifest_path()
         if not manifest_path.exists():
             return updated
 
@@ -174,6 +177,8 @@ def _merge_manifest_into_session(session_vars: Dict[str, Any]) -> Dict[str, Any]
             return updated
 
         updated.setdefault("file_manifest", str(manifest_path))
+        if active_manifest.get("manifest_id"):
+            updated.setdefault("manifest_id", str(active_manifest.get("manifest_id")))
         updated.setdefault("found_count", len(raw_paths))
         if len(raw_paths) == 1:
             updated.setdefault("last_found_file_path", raw_paths[0])
@@ -437,7 +442,7 @@ def run_skill_dag(
     # ── Extract session state from enriched query (## Session State block) ──
     # Used to resolve {__session__.field} tokens in LLM-planned kwargs.
     session_vars = _extract_session_state(user_query)
-    # ── Augment compact file context from octa_manifest.txt when available ──
+    # ── Augment compact file context from the active file manifest when available ──
     # Background jobs update the manifest but NOT the session state, which can
     # cause stale session state to point at old file paths (e.g. the email report
     # folder instead of the just-searched payslip files).
@@ -507,6 +512,19 @@ def run_skill_dag(
             continue
 
         try:
+            confirmation = maybe_guard_destructive_tool_call(
+                skill_name=skill_name,
+                tool_name=tool_name,
+                kwargs=kwargs if isinstance(kwargs, dict) else {},
+                artifacts_out=artifacts_out,
+            )
+            if confirmation:
+                confirmation.setdefault("action", tool_name)
+                confirmation["llm_calls"] = llm_calls
+                confirmation["_dag_used"] = True
+                confirmation["file_path"] = artifacts_out.get("file_path", "")
+                confirmation["found_paths"] = artifacts_out.get("found_paths", [])
+                return confirmation
             result_raw = callable_fn(**kwargs) if kwargs else callable_fn()
             step_results[step_id] = result_raw
 

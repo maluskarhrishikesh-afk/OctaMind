@@ -151,7 +151,8 @@ Available agents:
 
 SPECIAL CONTEXT TOKENS always available in instructions:
 - {{__user_email__}} — the authenticated user's own email address.
-  Use it when the user says "email me", "send it to me", "notify me", etc.
+    Use it only when the user explicitly says "email me", "mail it", "send it by email", mentions an inbox, or provides an email address.
+    Do NOT use it for current-channel delivery phrases like "send it to me", "give me the file", "share it here", or "download it" — those should return the file to the current Telegram/Dashboard channel via files delivery.
 - {{<step_id>.file_path}} — the local file path produced by a previous step.
   Use it to pass files between agents.
   Example: step 2 instruction → "Zip the file at {{download1.file_path}}"
@@ -426,6 +427,7 @@ def execute_dag_workflow(
     plan: DAGPlan,
     agent_ids: Optional[Dict[str, str]] = None,
     user_email: Optional[str] = None,
+    confirmed_action_keys: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Execute a DAGPlan deterministically.
@@ -547,6 +549,8 @@ def execute_dag_workflow(
             continue
 
         artifacts_out: Dict[str, Any] = {}
+        if confirmed_action_keys:
+            artifacts_out["_confirmed_action_keys"] = list(confirmed_action_keys)
         try:
             raw_result = executor(
                 user_query=resolved,
@@ -570,6 +574,28 @@ def execute_dag_workflow(
             # Mark failed so dependents are skipped
             if exec_status == "error":
                 failed_step_ids.add(step.id)
+            if exec_status == "confirmation_required":
+                steps_results.append({
+                    "step": step.id,
+                    "agent": step.agent,
+                    "tool": step.description or step.instruction[:60],
+                    "instruction": step.instruction,
+                    "status": exec_status,
+                    "result": {
+                        "message": text[:500],
+                        "artifacts": artifacts_out,
+                        "confirmation": raw_result.get("confirmation") if isinstance(raw_result, dict) else None,
+                        "channel_payloads": raw_result.get("channel_payloads", {}) if isinstance(raw_result, dict) else {},
+                    },
+                    "error": None,
+                    "elapsed": time.time() - t0,
+                    "llm_calls": _step_llm_calls,
+                })
+                logger.info(
+                    "│  ⏸ DAG step [%-12s]  agent=%-10s  confirmation required",
+                    step.id, step.agent,
+                )
+                break
 
             steps_results.append({
                 "step":        step.id,
@@ -577,7 +603,12 @@ def execute_dag_workflow(
                 "tool":        step.description or step.instruction[:60],
                 "instruction": step.instruction,
                 "status":      exec_status,
-                "result":      {"message": text[:500], "artifacts": artifacts_out},
+                "result":      {
+                    "message": text[:500],
+                    "artifacts": artifacts_out,
+                    "confirmation": raw_result.get("confirmation") if isinstance(raw_result, dict) else None,
+                    "channel_payloads": raw_result.get("channel_payloads", {}) if isinstance(raw_result, dict) else {},
+                },
                 "error":       text[:300] if exec_status == "error" else None,
                 "elapsed":     time.time() - t0,
                 "llm_calls":   _step_llm_calls,

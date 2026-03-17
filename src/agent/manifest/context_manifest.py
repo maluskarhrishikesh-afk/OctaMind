@@ -55,6 +55,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
+from os import PathLike
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -107,7 +108,7 @@ _AWAITING_INSTRUCTIONS: Dict[str, str] = {
     ),
     "file_action": (
         "The user is acting on files from the previous search. "
-        "File paths are stored in the file manifest (octa_manifest.txt). "
+        "File paths are stored in the active file manifest referenced by `file_manifest`. "
         "If `search_bundle_dir` is present, prefer that staged folder for zip/send follow-ups. "
         "Call collect_files_from_manifest() to copy, call zip_files_from_manifest() to zip EXACTLY those files, or use files from `listed_files` "
         "in this context. Do NOT run a new search — the files are already resolved.\n"
@@ -115,6 +116,7 @@ _AWAITING_INSTRUCTIONS: Dict[str, str] = {
         "(e.g. {\"path\": \"C:\\\\Users\\\\...\\\\Text\", \"type\": \"folder\"}), "
         "call zip_folder(folder_path=<that path>) DIRECTLY — do NOT call "
         "collect_files_from_manifest for a folder path.\n"
+        "CURRENT-CHANNEL DELIVERY RULE: If the user says 'send it to me', 'give me the file', 'share it here', or 'download it' without explicitly saying email/mail or giving an email address, deliver it back to the current chat channel via files delivery tools — do NOT route that request to email.\n"
         "SUBSET ZIP RULE: If the previous search returned multiple files and the user says 'zip them' or 'send them as a zip', do NOT zip `last_found_folder` because that may include unrelated files. Prefer `search_bundle_dir` when present; otherwise use zip_files_from_manifest() unless the previous result was a single folder path.\n"
         "DESTINATION RULES — resolve in this order and NEVER ask the user:\n"
         "  1. Absolute path given (e.g. 'C:\\\\Users\\\\...') → use as-is.\n"
@@ -896,7 +898,7 @@ def auto_save_drive_context(result: Any, query: str = "") -> Any:
 def auto_save_files_context(result: Any, query: str = "") -> Any:
     """
     After a local file search, save the search metadata as context.
-    The actual file paths are in octa_manifest.txt (file manifest);
+    The actual file paths are in the active file manifest referenced by `file_manifest`;
     for small result sets (≤ 50 files) we also embed the path list directly
     so the LLM can resolve specific-file references ('the second one', 'report.pdf').
     Returns `result` unchanged.
@@ -905,29 +907,104 @@ def auto_save_files_context(result: Any, query: str = "") -> Any:
         if not isinstance(result, dict):
             return result
         results_list = result.get("results", [])
-        count = result.get("count", len(results_list))
-        if count <= 0:
-            return result
+        directory_entries = result.get("entries", [])
+        directory_path = str(result.get("path", "") or "").strip()
         entities: Dict[str, Any] = {
-            "query":         query,
-            "found_count":   count,
-            "file_manifest": str(_MANIFEST_DIR / "octa_manifest.txt"),
+            "query": query,
         }
+
+        manifest_path = str(result.get("manifest_path", "") or "").strip()
+        if manifest_path:
+            entities["file_manifest"] = manifest_path
+        manifest_id = str(result.get("manifest_id", "") or "").strip()
+        if manifest_id:
+            entities["manifest_id"] = manifest_id
+        manifest_label = str(result.get("manifest_label", result.get("label", "")) or "").strip()
+        if manifest_label:
+            entities["manifest_label"] = manifest_label
+
+        if isinstance(results_list, list) and results_list:
+            count = int(result.get("count", len(results_list)) or len(results_list))
+            entities["found_count"] = count
+            entities["selection_kind"] = "search_results"
+            compact_results = []
+            selected_paths = []
+            for idx, item in enumerate(results_list[:50]):
+                if isinstance(item, dict):
+                    path_str = str(item.get("path", "") or "").strip()
+                    name = str(item.get("name", "") or "").strip() or Path(path_str).name
+                    item_type = str(item.get("type", "") or "").strip().lower()
+                    size = item.get("size_human", item.get("size", ""))
+                else:
+                    path_str = str(item).strip()
+                    name = Path(path_str).name
+                    item_type = ""
+                    size = ""
+                if not path_str:
+                    continue
+                compact_results.append(
+                    {
+                        "index": idx,
+                        "path": path_str,
+                        "name": name,
+                        "size": size,
+                        "type": item_type,
+                    }
+                )
+                selected_paths.append(path_str)
+            if compact_results:
+                entities["listed_files"] = compact_results
+                entities["selected_paths"] = selected_paths
+        elif isinstance(directory_entries, list) and directory_path:
+            entities["selection_kind"] = "directory_listing"
+            entities["directory_path"] = directory_path
+            entities["selected_paths"] = [directory_path]
+            compact_entries = []
+            file_entries = 0
+            for idx, entry in enumerate(directory_entries[:200]):
+                if not isinstance(entry, dict):
+                    continue
+                name = str(entry.get("name", "") or "").strip()
+                if not name:
+                    continue
+                item_type = str(entry.get("type", "") or "").strip().lower()
+                if item_type == "file":
+                    file_entries += 1
+                absolute_path = str(Path(directory_path) / name)
+                compact_entries.append(
+                    {
+                        "index": idx,
+                        "path": absolute_path,
+                        "name": name,
+                        "size": entry.get("size_human", entry.get("size", "")),
+                        "type": item_type,
+                    }
+                )
+            found_count = result.get("files")
+            if not isinstance(found_count, int):
+                found_count = file_entries if file_entries else len(compact_entries)
+            if found_count > 0:
+                entities["found_count"] = int(found_count)
+            if compact_entries:
+                entities["listed_files"] = compact_entries
+
+        if int(entities.get("found_count", 0) or 0) <= 0 and not entities.get("directory_path"):
+            return result
+
         bundle_dir = str(result.get("search_bundle_dir", "") or "").strip()
         if bundle_dir:
             entities["search_bundle_dir"] = bundle_dir
-        # Embed compact file list for manageable result sets so the LLM can
-        # resolve references like 'the second PDF' or 'report.pdf' in follow-up turns.
-        if results_list and count <= 50:
-            entities["listed_files"] = [
-                {
-                    "index": idx,
-                    "path":  r.get("path", str(r)) if isinstance(r, dict) else str(r),
-                    "name":  r.get("name", "") if isinstance(r, dict) else "",
-                    "size":  r.get("size_human", r.get("size", "")) if isinstance(r, dict) else "",
-                }
-                for idx, r in enumerate(results_list[:50])
-            ]
+
+        if "file_manifest" not in entities:
+            try:
+                from src.files.features.file_ops import get_active_file_manifest_metadata  # noqa: PLC0415
+
+                active_manifest = get_active_file_manifest_metadata()
+                active_path = str(active_manifest.get("manifest_path", "") or "").strip()
+                if active_path:
+                    entities["file_manifest"] = active_path
+            except Exception:
+                pass
         write_context(
             agent="files",
             topic="file_search",
@@ -937,6 +1014,104 @@ def auto_save_files_context(result: Any, query: str = "") -> Any:
     except Exception as exc:
         logger.debug("[context-manifest] auto_save_files_context skipped: %s", exc)
     return result
+
+
+def _rewrite_path_for_rename(path_value: str | PathLike[str], old_path: str, new_path: str) -> str:
+    candidate = Path(str(path_value)).resolve(strict=False)
+    old_resolved = Path(old_path).resolve(strict=False)
+    new_resolved = Path(new_path).resolve(strict=False)
+
+    if candidate == old_resolved:
+        return str(new_resolved)
+
+    try:
+        relative = candidate.relative_to(old_resolved)
+    except ValueError:
+        return str(path_value)
+    return str(new_resolved / relative)
+
+
+def refresh_files_context_after_rename(old_path: str, new_path: str) -> bool:
+    """Rewrite live files context + manifest paths after a rename operation."""
+    try:
+        ctx = read_context(agent="files")
+        if not isinstance(ctx, dict):
+            return False
+
+        entities = dict(ctx.get("resolved_entities", {}) or {})
+        updated = False
+
+        directory_path = str(entities.get("directory_path", "") or "").strip()
+        if directory_path:
+            rewritten = _rewrite_path_for_rename(directory_path, old_path, new_path)
+            if rewritten != directory_path:
+                entities["directory_path"] = rewritten
+                updated = True
+
+        selected_paths = entities.get("selected_paths", [])
+        if isinstance(selected_paths, list) and selected_paths:
+            rewritten_paths = []
+            changed_paths = False
+            for value in selected_paths:
+                rewritten = _rewrite_path_for_rename(str(value), old_path, new_path)
+                rewritten_paths.append(rewritten)
+                changed_paths = changed_paths or rewritten != str(value)
+            if changed_paths:
+                entities["selected_paths"] = rewritten_paths
+                updated = True
+
+        listed_files = entities.get("listed_files", [])
+        if isinstance(listed_files, list) and listed_files:
+            rewritten_items = []
+            changed_items = False
+            for item in listed_files:
+                if not isinstance(item, dict):
+                    rewritten_items.append(item)
+                    continue
+                cloned = dict(item)
+                original_path = str(cloned.get("path", "") or "").strip()
+                if original_path:
+                    rewritten_path = _rewrite_path_for_rename(original_path, old_path, new_path)
+                    if rewritten_path != original_path:
+                        cloned["path"] = rewritten_path
+                        item_type = str(cloned.get("type", "") or "").strip().lower()
+                        if item_type == "folder" or Path(original_path).name == str(cloned.get("name", "") or ""):
+                            cloned["name"] = Path(rewritten_path).name
+                        changed_items = True
+                rewritten_items.append(cloned)
+            if changed_items:
+                entities["listed_files"] = rewritten_items
+                updated = True
+
+        manifest_path = str(entities.get("file_manifest", "") or "").strip()
+        if manifest_path:
+            manifest = Path(manifest_path)
+            if manifest.exists():
+                lines = manifest.read_text(encoding="utf-8").splitlines()
+                rewritten_lines = []
+                changed_manifest = False
+                for line in lines:
+                    updated_line = _rewrite_path_for_rename(line, old_path, new_path)
+                    rewritten_lines.append(updated_line)
+                    changed_manifest = changed_manifest or updated_line != line
+                if changed_manifest:
+                    manifest.write_text("\n".join(rewritten_lines) + "\n", encoding="utf-8")
+                    updated = True
+
+        if not updated:
+            return False
+
+        write_context(
+            agent="files",
+            topic=str(ctx.get("topic", "file_search") or "file_search"),
+            resolved_entities=entities,
+            awaiting=str(ctx.get("awaiting", "file_action") or "file_action"),
+            scope=ctx.get("scope"),
+        )
+        return True
+    except Exception as exc:
+        logger.debug("[context-manifest] refresh_files_context_after_rename skipped: %s", exc)
+        return False
 
 
 def auto_save_whatsapp_context(resolved_contact: str, contact_name: str = "", query: str = "") -> None:

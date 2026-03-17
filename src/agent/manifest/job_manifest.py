@@ -113,7 +113,7 @@ def create_job(
         "progress_pct":    0,
         "progress_detail": "Queued",
         "result_summary":  None,
-        "result_manifest": None,           # path to octa_manifest.txt if applicable
+        "result_manifest": None,           # path to the active or explicit result manifest if applicable
         "session_id":      session_id,
         "pa_id":           pa_id,
         "params":          params or {},
@@ -170,7 +170,7 @@ def complete_job(
     Args:
         job_id:          The job to complete.
         result_summary:  Human-readable description of what was found/done.
-        result_manifest: Optional path to octa_manifest.txt with found paths.
+        result_manifest: Optional path to the manifest with found paths.
     """
     return update_job(
         job_id,

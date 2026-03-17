@@ -220,6 +220,85 @@ class TestContextManifestRead:
             assert ctx is not None
             assert ctx["scope"] == "multi_folder"
 
+    def test_auto_save_files_context_persists_directory_listing(self, tmp_path):
+        with _patch_files(tmp_path):
+            from src.agent.manifest.context_manifest import auto_save_files_context, read_context
+
+            auto_save_files_context(
+                {
+                    "status": "success",
+                    "path": str(tmp_path / "Downloads" / "Text"),
+                    "files": 3,
+                    "entries": [
+                        {"name": "one.txt", "type": "file"},
+                        {"name": "two.txt", "type": "file"},
+                        {"name": "nested", "type": "folder"},
+                    ],
+                },
+                "How many files are there in Text folder inside Downloads?",
+            )
+
+            ctx = read_context(agent="files")
+            assert ctx is not None
+            entities = ctx["resolved_entities"]
+            assert entities["directory_path"].endswith("Text")
+            assert entities["selection_kind"] == "directory_listing"
+            assert entities["found_count"] == 3
+            assert entities["selected_paths"] == [str(tmp_path / "Downloads" / "Text")]
+            assert len(entities["listed_files"]) == 3
+            assert entities["listed_files"][0]["path"].endswith("one.txt")
+
+    def test_refresh_files_context_after_rename_rewrites_manifest_and_paths(self, tmp_path):
+        with _patch_files(tmp_path):
+            from src.agent.manifest.context_manifest import (
+                refresh_files_context_after_rename,
+                read_context,
+                write_context,
+            )
+
+            old_folder = tmp_path / "Downloads" / "Text"
+            new_folder = tmp_path / "Downloads" / "Text-123"
+            manifest = tmp_path / "octa_manifest.txt"
+            manifest.write_text(
+                "\n".join(
+                    [
+                        str(old_folder),
+                        str(old_folder / "one.txt"),
+                        str(old_folder / "two.txt"),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            write_context(
+                agent="files",
+                topic="file_search",
+                resolved_entities={
+                    "directory_path": str(old_folder),
+                    "selected_paths": [str(old_folder)],
+                    "file_manifest": str(manifest),
+                    "listed_files": [
+                        {"index": 0, "path": str(old_folder), "name": "Text", "type": "folder"},
+                        {"index": 1, "path": str(old_folder / "one.txt"), "name": "one.txt", "type": "file"},
+                    ],
+                },
+                awaiting="file_action",
+            )
+
+            assert refresh_files_context_after_rename(str(old_folder), str(new_folder)) is True
+
+            ctx = read_context(agent="files")
+            assert ctx is not None
+            entities = ctx["resolved_entities"]
+            assert entities["directory_path"] == str(new_folder)
+            assert entities["selected_paths"] == [str(new_folder)]
+            assert entities["listed_files"][0]["path"] == str(new_folder)
+            assert entities["listed_files"][0]["name"] == "Text-123"
+            manifest_lines = manifest.read_text(encoding="utf-8").splitlines()
+            assert manifest_lines[0] == str(new_folder)
+            assert manifest_lines[1] == str(new_folder / "one.txt")
+
 
 class TestContextManifestClear:
 

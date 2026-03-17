@@ -29,6 +29,9 @@ _PA_IMPORT_ERRORS = (ImportError, AttributeError)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _safe_pa_log_name(name: str) -> str:
+    return re.sub(r"[^\w\-.]", "_", (name or "").strip())
+
 def _make_assistant(
     name: str,
     skills: List[str],
@@ -57,6 +60,80 @@ def _save(assistants: List[dict]) -> None:
     tmp.replace(_PA_PATH)
 
 
+def _build_pa_log_patterns(pa: dict) -> List[str]:
+    pa_id = str(pa.get("id", "")).strip()
+    pa_name = str(pa.get("name", "")).strip()
+    safe_name = _safe_pa_log_name(pa_name)
+
+    project_root = _PA_PATH.parent.parent
+    logs_dir = project_root / "logs"
+    patterns = [
+        str(logs_dir / f"{pa_id}.log") if pa_id else "",
+        str(logs_dir / f"{pa_name}.log") if pa_name else "",
+        str(logs_dir / f"{safe_name}.log") if safe_name else "",
+        str(logs_dir / f"{safe_name}_stderr.txt") if safe_name else "",
+        str(logs_dir / f"pa_{pa_id}_stderr.txt") if pa_id else "",
+        str(logs_dir / f"*{pa_id}*.log") if pa_id else "",
+    ]
+    return [pattern for pattern in patterns if pattern]
+
+
+def cleanup_orphaned_pa_resources(assistants: Optional[List[dict]] = None) -> None:
+    """Remove logs and memory folders that belong to deleted personal assistants."""
+    import glob
+    import shutil
+
+    active_assistants = assistants if assistants is not None else load_assistants()
+    active_ids = {str(pa.get("id", "")).strip() for pa in active_assistants}
+
+    project_root = _PA_PATH.parent.parent
+    logs_dir = project_root / "logs"
+    memory_root = project_root / "memory"
+
+    keep_log_paths = set()
+    for pa in active_assistants:
+        for pattern in _build_pa_log_patterns(pa):
+            for path in glob.glob(pattern):
+                keep_log_paths.add(str(Path(path).resolve()))
+
+    for log_path in logs_dir.glob("*.log"):
+        resolved = str(log_path.resolve())
+        if resolved in keep_log_paths:
+            continue
+        if log_path.name in {"dash_stdout.txt", "dash_stderr.txt"}:
+            continue
+        if log_path.parent.name == "tests":
+            continue
+        # Only delete logs that look PA-specific.
+        if log_path.stem.startswith("pa_") or log_path.stem.startswith("My_Assistant") or "-" in log_path.stem or "_" in log_path.stem:
+            try:
+                log_path.unlink()
+            except OSError as exc:
+                print(f"⚠️  Could not remove orphan log {log_path}: {exc}")
+
+    for stderr_path in logs_dir.glob("*_stderr.txt"):
+        resolved = str(stderr_path.resolve())
+        if resolved in keep_log_paths:
+            continue
+        if stderr_path.name.startswith("pa_pa_") or stderr_path.stem.endswith("_stderr"):
+            try:
+                stderr_path.unlink()
+            except OSError as exc:
+                print(f"⚠️  Could not remove orphan stderr log {stderr_path}: {exc}")
+
+    if memory_root.exists():
+        for child in memory_root.iterdir():
+            if not child.is_dir():
+                continue
+            if child.name == "_collective_memory_":
+                continue
+            if child.name not in active_ids:
+                try:
+                    shutil.rmtree(child)
+                except OSError as exc:
+                    print(f"⚠️  Could not remove orphan memory dir {child}: {exc}")
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def load_assistants() -> List[dict]:
@@ -68,6 +145,7 @@ def load_assistants() -> List[dict]:
         try:
             data = json.loads(_PA_PATH.read_text(encoding="utf-8"))
             if isinstance(data, list):
+                cleanup_orphaned_pa_resources(data)
                 return data   # may be empty — that's valid after deleting all PAs
         except _PA_MANAGER_ERRORS:
             pass
@@ -91,6 +169,7 @@ def load_assistants() -> List[dict]:
         channels=all_channels,
     )
     _save([default])
+    cleanup_orphaned_pa_resources([default])
     return [default]
 
 
@@ -201,7 +280,7 @@ def _cleanup_pa_resources(pa: dict) -> None:
 
     pa_id = str(pa.get("id", "")).strip()
     pa_name = str(pa.get("name", "")).strip()
-    safe_name = re.sub(r"[^\w\-.]", "_", pa_name) if pa_name else ""
+    safe_name = _safe_pa_log_name(pa_name) if pa_name else ""
 
     project_root = _PA_PATH.parent.parent   # …/OctaMind
 
@@ -220,13 +299,14 @@ def _cleanup_pa_resources(pa: dict) -> None:
         except OSError as exc:
             print(f"⚠️  Could not remove memory dir {memory_dir}: {exc}")
 
-    # 3. Log files — match logs/*<pa_id>*.log and logs/<pa_id>.log
+    # 3. Log files — remove both current name-based files and legacy id-based files
     logs_dir = project_root / "logs"
     patterns = [
         str(logs_dir / f"*{pa_id}*.log"),
         str(logs_dir / f"{pa_id}.log"),
         str(logs_dir / f"{pa_name}.log") if pa_name else "",
         str(logs_dir / f"{safe_name}.log") if safe_name else "",
+        str(logs_dir / f"{safe_name}_stderr.txt") if safe_name else "",
         str(logs_dir / f"pa_{pa_id}_stderr.txt") if pa_id else "",
     ]
     for pattern in patterns:

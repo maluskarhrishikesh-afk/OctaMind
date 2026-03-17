@@ -386,6 +386,15 @@ class ConversationStateTracker:
             found_count = entities.get("found_count")
             if isinstance(found_count, int) and found_count > 0:
                 state["found_count"] = found_count
+            directory_path = str(entities.get("directory_path", "") or "").strip()
+            if directory_path:
+                state["last_found_folder"] = directory_path
+                state["last_found_file_path"] = directory_path
+            selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+            if isinstance(selected_paths, list) and len(selected_paths) == 1:
+                only_selected = str(selected_paths[0] or "").strip()
+                if only_selected:
+                    state["last_found_file_path"] = only_selected
             listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
             if isinstance(listed_files, list) and len(listed_files) == 1:
                 only_item = listed_files[0] if isinstance(listed_files[0], dict) else {}

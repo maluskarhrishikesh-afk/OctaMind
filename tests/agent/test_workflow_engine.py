@@ -483,7 +483,7 @@ class TestStepRunnerErrors:
 
     def test_successful_step_stores_output(self):
         from src.agent.workflows.workflow_context import WorkflowContext, WorkflowStep
-        from src.agent.workflows.step_runner import run_step, _get_drive_registry, _DRIVE_REGISTRY
+        from src.agent.workflows.step_runner import run_step
         import src.agent.workflows.step_runner as sr
 
         ctx = WorkflowContext()
@@ -491,15 +491,42 @@ class TestStepRunnerErrors:
                             {}, "quota_result", "Check quota")
 
         mock_tool = MagicMock(return_value={"used": 5, "total": 15})
-        original = sr._DRIVE_REGISTRY
-        sr._DRIVE_REGISTRY = {"get_storage_quota": mock_tool}
+        original = dict(sr._TOOL_REGISTRIES)
+        sr._TOOL_REGISTRIES["drive"] = {"get_storage_quota": mock_tool}
         try:
             result = run_step(step, ctx)
         finally:
-            sr._DRIVE_REGISTRY = original
+            sr._TOOL_REGISTRIES = original
 
         assert result["status"] == "success"
         assert ctx.get("quota_result") == {"used": 5, "total": 15}
+
+
+class TestAgentRegistryRuntimeToolMap:
+    def test_get_runtime_tool_map_uses_public_or_legacy_builder(self):
+        import types
+        import sys
+        from src.agent.workflows.agent_registry import get_runtime_tool_map, AGENT_REGISTRY
+
+        mod = types.ModuleType("test_runtime_tool_map_agent")
+        mod._build_all_tools = lambda: {"delete_item": lambda: {"status": "success"}}
+        sys.modules["test_runtime_tool_map_agent"] = mod
+
+        original = dict(AGENT_REGISTRY)
+        AGENT_REGISTRY["test_runtime"] = {
+            "description": "Test agent.",
+            "trigger_keywords": ["test_runtime"],
+            "module": "test_runtime_tool_map_agent",
+            "function": "execute_with_llm_orchestration",
+        }
+        try:
+            runtime_map = get_runtime_tool_map("test_runtime")
+        finally:
+            AGENT_REGISTRY.clear()
+            AGENT_REGISTRY.update(original)
+            sys.modules.pop("test_runtime_tool_map_agent", None)
+
+        assert "delete_item" in runtime_map
 
 
 # ── master_orchestrator plan_nl_workflow ──────────────────────────────────────
@@ -599,7 +626,7 @@ class TestMasterOrchestratorPlan:
 # ── master_orchestrator run_workflow ──────────────────────────────────────────
 
 class TestRunWorkflow:
-    """run_workflow now delegates to react_workflow internally (ReAct loop)."""
+    """run_workflow uses DAG planning first and falls back to react_workflow."""
 
     def test_run_workflow_all_errors_returns_error(self):
         """When react_workflow returns only error steps status is 'error'."""
@@ -609,7 +636,8 @@ class TestRunWorkflow:
             "status": "error", "step": 1, "agent": "drive",
             "description": "find file", "error": "Drive unreachable",
         }
-        with patch("src.agent.workflows.master_orchestrator.react_workflow",
+        with patch("src.agent.workflows.dag_planner.plan_dag_workflow", return_value=None), \
+             patch("src.agent.workflows.master_orchestrator.react_workflow",
                    return_value=([error_step], None)), \
              patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
             mock_fb.cleanup_all = MagicMock()
@@ -626,7 +654,8 @@ class TestRunWorkflow:
             "status": "success", "step": 1, "agent": "drive",
             "description": "get quota", "result": {"used": 5},
         }
-        with patch("src.agent.workflows.master_orchestrator.react_workflow",
+        with patch("src.agent.workflows.dag_planner.plan_dag_workflow", return_value=None), \
+             patch("src.agent.workflows.master_orchestrator.react_workflow",
                    return_value=([success_step], "\u2705 Done")), \
              patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
             mock_fb.cleanup_all = MagicMock()
@@ -646,7 +675,8 @@ class TestRunWorkflow:
             "status": "error", "step": 1, "agent": "drive",
             "description": "search", "error": "Drive offline",
         }
-        with patch("src.agent.workflows.master_orchestrator.react_workflow",
+        with patch("src.agent.workflows.dag_planner.plan_dag_workflow", return_value=None), \
+             patch("src.agent.workflows.master_orchestrator.react_workflow",
                    return_value=([fail_step], None)), \
              patch("src.agent.workflows.master_orchestrator._file_bridge") as mock_fb:
             mock_fb.cleanup_all = MagicMock()

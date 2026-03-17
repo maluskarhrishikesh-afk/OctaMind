@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -71,6 +73,16 @@ def _state_key(pa_id: str) -> str:
     return pa_id
 
 
+def _tail_text(path: Path, max_lines: int = 8) -> str:
+    try:
+        if not path.exists():
+            return ""
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        return "\n".join(lines[-max_lines:]).strip()
+    except Exception:
+        return ""
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def start_pa_poller(pa_id: str) -> Dict[str, Any]:
@@ -81,6 +93,22 @@ def start_pa_poller(pa_id: str) -> Dict[str, Any]:
     """
     key = _state_key(pa_id)
     state = _load_state()
+
+    try:
+        from src.agent.hub.pa_manager import get_assistant
+    except Exception as exc:
+        raise RuntimeError(f"Could not load assistant metadata: {exc}") from exc
+
+    assistant = get_assistant(pa_id)
+    if not assistant:
+        raise RuntimeError(f"Assistant '{pa_id}' was not found.")
+
+    tg_cfg = (assistant.get("config") or {}).get("telegram", {})
+    token = str(tg_cfg.get("bot_token", "") or "").strip()
+    if not token or token.startswith("<"):
+        raise RuntimeError(
+            "No Telegram bot token is configured for this assistant. Add one from the assistant card or Configure panel first."
+        )
 
     # Already running?
     if key in state and _is_pid_alive(state[key]["pid"]):
@@ -138,10 +166,23 @@ def start_pa_poller(pa_id: str) -> Dict[str, Any]:
     state[key] = {"pid": pid, "pa_id": pa_id}
     _save_state(state)
 
-    # Brief pause so the poller has time to initialise before the Streamlit
-    # page reloads and calls _is_pid_alive().
-    import time as _time
-    _time.sleep(0.5)
+    # Give the child process enough time to initialise and fail fast if it is
+    # misconfigured, instead of silently reporting success and rerendering.
+    time.sleep(1.0)
+
+    if not _is_pid_alive(pid):
+        state.pop(key, None)
+        _save_state(state)
+
+        safe_name = re.sub(r"[^\w\-.]", "_", str(assistant.get("name", pa_id) or pa_id))
+        logs_dir = _ROOT / "logs"
+        stderr_tail = _tail_text(logs_dir / f"{safe_name}_stderr.txt")
+        log_tail = _tail_text(logs_dir / f"{safe_name}.log")
+        detail = stderr_tail or log_tail
+        if detail:
+            detail = detail.splitlines()[-1].strip()
+            raise RuntimeError(f"Telegram poller exited immediately. Last log line: {detail}")
+        raise RuntimeError("Telegram poller exited immediately after launch.")
 
     return {"pid": pid, "pa_id": pa_id}
 

@@ -90,6 +90,7 @@ def react_workflow(
     command: str,
     agent_ids: Dict[str, str],
     ctx: WorkflowContext,
+    confirmed_action_keys: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], str]:
     """
     Run the multi-agent ReAct loop.
@@ -226,6 +227,8 @@ def react_workflow(
                 continue
 
             artifacts_out: Dict[str, Any] = {}
+            if confirmed_action_keys:
+                artifacts_out["_confirmed_action_keys"] = list(confirmed_action_keys)
             try:
                 raw_result = executor(
                     user_query=instruction,
@@ -256,9 +259,18 @@ def react_workflow(
                     "step": step_counter, "agent": agent_name,
                     "tool": instruction[:60], "instruction": instruction,
                     "status": exec_status,
-                    "result": {"message": text[:500], "artifacts": artifacts_out},
+                    "result": {
+                        "message": text[:500],
+                        "artifacts": artifacts_out,
+                        "confirmation": raw_result.get("confirmation") if isinstance(raw_result, dict) else None,
+                        "channel_payloads": raw_result.get("channel_payloads", {}) if isinstance(raw_result, dict) else {},
+                    },
                     "error": None, "elapsed": time.time() - t0,
                 })
+                if exec_status == "confirmation_required":
+                    final_answer_text = text
+                    logger.info("│    ⏸ step=%d  agent=%-12s  confirmation required", step_counter, agent_name)
+                    break
                 logger.info(
                     "│    ✔ step=%d  agent=%-12s  elapsed=%.2fs",
                     step_counter, agent_name, time.time() - t0,
@@ -322,7 +334,8 @@ Available agents:
 
 SPECIAL CONTEXT VALUES always available in instructions:
 - {{__user_email__}} — the authenticated user's own Gmail address.
-  Use it when the user says "email me", "send it to me", "email myself", etc.
+    Use it only when the user explicitly says "email me", "mail it", "send it by email", or provides an email address.
+    Do NOT use it for current-channel delivery phrases like "send it to me", "share it here", or "give me the file".
 
 Each step schema:
 {{
@@ -447,6 +460,10 @@ def _dag_final_answer(steps_results: List[Dict[str, Any]]) -> str:
     """
     successes = [r for r in steps_results if r["status"] == "success"]
     failures  = [r for r in steps_results if r["status"] == "error"]
+    confirmations = [r for r in steps_results if r["status"] == "confirmation_required"]
+
+    if confirmations:
+        return (confirmations[0].get("result") or {}).get("message", "Confirmation required.")
 
     # Single step — return the agent's reply verbatim
     if len(steps_results) == 1 and successes:
@@ -475,6 +492,7 @@ def _dag_final_answer(steps_results: List[Dict[str, Any]]) -> str:
 def run_workflow(
     command: str,
     agent_ids: Optional[Dict[str, str]] = None,
+    confirmed_action_keys: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Plan and execute a multi-agent workflow.
@@ -516,7 +534,7 @@ def run_workflow(
             "run_workflow: DAG planner succeeded (%d steps)  mode=dag_planner",
             len(plan.steps),
         )
-        steps_results    = execute_dag_workflow(plan, agent_ids, user_email)
+        steps_results    = execute_dag_workflow(plan, agent_ids, user_email, confirmed_action_keys=confirmed_action_keys)
         final_answer_text = _dag_final_answer(steps_results)
         execution_mode   = "dag_planner"
 
@@ -525,7 +543,7 @@ def run_workflow(
         logger.warning(
             "run_workflow: DAG planning failed — falling back to ReAct loop"
         )
-        steps_results, final_answer_text = react_workflow(command, agent_ids, ctx)
+        steps_results, final_answer_text = react_workflow(command, agent_ids, ctx, confirmed_action_keys=confirmed_action_keys)
         execution_mode = "react_fallback"
         plan = None
 
@@ -537,7 +555,13 @@ def run_workflow(
     success_count = sum(1 for r in steps_results if r["status"] == "success")
     total         = len(steps_results)
     failed        = any(r["status"] == "error" for r in steps_results)
-    status        = "error" if (failed and success_count == 0) else ("partial" if failed else "success")
+    needs_confirmation = any(r["status"] == "confirmation_required" for r in steps_results)
+    status        = (
+        "confirmation_required"
+        if needs_confirmation
+        else "error" if (failed and success_count == 0)
+        else ("partial" if failed else "success")
+    )
     summary       = _summarize_results(steps_results) if steps_results else final_answer_text
     elapsed       = ctx.elapsed_seconds()
 
@@ -560,7 +584,8 @@ def run_workflow(
         "summary":          summary,
         "steps":            steps_results,
         "elapsed":          elapsed,
-        "plan":             plan,
+        "plan":             None,
+        "dag_plan":         plan,
         "final_answer":     final_answer_text,
         "execution_mode":   execution_mode,
         "total_llm_calls":  total_llm_calls,

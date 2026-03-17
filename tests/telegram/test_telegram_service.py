@@ -135,6 +135,16 @@ class TestSendText:
         payload = call_kwargs[1]["json"]
         assert payload["reply_to_message_id"] == 3
 
+    @patch("src.telegram.telegram_service.requests.post")
+    @patch("src.telegram.telegram_service.get_bot_token", return_value="FAKE_TOKEN")
+    def test_send_text_with_reply_markup_includes_payload(self, _tok, mock_post):
+        mock_post.return_value = _mock_ok_response({"message_id": 8, "chat": {"id": 5}})
+        from src.telegram.telegram_service import send_text
+        reply_markup = {"inline_keyboard": [[{"text": "Yes", "callback_data": "x"}]]}
+        send_text(5, "reply text", reply_markup=reply_markup)
+        payload = mock_post.call_args[1]["json"]
+        assert payload["reply_markup"] == reply_markup
+
     @patch(
         "src.telegram.telegram_service.requests.post",
         side_effect=Exception("connection refused"),
@@ -167,6 +177,31 @@ class TestMessageMutations:
         from src.telegram.telegram_service import edit_message_text
         result = edit_message_text(chat_id=1, message_id=5, text="new")
         assert result["message_id"] == 5
+
+    @patch("src.telegram.telegram_service.requests.post")
+    @patch("src.telegram.telegram_service.get_bot_token", return_value="FAKE_TOKEN")
+    def test_edit_message_text_with_reply_markup(self, _tok, mock_post):
+        mock_post.return_value = _mock_ok_response({"message_id": 5, "text": "new"})
+        from src.telegram.telegram_service import edit_message_text
+        reply_markup = {"inline_keyboard": [[{"text": "Yes", "callback_data": "x"}]]}
+        edit_message_text(chat_id=1, message_id=5, text="new", reply_markup=reply_markup)
+        payload = mock_post.call_args[1]["json"]
+        assert payload["reply_markup"] == reply_markup
+
+    @patch("src.telegram.telegram_service.requests.post")
+    @patch("src.telegram.telegram_service.get_bot_token", return_value="FAKE_TOKEN")
+    def test_edit_message_reply_markup(self, _tok, mock_post):
+        mock_post.return_value = _mock_ok_response({"message_id": 5})
+        from src.telegram.telegram_service import edit_message_reply_markup
+        result = edit_message_reply_markup(chat_id=1, message_id=5)
+        assert result["message_id"] == 5
+
+    @patch("src.telegram.telegram_service.requests.post")
+    @patch("src.telegram.telegram_service.get_bot_token", return_value="FAKE_TOKEN")
+    def test_answer_callback_query_returns_true(self, _tok, mock_post):
+        mock_post.return_value = _mock_ok_response(True)
+        from src.telegram.telegram_service import answer_callback_query
+        assert answer_callback_query("cbq-1", text="Done") is True
 
     @patch("src.telegram.telegram_service.requests.post")
     @patch("src.telegram.telegram_service.get_bot_token", return_value="FAKE_TOKEN")
@@ -213,8 +248,9 @@ class TestMessageStore:
 
     def test_store_inbound_message(self, isolated_store):
         from src.telegram.polling.message_store import store_inbound_message, get_all_messages
-        store_inbound_message(_make_raw_message(text="Hello"), update_id=10)
+        stored = store_inbound_message(_make_raw_message(text="Hello"), update_id=10)
         msgs = get_all_messages()
+        assert stored is True
         assert len(msgs) == 1
         assert msgs[0]["text"] == "Hello"
         assert msgs[0]["direction"] == "inbound"
@@ -235,8 +271,8 @@ class TestMessageStore:
         """Storing the same composite ID twice should not create a duplicate."""
         from src.telegram.polling.message_store import store_inbound_message, get_all_messages
         raw = _make_raw_message(chat_id=1001, message_id=42, text="dup")
-        store_inbound_message(raw, update_id=20)
-        store_inbound_message(raw, update_id=20)
+        assert store_inbound_message(raw, update_id=20) is True
+        assert store_inbound_message(raw, update_id=20) is False
         msgs = [m for m in get_all_messages() if m["id"] == "1001:42"]
         assert len(msgs) == 1
 
@@ -317,3 +353,98 @@ class TestPoller:
         assert isinstance(result, threading.Thread)
         poller_mod.stop_poller()
         poller_mod._poll_thread = None
+
+    def test_process_update_dispatches_callback_queries(self):
+        import src.telegram.polling.poller as poller_mod
+
+        handled = []
+
+        with patch("src.telegram.auto_responder.maybe_handle_callback_query", side_effect=lambda payload: handled.append(payload)):
+            class _ImmediateThread:
+                def __init__(self, target, args=(), daemon=None):
+                    self._target = target
+                    self._args = args
+
+                def start(self):
+                    self._target(*self._args)
+
+            with patch("threading.Thread", _ImmediateThread):
+                poller_mod._process_update(
+                    {
+                        "update_id": 77,
+                        "callback_query": {
+                            "id": "cbq-1",
+                            "data": "mailbox_cleanup:confirm:delete_all_filters",
+                            "message": {"message_id": 8, "chat": {"id": 123}},
+                        },
+                    }
+                )
+
+        assert handled and handled[0]["data"] == "mailbox_cleanup:confirm:delete_all_filters"
+
+    def test_process_update_skips_duplicate_auto_reply(self, isolated_store):
+        import src.telegram.polling.poller as poller_mod
+
+        handled = []
+
+        class _ImmediateThread:
+            def __init__(self, target, args=(), daemon=None):
+                self._target = target
+                self._args = args
+
+            def start(self):
+                self._target(*self._args)
+
+        update = {
+            "update_id": 88,
+            "message": _make_raw_message(chat_id=555, message_id=9, text="hello once"),
+        }
+
+        with patch("src.telegram.auto_responder.maybe_auto_reply", side_effect=lambda payload: handled.append(payload)):
+            with patch("threading.Thread", _ImmediateThread):
+                poller_mod._process_update(update)
+                poller_mod._process_update(update)
+
+        assert len(handled) == 1
+
+
+class TestAutoResponderDirectCommands:
+    def test_send_welcome_logs_direct_turn(self):
+        import src.telegram.auto_responder as auto_responder
+
+        sent = []
+        logged = []
+
+        with patch("src.telegram.telegram_service.send_text", side_effect=lambda chat_id, text: sent.append((chat_id, text)) or {"message_id": 12}):
+            with patch("src.telegram.polling.message_store.store_outbound_message"):
+                with patch("src.agent.hub.processor.log_external_turn", side_effect=lambda **kwargs: logged.append(kwargs)):
+                    with patch.object(auto_responder, "_resolve_current_pa", return_value=("pa-1", "Assistant")):
+                        auto_responder._send_welcome(321)
+
+        assert sent and sent[0][0] == 321
+        assert logged and logged[0]["session_id"] == "telegram_321"
+        assert logged[0]["agent_id"] == "pa-1"
+        assert logged[0]["user_message"] == "/start"
+
+    def test_status_command_reports_keep_awake_state(self):
+        import src.telegram.auto_responder as auto_responder
+
+        sent = []
+        logged = []
+
+        with patch("src.telegram.telegram_service.send_text", side_effect=lambda chat_id, text: sent.append((chat_id, text)) or {"message_id": 55}):
+            with patch("src.telegram.polling.message_store.store_outbound_message"):
+                with patch("src.agent.hub.processor.log_external_turn", side_effect=lambda **kwargs: logged.append(kwargs)):
+                    with patch("src.agent.system.runtime_status.get_keep_awake_status", return_value={
+                        "label": "Active",
+                        "detail": "Idle sleep prevention is active while OctaMind is running.",
+                        "hard_limit": "If Windows enters real sleep or hibernation, Telegram cannot reach OctaMind until the laptop wakes.",
+                    }):
+                        with patch("src.telegram.pa_poller_manager.get_pa_poller_status", return_value={"running": True}):
+                            with patch.object(auto_responder, "_resolve_current_pa", return_value=("pa-1", "Assistant")):
+                                auto_responder._handle_status(321)
+
+        assert sent and sent[0][0] == 321
+        assert "Sleep protection: Active" in sent[0][1]
+        assert "Telegram bot: Running" in sent[0][1]
+        assert logged and logged[0]["user_message"] == "/status"

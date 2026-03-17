@@ -169,8 +169,11 @@ def _extract_message_fields(msg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def store_inbound_message(msg: Dict[str, Any], update_id: int = 0) -> None:
-    """Persist an inbound message object from a Telegram update."""
+def store_inbound_message(msg: Dict[str, Any], update_id: int = 0) -> bool:
+    """Persist an inbound message object from a Telegram update.
+
+    Returns True only when a new inbound record is written.
+    """
     fields = _extract_message_fields(msg)
     chat_id_str = str(fields["chat_id"])
 
@@ -180,7 +183,7 @@ def store_inbound_message(msg: Dict[str, Any], update_id: int = 0) -> None:
         # Deduplicate by composite id
         existing_ids = {m["id"] for m in data["messages"]}
         if fields["id"] in existing_ids:
-            return
+            return False
 
         # Add update_id for traceability
         record = {k: v for k, v in fields.items() if not k.startswith("_")}
@@ -204,6 +207,7 @@ def store_inbound_message(msg: Dict[str, Any], update_id: int = 0) -> None:
         }
 
         _save(data)
+        return True
 
 
 def store_outbound_message(

@@ -26,6 +26,8 @@ The example already includes the current top-level sections used by the codebase
 - `whatsapp`
 - `linkedin`
 
+Telegram bot tokens are now typically saved per Personal Assistant from the dashboard instead of as one shared global token in `config/settings.json`.
+
 ## 2. Configure An LLM Provider
 
 OctaMind defaults to GitHub Models, but the active provider is selected through `config/providers.json`. Credentials are loaded from `config/settings.json` first and can fall back to environment variables.
@@ -91,6 +93,13 @@ Fill the `linkedin` section in `config/settings.json` if you enable the LinkedIn
 ### Runtime
 
 The `runtime.keep_awake_when_running` flag controls whether the Windows keep-awake helper is launched with OctaMind.
+This prevents idle sleep while OctaMind is running, which is required if you want Telegram to keep reaching the laptop from outside.
+It does not bypass true Windows sleep or hibernation: once the machine is suspended, the Telegram poller and Hub API stop until Windows wakes.
+
+The dashboard also exposes:
+
+- a Security Dashboard for audit events, throttling state, pending confirmations, and live tool-risk manifests
+- a Manifest Inspector for the active file manifest and recent historical manifests
 
 ## 5. Start OctaMind
 
@@ -99,6 +108,8 @@ Run:
 ```bash
 python start.py
 ```
+
+For remote Telegram reachability, prefer `python start.py` over ad-hoc dashboard launch commands because it starts the Hub API and the Windows keep-awake helper together.
 
 What this does today:
 
@@ -134,6 +145,7 @@ Good smoke tests:
 - Calendar: "What is on my calendar today?"
 - Files: "Search my laptop for PDF invoices"
 - Browser: "Search the web for the latest Python release"
+- Telegram: save a bot token on a Personal Assistant card, start the bot, then send `/status` to the bot from Telegram
 
 ## Setup Guides By Feature
 

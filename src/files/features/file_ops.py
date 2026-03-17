@@ -259,6 +259,12 @@ def rename_file(path: str, new_name: str) -> Dict[str, Any]:
         if new_path.exists():
             return {"status": "error", "message": f"Destination already exists: {new_path}"}
         p.rename(new_path)
+        try:
+            from src.agent.manifest.context_manifest import refresh_files_context_after_rename  # noqa: PLC0415
+
+            refresh_files_context_after_rename(str(p), str(new_path))
+        except Exception:
+            pass
         return {"status": "success", "message": f"Renamed to {new_path.name}", "new_path": str(new_path)}
     except Exception as exc:
         logger.error("rename_file failed: %s", exc)
@@ -574,6 +580,49 @@ def count_files_and_folders_all_drives(
     except Exception as exc:
         logger.error("count_files_and_folders_all_drives failed: %s", exc)
         return {"status": "error", "message": f"count_files_and_folders_all_drives error: {exc}"}
+
+
+def get_recycle_bin_info() -> Dict[str, Any]:
+    """Return the current Windows Recycle Bin item count and size."""
+    if platform.system() != "Windows":
+        return {
+            "status": "error",
+            "message": "Recycle Bin inspection is currently supported only on Windows.",
+        }
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _SHQUERYRBINFO(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("i64Size", ctypes.c_longlong),
+                ("i64NumItems", ctypes.c_longlong),
+            ]
+
+        info = _SHQUERYRBINFO()
+        info.cbSize = ctypes.sizeof(_SHQUERYRBINFO)
+
+        result = ctypes.windll.shell32.SHQueryRecycleBinW(None, ctypes.byref(info))
+        if result != 0:
+            return {
+                "status": "error",
+                "message": f"SHQueryRecycleBinW failed with code {result}.",
+            }
+
+        item_count = int(info.i64NumItems)
+        size_bytes = int(info.i64Size)
+        return {
+            "status": "success",
+            "item_count": item_count,
+            "size_bytes": size_bytes,
+            "size": _human_size(size_bytes),
+            "message": f"Recycle Bin currently contains {item_count} item(s) using {_human_size(size_bytes)}.",
+        }
+    except Exception as exc:
+        logger.error("get_recycle_bin_info failed: %s", exc)
+        return {"status": "error", "message": f"get_recycle_bin_info error: {exc}"}
 
 
 def deliver_file(path: str) -> Dict[str, Any]:
@@ -1938,6 +1987,8 @@ def list_running_apps() -> Dict[str, Any]:
 
 _DEFAULT_OCTAMIND_DIR = get_your_data_dir(create=True)
 _DEFAULT_MANIFEST     = _DEFAULT_OCTAMIND_DIR / "octa_manifest.txt"
+_MANIFESTS_DIR        = _DEFAULT_OCTAMIND_DIR / "manifests" / "files"
+_ACTIVE_MANIFEST_FILE = _DEFAULT_OCTAMIND_DIR / "active_file_manifest.json"
 # Operation history (replaces single-entry last_operation.json).
 # JSON array, most-recent-first.  Entries older than 30 days are pruned
 # automatically on every write so the file stays small.
@@ -1957,6 +2008,219 @@ def _is_under_path(path: Path, parent: Path) -> bool:
 def _make_bundle_slug(value: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
     return slug[:48] or "search_results"
+
+
+def _load_active_manifest_state() -> Dict[str, Any]:
+    try:
+        if _ACTIVE_MANIFEST_FILE.exists():
+            payload = json.loads(_ACTIVE_MANIFEST_FILE.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        pass
+    return {}
+
+
+def _save_active_manifest_state(payload: Dict[str, Any]) -> None:
+    try:
+        _ACTIVE_MANIFEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _ACTIVE_MANIFEST_FILE.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _manifest_metadata_path(manifest_path: Path) -> Path:
+    return manifest_path.with_suffix(".json")
+
+
+def _read_manifest_metadata(manifest_path: Path) -> Dict[str, Any]:
+    try:
+        sidecar = _manifest_metadata_path(manifest_path)
+        if sidecar.exists():
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                payload["manifest_path"] = str(manifest_path)
+                return payload
+    except Exception:
+        pass
+
+    written_at = datetime.fromtimestamp(manifest_path.stat().st_mtime).isoformat(timespec="seconds")
+    try:
+        count = len([line for line in manifest_path.read_text(encoding="utf-8").splitlines() if line.strip()])
+    except Exception:
+        count = 0
+    return {
+        "manifest_id": manifest_path.stem,
+        "manifest_path": str(manifest_path),
+        "count": count,
+        "label": manifest_path.stem,
+        "written_at": written_at,
+    }
+
+
+def _write_manifest_metadata(manifest_path: Path, payload: Dict[str, Any]) -> None:
+    try:
+        sidecar = _manifest_metadata_path(manifest_path)
+        sidecar.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _clear_active_file_manifest() -> None:
+    try:
+        if _ACTIVE_MANIFEST_FILE.exists():
+            _ACTIVE_MANIFEST_FILE.unlink()
+    except Exception:
+        pass
+    try:
+        if _DEFAULT_MANIFEST.exists():
+            _DEFAULT_MANIFEST.unlink()
+    except Exception:
+        pass
+
+
+def _set_active_file_manifest_from_metadata(metadata: Dict[str, Any]) -> None:
+    manifest_path = Path(str(metadata.get("manifest_path", "") or "").strip())
+    if not manifest_path.exists():
+        _clear_active_file_manifest()
+        return
+
+    _save_active_manifest_state(metadata)
+    try:
+        _DEFAULT_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+        _DEFAULT_MANIFEST.write_text(manifest_path.read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _refresh_active_manifest_after_delete() -> None:
+    manifests = list_file_manifests(limit=1).get("manifests", [])
+    if manifests:
+        _set_active_file_manifest_from_metadata(manifests[0])
+    else:
+        _clear_active_file_manifest()
+
+
+def get_active_file_manifest_metadata() -> Dict[str, Any]:
+    payload = _load_active_manifest_state()
+    manifest_path = str(payload.get("manifest_path", "") or "").strip()
+    if not manifest_path:
+        return {}
+
+    candidate = Path(manifest_path).expanduser()
+    if not candidate.exists():
+        return {}
+
+    enriched = dict(payload)
+    enriched["manifest_path"] = str(candidate)
+    return enriched
+
+
+def resolve_file_manifest_path(manifest_path: str = "") -> Path:
+    explicit = str(manifest_path or "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+
+    active = get_active_file_manifest_metadata()
+    active_path = str(active.get("manifest_path", "") or "").strip()
+    if active_path:
+        return Path(active_path)
+
+    return _DEFAULT_MANIFEST
+
+
+def list_file_manifests(limit: int = 100) -> Dict[str, Any]:
+    try:
+        _MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
+        active = get_active_file_manifest_metadata()
+        active_path = str(active.get("manifest_path", "") or "").strip()
+        manifests: List[Dict[str, Any]] = []
+        for manifest_path in sorted(_MANIFESTS_DIR.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True):
+            metadata = _read_manifest_metadata(manifest_path)
+            metadata["is_active"] = str(manifest_path) == active_path
+            manifests.append(metadata)
+            if len(manifests) >= max(limit, 1):
+                break
+        return {
+            "status": "success",
+            "active_manifest_id": str(active.get("manifest_id", "") or ""),
+            "manifests": manifests,
+            "count": len(manifests),
+        }
+    except Exception as exc:
+        logger.error("list_file_manifests failed: %s", exc)
+        return {"status": "error", "message": str(exc), "manifests": []}
+
+
+def delete_file_manifest(manifest_id: str = "", manifest_path: str = "") -> Dict[str, Any]:
+    try:
+        target = Path(str(manifest_path or "").strip()).expanduser() if str(manifest_path or "").strip() else None
+        if target is None and manifest_id:
+            candidate = _MANIFESTS_DIR / f"{manifest_id}.txt"
+            if candidate.exists():
+                target = candidate
+        if target is None or not target.exists():
+            return {"status": "error", "message": "Manifest not found."}
+
+        active = get_active_file_manifest_metadata()
+        was_active = str(target) == str(active.get("manifest_path", "") or "")
+
+        sidecar = _manifest_metadata_path(target)
+        if target.exists():
+            target.unlink()
+        if sidecar.exists():
+            sidecar.unlink()
+
+        if was_active:
+            _refresh_active_manifest_after_delete()
+
+        return {
+            "status": "success",
+            "manifest_id": target.stem,
+            "manifest_path": str(target),
+            "was_active": was_active,
+            "message": f"Deleted manifest '{target.name}'.",
+        }
+    except Exception as exc:
+        logger.error("delete_file_manifest failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def prune_stale_file_manifests(max_age_days: int = 7) -> Dict[str, Any]:
+    try:
+        active = get_active_file_manifest_metadata()
+        active_path = str(active.get("manifest_path", "") or "").strip()
+        cutoff = datetime.now() - timedelta(days=max_age_days)
+        deleted: List[str] = []
+
+        for manifest_path in _MANIFESTS_DIR.glob("*.txt"):
+            if str(manifest_path) == active_path:
+                continue
+            metadata = _read_manifest_metadata(manifest_path)
+            written_at = str(metadata.get("written_at", "") or "").strip()
+            try:
+                ts = datetime.fromisoformat(written_at)
+            except Exception:
+                ts = datetime.fromtimestamp(manifest_path.stat().st_mtime)
+            if ts >= cutoff:
+                continue
+            sidecar = _manifest_metadata_path(manifest_path)
+            manifest_path.unlink(missing_ok=True)
+            sidecar.unlink(missing_ok=True)
+            deleted.append(str(manifest_path))
+
+        return {
+            "status": "success",
+            "deleted_count": len(deleted),
+            "deleted": deleted,
+            "message": f"Pruned {len(deleted)} stale manifest(s).",
+        }
+    except Exception as exc:
+        logger.error("prune_stale_file_manifests failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
 
 
 def _filter_stageable_paths(paths: List[Path]) -> tuple[List[Path], List[str], List[str]]:
@@ -2194,6 +2458,7 @@ def list_file_operations(days: int = _OP_HISTORY_TTL_DAYS) -> Dict[str, Any]:
 def save_search_manifest(
     found_paths: List[str],
     manifest_path: str = "",
+    label: str = "search_results",
 ) -> Dict[str, Any]:
     """
     Persist a list of found file paths to a plain-text manifest file
@@ -2204,10 +2469,15 @@ def save_search_manifest(
     Args:
         found_paths:   List of absolute file paths returned by a search step.
         manifest_path: Where to write the manifest.  Defaults to
-                       <workspace>/data/octa_manifest.txt
+                       a dedicated file under <workspace>/your_data/manifests/files/
     """
     try:
-        target = Path(manifest_path).expanduser() if manifest_path else _DEFAULT_MANIFEST
+        if manifest_path:
+            target = Path(manifest_path).expanduser()
+        else:
+            _MANIFESTS_DIR.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            target = _MANIFESTS_DIR / f"{_make_bundle_slug(label)}_{stamp}.txt"
         target.parent.mkdir(parents=True, exist_ok=True)
 
         # Deduplicate while preserving order
@@ -2220,10 +2490,23 @@ def save_search_manifest(
                 unique.append(ps)
 
         target.write_text("\n".join(unique), encoding="utf-8")
-        return {
-            "status": "success",
+        if target != _DEFAULT_MANIFEST:
+            _DEFAULT_MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+            _DEFAULT_MANIFEST.write_text("\n".join(unique), encoding="utf-8")
+
+        manifest_id = target.stem
+        metadata = {
+            "manifest_id": manifest_id,
             "manifest_path": str(target),
             "count": len(unique),
+            "label": str(label or "search_results"),
+            "written_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        _write_manifest_metadata(target, metadata)
+        _set_active_file_manifest_from_metadata(metadata)
+        return {
+            "status": "success",
+            **metadata,
             "message": f"Saved {len(unique)} path(s) to manifest '{target}'.",
         }
     except Exception as exc:
@@ -2244,12 +2527,12 @@ def collect_files_from_manifest(
 
     Args:
         manifest_path: Path to the manifest text file.  Defaults to
-                       <workspace>/data/octa_manifest.txt
+                       the active file manifest for the current files context.
         destination:   Folder to copy files into.  Defaults to
-                       <workspace>/data/
+                       <workspace>/your_data/
     """
     try:
-        mf = Path(manifest_path).expanduser() if manifest_path else _DEFAULT_MANIFEST
+        mf = resolve_file_manifest_path(manifest_path)
         if not mf.exists():
             return {
                 "status": "error",
@@ -2330,14 +2613,14 @@ def zip_files_from_manifest(
 
     Args:
         manifest_path: Path to the manifest text file. Defaults to
-                       <workspace>/your_data/octa_manifest.txt.
+                       the active file manifest for the current files context.
         output_path:   Destination zip path. Defaults to
                        <workspace>/your_data/archives/search_results.zip.
     """
     try:
         from .archives import zip_folder as _zip_folder
 
-        mf = Path(manifest_path).expanduser() if manifest_path else _DEFAULT_MANIFEST
+        mf = resolve_file_manifest_path(manifest_path)
         if not mf.exists():
             return {
                 "status": "error",

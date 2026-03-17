@@ -71,11 +71,11 @@ _TRACE_CATEGORY_ORDER = [
     "Turn",
     "Intent",
     "Session",
-    "Tool Selection",
     "DAG",
     "Thought",
     "Action",
     "Observation",
+    "Tool Selection",
     "Error",
     "Other",
 ]
@@ -205,9 +205,11 @@ def group_by_turns(entries: List[LogEntry]) -> List[Turn]:
             turn.has_error = True
         if entry.level == "WARNING":
             turn.has_warning = True
+        if entry.logger == "llm.call":
+            turn.llm_calls += 1
         m_llm = _TURN_END_LLM_RE.search(entry.message)
         if m_llm:
-            turn.llm_calls += int(m_llm.group(1))
+            turn.llm_calls = max(turn.llm_calls, int(m_llm.group(1)))
         if entry.ts:
             if turn.start_ts is None:
                 turn.start_ts = entry.ts
@@ -230,16 +232,18 @@ def _classify_trace_message(message: str, logger_name: str, level: str) -> str:
         return "Intent"
     if "[session state]" in lowered:
         return "Session"
+    if "raw planning response" in lowered or "plan contains" in lowered:
+        return "Thought"
+    if "calling tool=" in lowered or ("step=" in lowered and "tool=" in lowered):
+        return "Action"
+    if "succeeded" in lowered or "returned" in lowered or "skill dag done" in lowered:
+        return "Observation"
     if "skill_loader" in logger_lower or "loaded 54 tool skills" in lowered:
         return "Tool Selection"
     if "thought=" in lowered:
         return "Thought"
-    if "calling tool=" in lowered:
-        return "Action"
     if "skill dag start" in lowered or "plan contains" in lowered or "step=" in lowered:
         return "DAG"
-    if "succeeded" in lowered or "returned" in lowered:
-        return "Observation"
     if level in {"ERROR", "CRITICAL"} or "error" in lowered or "failed" in lowered:
         return "Error"
     return "Other"
@@ -274,6 +278,66 @@ def load_trace_file(path: Path, max_lines: int = 3000) -> List[TraceEntry]:
         return [_parse_trace_line(line, idx + 1) for idx, line in enumerate(lines)]
     except Exception:
         return []
+
+
+def _safe_log_filename(pa_name: str) -> str:
+    return re.sub(r"[^\w\-.]", "_", pa_name)
+
+
+def _load_active_log_sources() -> List[Dict[str, str]]:
+    try:
+        from src.agent.hub.pa_manager import load_assistants
+        from src.telegram.pa_poller_manager import get_pa_poller_status
+    except Exception:
+        return []
+
+    sources: List[Dict[str, str]] = []
+    for assistant in load_assistants():
+        pa_id = assistant.get("id", "")
+        if not pa_id or get_pa_poller_status(pa_id) is None:
+            continue
+        pa_name = assistant.get("name", pa_id)
+        log_path = _LOGS_DIR / f"{_safe_log_filename(pa_name)}.log"
+        if not log_path.exists():
+            continue
+        sources.append(
+            {
+                "pa_id": pa_id,
+                "name": pa_name,
+                "log_path": str(log_path),
+            }
+        )
+
+    return sorted(
+        sources,
+        key=lambda item: Path(item["log_path"]).stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _entry_to_trace_entry(entry: LogEntry) -> TraceEntry:
+    if not entry.parsed:
+        return TraceEntry(
+            line_no=entry.line_no,
+            raw=entry.raw,
+            message=entry.raw,
+            category="Other",
+        )
+
+    short_ts = entry.ts[11:23] if entry.ts and len(entry.ts) > 11 else (entry.ts or "")
+    return TraceEntry(
+        line_no=entry.line_no,
+        raw=entry.raw,
+        ts=short_ts,
+        level=entry.level,
+        logger=entry.logger,
+        message=entry.message,
+        category=_classify_trace_message(entry.message, entry.logger, entry.level),
+    )
+
+
+def _resolve_selected_log_source(sources: List[Dict[str, str]], selected_name: str) -> Dict[str, str]:
+    return next(source for source in sources if source["name"] == selected_name)
 
 
 # ---------------------------------------------------------------------------
@@ -466,18 +530,18 @@ def _render_trace_entry(entry: TraceEntry, search: str = "") -> str:
 
 
 def _show_reasoning_trace() -> None:
-    trace_files = sorted(_LOGS_DIR.glob("pa_*_stderr.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if not trace_files:
-        st.info("No stderr trace files found in the logs directory yet.")
+    trace_sources = _load_active_log_sources()
+    if not trace_sources:
+        st.info("No active Personal Assistants with live logs were found.")
         return
 
     trace_cols = st.columns([2.6, 1.6, 1.2, 1.2, 1])
     with trace_cols[0]:
-        selected_trace = st.selectbox(
-            "Trace file",
-            [path.name for path in trace_files],
+        selected_pa = st.selectbox(
+            "Personal Assistant",
+            [source["name"] for source in trace_sources],
             label_visibility="collapsed",
-            key="lv_trace_file",
+            key="lv_trace_pa",
         )
     with trace_cols[1]:
         categories = st.multiselect(
@@ -505,7 +569,8 @@ def _show_reasoning_trace() -> None:
     with trace_cols[4]:
         interesting_only = st.checkbox("Key only", value=True, key="lv_trace_key_only")
 
-    trace_path = _LOGS_DIR / selected_trace
+    selected_source = _resolve_selected_log_source(trace_sources, selected_pa)
+    trace_path = Path(selected_source["log_path"])
     try:
         trace_mtime = datetime.fromtimestamp(trace_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
@@ -513,13 +578,14 @@ def _show_reasoning_trace() -> None:
 
     st.markdown(
         f'<div style="padding:6px 10px;color:#475569;font-size:0.78rem;">'
-        f'🧠 <b style="color:#64748b;">{selected_trace}</b>'
+        f'🧠 <b style="color:#64748b;">{selected_source["name"]}</b>'
+        f'  &nbsp;·&nbsp;  <span style="color:#64748b;">{trace_path.name}</span>'
         f'  &nbsp;·&nbsp;  last modified <b style="color:#94a3b8;">{trace_mtime}</b>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    all_trace_entries = load_trace_file(trace_path, max_lines=trace_tail)
+    all_trace_entries = [_entry_to_trace_entry(entry) for entry in load_log_file(trace_path, max_lines=trace_tail)]
     if interesting_only:
         all_trace_entries = [entry for entry in all_trace_entries if entry.category != "Other"]
 
@@ -570,7 +636,10 @@ def _stats_bar(entries: List[LogEntry], turns: List[Turn]) -> None:
     for e in entries:
         if e.parsed:
             counts[e.level] = counts.get(e.level, 0) + 1
-    llm_calls = sum(t.llm_calls for t in turns)
+    llm_calls = max(
+        sum(t.llm_calls for t in turns),
+        len([entry for entry in entries if entry.parsed and entry.logger == "llm.call"]),
+    )
 
     error_turns = sum(1 for t in turns if t.has_error)
     cols = st.columns(7)
@@ -631,16 +700,17 @@ def show_log_viewer() -> None:
     structured_tab, trace_tab = st.tabs(["Structured Logs", "Reasoning Trace"])
 
     with structured_tab:
-        if not log_files:
-            st.info("No log files found in the logs directory. Start a Personal Assistant to generate logs.")
+        structured_sources = _load_active_log_sources()
+        if not structured_sources:
+            st.info("No active Personal Assistants with live logs were found.")
         else:
-            file_names = [path.name for path in log_files]
+            pa_names = [source["name"] for source in structured_sources]
             ctrl_cols = st.columns([2.5, 1.2, 1.2, 1.2, 1, 1])
 
             with ctrl_cols[0]:
-                selected_file = st.selectbox(
-                    "Log file",
-                    file_names,
+                selected_pa = st.selectbox(
+                    "Personal Assistant",
+                    pa_names,
                     label_visibility="collapsed",
                     key="lv_file",
                 )
@@ -682,7 +752,8 @@ def show_log_viewer() -> None:
             with ctrl_cols[5]:
                 st.markdown("<div style='padding-top:8px;color:#64748b;font-size:0.78rem;'>structured</div>", unsafe_allow_html=True)
 
-            log_path = _LOGS_DIR / selected_file
+            selected_source = _resolve_selected_log_source(structured_sources, selected_pa)
+            log_path = Path(selected_source["log_path"])
             try:
                 mtime = datetime.fromtimestamp(log_path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
@@ -690,7 +761,8 @@ def show_log_viewer() -> None:
 
             st.markdown(
                 f'<div style="padding:6px 10px;color:#475569;font-size:0.78rem;">'
-                f'📄 <b style="color:#64748b;">{selected_file}</b>'
+                f'📄 <b style="color:#64748b;">{selected_source["name"]}</b>'
+                f'  &nbsp;·&nbsp;  <span style="color:#64748b;">{log_path.name}</span>'
                 f'  &nbsp;·&nbsp;  last modified <b style="color:#94a3b8;">{mtime}</b>'
                 f'</div>',
                 unsafe_allow_html=True,

@@ -7,10 +7,19 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from typing import Any, Dict, Optional
 
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
+from src.agent.runtime_paths import get_runtime_state_path
+
+
+_PENDING_MAILBOX_CLEANUP_PATH = get_runtime_state_path(
+    "runtime_state",
+    "email_mailbox_cleanup_pending.json",
+    create_parent=True,
+)
 
 
 def _coerce_report_content(content: Any) -> str:
@@ -34,6 +43,287 @@ def _coerce_report_content(content: Any) -> str:
         return candidate
 
     return str(content)
+
+
+def _normalize_query_text(user_query: str) -> str:
+    return " ".join((user_query or "").lower().split())
+
+
+def _extract_fast_path_query(user_query: str) -> str:
+    text = str(user_query or "")
+    if "->" in text:
+        text = text.split("->", 1)[1]
+
+    injected_block_markers = (
+        "\n## Context from Previous Turn",
+        "\n## Conversation Diary",
+        "\n## Session State",
+    )
+    for marker in injected_block_markers:
+        if marker in text:
+            text = text.split(marker, 1)[0]
+
+    assistant_response_markers = (
+        "Mailbox cleanup preview:",
+        "This will permanently delete every Gmail filter and every user-created label.",
+        "If you want to proceed, reply with:",
+    )
+    for marker in assistant_response_markers:
+        if marker in text:
+            text = text.split(marker, 1)[0]
+
+    return text.strip()
+
+
+def _load_pending_mailbox_cleanup() -> Dict[str, Dict[str, Any]]:
+    try:
+        if _PENDING_MAILBOX_CLEANUP_PATH.exists():
+            payload = json.loads(_PENDING_MAILBOX_CLEANUP_PATH.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        pass
+    return {}
+
+
+def _save_pending_mailbox_cleanup(state: Dict[str, Dict[str, Any]]) -> None:
+    _PENDING_MAILBOX_CLEANUP_PATH.write_text(
+        json.dumps(state, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _get_pending_mailbox_cleanup(session_id: str) -> Dict[str, Any]:
+    return _load_pending_mailbox_cleanup().get(session_id, {})
+
+
+def _set_pending_mailbox_cleanup(session_id: str, preview: Dict[str, Any], action: str) -> None:
+    if not session_id:
+        return
+    state = _load_pending_mailbox_cleanup()
+    state[session_id] = {
+        "preview": preview,
+        "action": action,
+    }
+    _save_pending_mailbox_cleanup(state)
+
+
+def _clear_pending_mailbox_cleanup(session_id: str) -> None:
+    if not session_id:
+        return
+    state = _load_pending_mailbox_cleanup()
+    if session_id in state:
+        del state[session_id]
+        _save_pending_mailbox_cleanup(state)
+
+
+def _get_session_id(artifacts_out: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(artifacts_out, dict):
+        return ""
+    return str(artifacts_out.get("_session_id", "") or "").strip()
+
+
+def _mailbox_cleanup_scope(normalized_query: str) -> str:
+    cleanup_verbs = ("delete", "remove", "clear", "wipe", "reset")
+    filter_terms = ("rule", "rules", "filter", "filters")
+    label_terms = ("label", "labels", "folder", "folders")
+    mailbox_terms = ("mailbox", "gmail", "inbox")
+    if not any(term in normalized_query for term in cleanup_verbs):
+        return ""
+    if not any(term in normalized_query for term in filter_terms):
+        return ""
+    if "all" not in normalized_query and not any(term in normalized_query for term in mailbox_terms) and "applied" not in normalized_query:
+        return ""
+    if any(term in normalized_query for term in label_terms):
+        return "filters_and_labels"
+    return "filters"
+
+
+def _is_mailbox_cleanup_intent(normalized_query: str) -> bool:
+    return bool(_mailbox_cleanup_scope(normalized_query))
+
+
+def _is_mailbox_preview_intent(normalized_query: str) -> bool:
+    preview_terms = ("show", "list", "preview", "what", "which", "check")
+    filter_terms = ("rule", "rules", "filter", "filters")
+    label_terms = ("label", "labels", "folder", "folders")
+    mailbox_phrases = ("are there any", "do i have any")
+    return (
+        (
+            any(term in normalized_query for term in preview_terms)
+            or any(phrase in normalized_query for phrase in mailbox_phrases)
+        )
+        and any(term in normalized_query for term in filter_terms)
+        and (
+            any(term in normalized_query for term in label_terms)
+            or "applied" in normalized_query
+            or "mailbox" in normalized_query
+        )
+    )
+
+
+def _has_mailbox_cleanup_confirmation(normalized_query: str) -> bool:
+    confirmation_patterns = (
+        r"\bconfirm(?:ed)?\b",
+        r"\byes,? delete\b",
+        r"\bgo ahead and delete\b",
+        r"\bproceed to delete\b",
+        r"\bdelete them now\b",
+        r"\bdelete all of them now\b",
+    )
+    return any(re.search(pattern, normalized_query) for pattern in confirmation_patterns)
+
+
+def _is_affirmative_reply(normalized_query: str) -> bool:
+    reply_patterns = (
+        r"^yes[.!?\s]*$",
+        r"^yes,? delete(?: them| it| all(?: of them)?)?[.!?\s]*$",
+        r"^delete (?:them|it|all(?: of them)?) now[.!?\s]*$",
+        r"^go ahead(?: and delete(?: them| it| all(?: of them)?)?)?[.!?\s]*$",
+        r"^proceed(?: to delete(?: them| it| all(?: of them)?)?)?[.!?\s]*$",
+        r"^do it[.!?\s]*$",
+        r"^confirm(?: delete(?: all)? filters(?: and labels)?)?[.!?\s]*$",
+    )
+    stripped = normalized_query.strip()
+    return any(re.fullmatch(pattern, stripped) for pattern in reply_patterns)
+
+
+def _is_negative_reply(normalized_query: str) -> bool:
+    reply_patterns = (
+        r"^no[.!?\s]*$",
+        r"^cancel(?: it| that)?[.!?\s]*$",
+        r"^don't delete(?: them| it| anything)?[.!?\s]*$",
+        r"^do not delete(?: them| it| anything)?[.!?\s]*$",
+        r"^stop[.!?\s]*$",
+        r"^never mind[.!?\s]*$",
+    )
+    stripped = normalized_query.strip()
+    return any(re.fullmatch(pattern, stripped) for pattern in reply_patterns)
+
+
+def _mailbox_cleanup_action_description(action: str) -> str:
+    if action == "delete_all_filters_and_labels":
+        return "filter and label deletion"
+    return "filter deletion"
+
+
+def _build_mailbox_cleanup_reply_markup(action: str) -> Dict[str, Any]:
+    return {
+        "inline_keyboard": [[
+            {
+                "text": "Yes, delete",
+                "callback_data": f"mailbox_cleanup:confirm:{action}",
+            },
+            {
+                "text": "No, cancel",
+                "callback_data": f"mailbox_cleanup:cancel:{action}",
+            },
+        ]]
+    }
+
+
+def _extract_sender_rule_request(raw_query: str) -> Dict[str, str]:
+    query = str(raw_query or "")
+    email_match = re.search(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", query, flags=re.IGNORECASE)
+    if not email_match:
+        return {}
+
+    label_match = re.search(
+        r'(?:folder|label)\s+named\s+["\']([^"\']+)["\']',
+        query,
+        flags=re.IGNORECASE,
+    )
+    if not label_match:
+        label_match = re.search(
+            r'(?:folder|label)\s+named\s+([^\n\r\.!?]+)',
+            query,
+            flags=re.IGNORECASE,
+        )
+    if not label_match:
+        return {}
+
+    label_name = str(label_match.group(1)).strip().strip('"\'').strip()
+    if not label_name:
+        return {}
+
+    return {
+        "from_email": email_match.group(0).strip(),
+        "label_name": label_name,
+    }
+
+
+def _is_sender_rule_creation_intent(normalized_query: str, raw_query: str) -> bool:
+    future_terms = ("in future", "future", "automatically", "always")
+    sender_terms = ("comes from", "from this id", "from this email", "from:", "from ")
+    label_terms = ("folder named", "label named", "put to a folder", "put in a folder", "go to a folder")
+    request = _extract_sender_rule_request(raw_query)
+    return (
+        bool(request)
+        and any(term in normalized_query for term in future_terms)
+        and any(term in normalized_query for term in sender_terms)
+        and any(term in normalized_query for term in label_terms)
+    )
+
+
+def _format_mailbox_preview(preview: Dict[str, Any]) -> str:
+    filters = preview.get("filters", []) if isinstance(preview, dict) else []
+    user_labels = preview.get("user_labels", []) if isinstance(preview, dict) else []
+
+    lines = [
+        "Mailbox cleanup preview:",
+        f"- Gmail filters: {len(filters)}",
+        f"- User labels: {len(user_labels)}",
+    ]
+
+    if filters:
+        lines.append("Filters:")
+        for index, item in enumerate(filters[:10], 1):
+            criteria_parts = []
+            if item.get("from"):
+                criteria_parts.append(f"from={item['from']}")
+            if item.get("to"):
+                criteria_parts.append(f"to={item['to']}")
+            if item.get("subject"):
+                criteria_parts.append(f"subject={item['subject']}")
+            if item.get("query"):
+                criteria_parts.append(f"query={item['query']}")
+            criteria_text = ", ".join(criteria_parts) if criteria_parts else "no criteria"
+            lines.append(f"{index}. {criteria_text}")
+        if len(filters) > 10:
+            lines.append(f"...and {len(filters) - 10} more filter(s).")
+
+    if user_labels:
+        label_names = [str(label.get("name", "")).strip() for label in user_labels if str(label.get("name", "")).strip()]
+        if label_names:
+            preview_names = ", ".join(label_names[:15])
+            if len(label_names) > 15:
+                preview_names += f", and {len(label_names) - 15} more"
+            lines.append(f"User labels: {preview_names}")
+
+    return "\n".join(lines)
+
+
+def _format_sender_rule_result(result: Dict[str, Any], from_email: str, label_name: str) -> Dict[str, Any]:
+    if result.get("status") != "success":
+        return result
+
+    emails_labeled = int(result.get("emails_labeled", 0) or 0)
+    future_created = bool(result.get("future_rule_created"))
+    filter_id = str(result.get("filter_id", "") or "").strip()
+    future_text = (
+        "Created a Gmail filter for future matching emails."
+        if future_created
+        else "A matching Gmail filter already exists for future emails."
+        if filter_id
+        else "Future Gmail filter status could not be confirmed."
+    )
+    result["action"] = "create_smart_label_rule"
+    result["_fast_path"] = "sender_rule_creation"
+    result["message"] = (
+        f"Applied label '{label_name}' to {emails_labeled} existing email(s) from {from_email}. "
+        f"{future_text}"
+    )
+    return result
 
 # ---------------------------------------------------------------------------
 # Tool builders (lazy so Gmail auth errors surface at call time not import time)
@@ -167,6 +457,15 @@ def _build_all_tools() -> Dict[str, Any]:
     def create_label(label_name: str) -> dict:
         return svc.create_label(label_name)
 
+    def list_all_filters_and_labels() -> dict:
+        return svc.list_all_filters_and_labels()
+
+    def delete_all_filters() -> dict:
+        return svc.delete_all_filters()
+
+    def delete_all_filters_and_labels() -> dict:
+        return svc.delete_all_filters_and_labels()
+
     def move_emails_to_label(query: str, label_name: str, max_results: int = 50) -> dict:
         return svc.move_emails_to_label(query, label_name, max_results)
 
@@ -230,6 +529,16 @@ def _build_all_tools() -> Dict[str, Any]:
     ) -> dict:
         return svc.create_smart_label_rule(
             label_name, from_email, subject_contains, to_email, also_archive
+        )
+
+    def delete_smart_label_rule(
+        from_email: str = "",
+        subject_contains: str = "",
+        to_email: str = "",
+        label_name: str = "",
+    ) -> dict:
+        return svc.delete_smart_label_rule(
+            from_email, subject_contains, to_email, label_name
         )
 
     def find_unanswered_emails(days: int = 3, max_results: int = 20) -> dict:
@@ -321,6 +630,9 @@ def _build_all_tools() -> Dict[str, Any]:
         "schedule_email": schedule_email,
         "extract_calendar_events": extract_calendar_events,
         "create_label": create_label,
+        "list_all_filters_and_labels": list_all_filters_and_labels,
+        "delete_all_filters": delete_all_filters,
+        "delete_all_filters_and_labels": delete_all_filters_and_labels,
         "move_emails_to_label": move_emails_to_label,
         "set_vacation_responder": set_vacation_responder,
         "get_vacation_responder": get_vacation_responder,
@@ -334,6 +646,7 @@ def _build_all_tools() -> Dict[str, Any]:
         "thread_archive": thread_archive,
         "thread_delete": thread_delete,
         "create_smart_label_rule": create_smart_label_rule,
+        "delete_smart_label_rule": delete_smart_label_rule,
         "find_unanswered_emails": find_unanswered_emails,
         "empty_trash": empty_trash,
         "batch_mark_spam": batch_mark_spam,
@@ -448,6 +761,99 @@ def execute_with_llm_orchestration(
     Fallback:      ReAct loop (1 LLM call per step, up to 10 iterations).
     """
     all_tools = _build_all_tools()
+    fast_path_query = _extract_fast_path_query(user_query)
+    normalized_query = _normalize_query_text(fast_path_query)
+    session_id = _get_session_id(artifacts_out)
+    is_sender_rule_intent = _is_sender_rule_creation_intent(normalized_query, fast_path_query)
+    is_mailbox_preview = _is_mailbox_preview_intent(normalized_query)
+    is_mailbox_cleanup = _is_mailbox_cleanup_intent(normalized_query)
+
+    pending_cleanup = _get_pending_mailbox_cleanup(session_id) if session_id else {}
+    if pending_cleanup:
+        # A fresh explicit intent should not be interpreted as a reply to an older
+        # mailbox-cleanup confirmation prompt.
+        if is_sender_rule_intent or is_mailbox_preview or is_mailbox_cleanup:
+            _clear_pending_mailbox_cleanup(session_id)
+            pending_cleanup = {}
+        if _is_negative_reply(normalized_query):
+            action = str(pending_cleanup.get("action", "delete_all_filters") or "delete_all_filters")
+            _clear_pending_mailbox_cleanup(session_id)
+            return {
+                "status": "success",
+                "action": action,
+                "_fast_path": "mailbox_cleanup_cancelled",
+                "message": f"Mailbox-wide {_mailbox_cleanup_action_description(action)} was canceled.",
+            }
+        if _is_affirmative_reply(normalized_query):
+            pending_action = str(pending_cleanup.get("action", "delete_all_filters") or "delete_all_filters")
+            result = all_tools[pending_action]()
+            _clear_pending_mailbox_cleanup(session_id)
+            result.setdefault("action", pending_action)
+            result.setdefault("_fast_path", "mailbox_cleanup")
+            result["preview"] = pending_cleanup.get("preview", {})
+            return result
+
+    if is_sender_rule_intent and "create_smart_label_rule" in all_tools:
+        request = _extract_sender_rule_request(fast_path_query)
+        result = all_tools["create_smart_label_rule"](
+            label_name=request["label_name"],
+            from_email=request["from_email"],
+        )
+        return _format_sender_rule_result(result, request["from_email"], request["label_name"])
+
+    if is_mailbox_preview:
+        preview = all_tools["list_all_filters_and_labels"]()
+        if preview.get("status") != "success":
+            return preview
+        preview.setdefault("action", "list_all_filters_and_labels")
+        preview.setdefault("_fast_path", "mailbox_cleanup_preview")
+        preview["message"] = _format_mailbox_preview(preview)
+        return preview
+
+    if is_mailbox_cleanup:
+        cleanup_scope = _mailbox_cleanup_scope(normalized_query)
+        cleanup_action = (
+            "delete_all_filters_and_labels"
+            if cleanup_scope == "filters_and_labels"
+            else "delete_all_filters"
+        )
+        preview = all_tools["list_all_filters_and_labels"]()
+        if preview.get("status") != "success":
+            return preview
+        preview.setdefault("action", "list_all_filters_and_labels")
+        preview.setdefault("_fast_path", "mailbox_cleanup_preview")
+        preview_message = _format_mailbox_preview(preview)
+
+        if not _has_mailbox_cleanup_confirmation(normalized_query):
+            _set_pending_mailbox_cleanup(session_id, preview, cleanup_action)
+            delete_scope_text = (
+                "every Gmail filter and every user-created label"
+                if cleanup_action == "delete_all_filters_and_labels"
+                else "every Gmail filter"
+            )
+            return {
+                "status": "confirmation_required",
+                "action": cleanup_action,
+                "_fast_path": "mailbox_cleanup_confirmation",
+                "preview": preview,
+                "channel_payloads": {
+                    "telegram": {
+                        "reply_markup": _build_mailbox_cleanup_reply_markup(cleanup_action),
+                    }
+                },
+                "message": (
+                    f"{preview_message}\n"
+                    f"This will permanently delete {delete_scope_text}. "
+                    f"If you want to proceed, reply with: confirm {cleanup_action.replace('_', ' ')}"
+                ),
+            }
+
+        result = all_tools[cleanup_action]()
+        result.setdefault("action", cleanup_action)
+        result.setdefault("_fast_path", "mailbox_cleanup")
+        result["preview"] = preview
+        return result
+
     skill_context = _load_skill_context()
     dag_tool_docs = _get_tool_docs_for_dag()
     react_tool_docs = _get_tool_docs_for_react(user_query)

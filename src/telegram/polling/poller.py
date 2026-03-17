@@ -30,13 +30,15 @@ def _process_update(update: dict) -> None:
     # Regular message or channel post
     msg = update.get("message") or update.get("channel_post")
     if msg:
-        store_inbound_message(msg, update_id=update_id)
+        stored = store_inbound_message(msg, update_id=update_id)
+        if not stored:
+            logger.debug("[Poller] Duplicate message skipped for update %s", update_id)
+            return
         # Auto-reply: generate and send LLM response in a background thread
         # so the polling loop is never blocked.
         try:
             from ..auto_responder import maybe_auto_reply
-            import threading as _threading
-            _threading.Thread(
+            threading.Thread(
                 target=maybe_auto_reply,
                 args=({
                     "text": msg.get("text"),
@@ -61,7 +63,20 @@ def _process_update(update: dict) -> None:
         store_inbound_message(edited_copy, update_id=update_id)
         return
 
-    # Everything else (callback_query, inline_query, etc.) — ignore for now
+    callback_query = update.get("callback_query")
+    if callback_query:
+        try:
+            from ..auto_responder import maybe_handle_callback_query
+            threading.Thread(
+                target=maybe_handle_callback_query,
+                args=(callback_query,),
+                daemon=True,
+            ).start()
+        except Exception as _exc:
+            logger.warning("[Poller] callback handler import error: %s", _exc)
+        return
+
+    # Everything else (inline_query, etc.) — ignore for now
 
 
 def _poll_loop() -> None:

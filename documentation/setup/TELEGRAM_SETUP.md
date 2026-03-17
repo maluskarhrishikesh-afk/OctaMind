@@ -50,12 +50,12 @@ Your Telegram account
 ```
 
 **Key points:**
-- **No webhook is needed** � the agent uses Telegram's **long-polling** (`getUpdates`).
-  No public URL, no ngrok, no port forwarding required.
-- The poller starts **automatically** the moment you open the Telegram Agent UI.
-- **Outbound messages** go directly: OctaMind ? Telegram Bot API ? recipient.
-- **Inbound messages** are collected by the background poller into an in-memory store.
-- The agent only needs one credential: the **bot token** from @BotFather.
+- **No webhook is needed** - the agent uses Telegram long-polling through `getUpdates`.
+- Telegram bots are managed **per Personal Assistant** from the dashboard.
+- Each PA bot gets its own poller process, message store, and structured log file.
+- **Outbound messages** go directly from the PA poller to the Telegram Bot API.
+- **Inbound messages** are persisted to the PA-specific store under `your_data/tg_<pa_id>.json`.
+- Duplicate inbound Telegram updates are deduplicated before auto-reply dispatch, so one update should not produce two assistant replies.
 
 ---
 
@@ -102,39 +102,32 @@ Make sure OctaMind is already set up with a working LLM key:
 
 1. Open `config/settings.json` and confirm `llm_api_keys.GITHUB_TOKEN` is filled in.
 2. Start OctaMind:
-   ```powershell
-   .\.venv\Scripts\python.exe -m streamlit run src\agent\ui\agent_dashboard.py
-   ```
+  ```powershell
+  .\.venv\Scripts\python.exe start.py
+  ```
    The dashboard opens at `http://localhost:8501`.
+
+> For Telegram access while you are away, start OctaMind with `start.py` or the updated `run_agent_hub.py`, not a raw Streamlit command. Those launchers start the Hub API and, on Windows, the keep-awake helper that prevents idle sleep while OctaMind is running.
+
+> Hard limit: if Windows enters real sleep or hibernation, Telegram cannot reach OctaMind because the laptop stops polling Telegram and stops serving the Hub API. The practical fix is to prevent idle sleep while OctaMind is meant to stay reachable, or use Wake-on-LAN / a permanently-on host.
 
 ---
 
-## Step 4 � Add the Telegram Block to settings.json
+## Step 4 - Add The Telegram Token To A Personal Assistant
 
-Open `config/settings.json` and add a `"telegram"` section alongside the existing keys:
+OctaMind now expects Telegram bot tokens to be configured on the Personal Assistant that will own that bot.
 
-```json
-{
-  "llm_api_keys": {
-    "GITHUB_TOKEN": "ghp_your_token_here"
-  },
-  "google": { ... },
-  "whatsapp": { ... },
+1. Open the dashboard at `http://localhost:8501`.
+2. Create a Personal Assistant or open an existing one.
+3. On the assistant card, expand **Add Telegram token** if the bot is not configured yet.
+4. Paste the token from BotFather and save it.
+5. Start the bot from that same assistant card.
 
-  "telegram": {
-    "bot_token": "7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  }
-}
-```
+Notes:
 
-Replace the placeholder with the actual token you copied from BotFather.
-
-> **Alternative � environment variable:**
-> If you prefer not to store the token in a file, set it as an environment variable instead.
-> The agent checks `TELEGRAM_BOT_TOKEN` before falling back to `settings.json`.
-> ```powershell
-> $env:TELEGRAM_BOT_TOKEN = "7123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-> ```
+- This keeps each Telegram bot scoped to a single Personal Assistant.
+- The poller fails fast if the assistant has no valid token.
+- The legacy `TELEGRAM_BOT_TOKEN` environment variable still exists for lower-level service calls, but the operational path for PA bots is the per-assistant token saved with the assistant config.
 
 ---
 
@@ -167,9 +160,10 @@ Verify the install is complete:
 
 7. Open the assistant workspace and test Telegram-related requests.
 
-> The background long-polling loop starts automatically when the UI loads.
+> The long-polling loop starts when you press **Start Bot** on the assistant card.
 > You will see log lines like `[Poller] Background polling loop started.`
-> in `logs/telegram_agent.log`.
+> in `logs/<assistant_name>.log` such as `logs/My_Assistant.log`.
+> On Windows, `start.py` and `run_agent_hub.py` also launch a keep-awake helper by default so the laptop stays reachable when locked and idle.
 
 ---
 
@@ -181,11 +175,11 @@ Most Telegram commands require a **chat_id** (an integer like `123456789`).
 
 1. In your Telegram app, open your newly created bot (`t.me/OctaMind_myname_bot`) and send it any message, e.g. `hello`.
 
-2. In the OctaMind Telegram Agent chat, type:
+2. In the same Telegram chat, type:
    ```
-   Show recent messages
+  /status
    ```
-   OctaMind will display the inbound message along with the **chat_id** and **message_id**.
+  The bot confirms that the PA poller is running and that sleep protection is active when enabled.
 
 3. Note your chat_id � it will be the same every time you message this bot from your account.
 
@@ -452,9 +446,8 @@ Share Drive file DRIVE_FILE_ID in chat YOUR_CHAT_ID
 
 ### ? "Not configured" badge in the UI
 
-- Check that `config/settings.json` has a `"telegram"` block with a non-empty `bot_token`.
-- Run: `.\.venv\Scripts\python.exe -c "from src.telegram.telegram_auth import get_bot_token; print(get_bot_token()[:10])"`
-  � should print the first 10 characters of your token.
+- Check that the Personal Assistant has a saved Telegram bot token.
+- Use the assistant card in the dashboard to save the token and then start the bot.
 
 ---
 
@@ -473,7 +466,7 @@ print(get_me())
 
 ### ? "Show recent messages" returns empty
 
-The in-memory message store is empty until the poller receives messages.
+The PA-specific message store is empty until that assistant's poller receives messages.
 1. Confirm the poller is running: the UI should show the poller status in the sidebar.
 2. Send a fresh message to the bot from your Telegram app.
 3. Wait 2�3 seconds, then run `Show recent messages` again.
@@ -482,9 +475,9 @@ The in-memory message store is empty until the poller receives messages.
 
 ### ? Poller doesn't start
 
-Check `logs/telegram_agent.log` for errors.  Common causes:
+Check the assistant-specific log file such as `logs/My_Assistant.log` for errors. Common causes:
 - Invalid token (poller fails on the first `getUpdates` call).
-- Another instance of OctaMind is already polling the same bot � Telegram only allows one `getUpdates` session per bot.
+- Another instance is already polling the same token - Telegram only allows one active `getUpdates` session per bot.
 
 ---
 
@@ -498,13 +491,13 @@ The bot cannot receive messages **in a private chat** unless the user has starte
 
 ```powershell
 # Confirm token is loaded
-.\.venv\Scripts\python.exe -c "from src.telegram.telegram_auth import credentials_configured; print(credentials_configured())"
+.\.venv\Scripts\python.exe -c "import json, pathlib; data=json.loads(pathlib.Path('your_data/assistants.json').read_text(encoding='utf-8')); print(bool((((data[0].get('config') or {}).get('telegram') or {}).get('bot_token') or '').strip()))"
 
 # Confirm bot identity
 .\.venv\Scripts\python.exe -c "from src.telegram.telegram_service import get_me; import json; print(json.dumps(get_me(), indent=2))"
 
 # Check message store
-.\.venv\Scripts\python.exe -c "from src.telegram.polling.message_store import get_recent_messages; print(get_recent_messages(5))"
+.\.venv\Scripts\python.exe -c "import json, pathlib; p=pathlib.Path('your_data/tg_pa_61cd192c.json'); print(p.exists())"
 
 # Run the Telegram agent tests
 .\.venv\Scripts\python.exe -m pytest tests/telegram/ -q
@@ -512,4 +505,4 @@ The bot cannot receive messages **in a private chat** unless the user has starte
 
 ---
 
-*Last updated: February 2026*
+*Last updated: March 2026*

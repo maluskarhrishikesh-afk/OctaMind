@@ -6,8 +6,12 @@ OctaMind is a multi-agent personal assistant platform that lets you operate Gmai
 
 - Agent Hub dashboard for creating, configuring, and launching Personal Assistants
 - Embedded Personal Assistant workspace inside the dashboard
+- Security Dashboard for inbound guardrails, rate-limit state, pending destructive confirmations, and live tool-risk inspection
+- Manifest Inspector for the active file manifest and recent historical manifests
 - Skill routing across email, drive, files, calendar, scheduler, file organizer, habit tracking, browser, stock market, LinkedIn, WhatsApp, and Telegram
 - Persistent assistant memory plus cross-channel history merging for dashboard and Telegram
+- Per-assistant Telegram bots with dedicated pollers, per-PA message stores, and direct Telegram runtime controls from each assistant card
+- Active file-manifest registry plus current-channel file delivery for follow-up requests like "send it to me" or "share it here"
 - Local runtime state and generated artifacts under `your_data/`
 - Public research artifacts in `research/`
 
@@ -35,6 +39,8 @@ OctaMind is a multi-agent personal assistant platform that lets you operate Gmai
 - On Windows, a keep-awake helper is started by default unless disabled in `config/settings.json`
 - Memory consolidation runs as a background process on startup and continues on an 8-hour loop
 - Telegram pollers are managed per Personal Assistant from the dashboard, not directly by `start.py`
+- Each Telegram-connected Personal Assistant keeps its own poller process, message store, and structured log file
+- Destructive tools now use a shared confirmation flow with Telegram inline buttons and persisted pending-confirmation state
 - Runtime outputs, operational state, archives, reports, and generated artifacts are stored under `your_data/`
 
 ## Quick Start
@@ -141,6 +147,8 @@ OctaMind/
 ### Architecture and operations
 
 - [documentation/architecture/ARCHITECTURE.md](documentation/architecture/ARCHITECTURE.md)
+- [documentation/architecture/SECURITY_ARCHITECTURE.md](documentation/architecture/SECURITY_ARCHITECTURE.md)
+- [documentation/architecture/MANIFEST_ARCHITECTURE.md](documentation/architecture/MANIFEST_ARCHITECTURE.md)
 - [documentation/architecture/PA-DESIGN.md](documentation/architecture/PA-DESIGN.md)
 - [documentation/architecture/memory-system.md](documentation/architecture/memory-system.md)
 - [documentation/reference/TOOL_REFERENCE.md](documentation/reference/TOOL_REFERENCE.md)
@@ -156,11 +164,11 @@ OctaMind/
 ## Research Papers
 
 - **DAG and Topological sort to reduce unnecessary reasoning by LLMs**  
-	[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18911464.svg)](https://doi.org/10.5281/zenodo.18911464)  
+	[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19023191.svg)](https://doi.org/10.5281/zenodo.19023191)  
 	DOI: [10.5281/zenodo.18911464](https://doi.org/10.5281/zenodo.18911464)  
 	PDF: [research/LLM_DAG_Orchestration.pdf](research/LLM_DAG_Orchestration.pdf)
 
 - **Building Persistent AI Systems Without a Traditional Database**  
-	[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19018414.svg)](https://doi.org/10.5281/zenodo.19018414)  
+    [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19023209.svg)](https://doi.org/10.5281/zenodo.19023209)  
 	DOI: [10.5281/zenodo.19018414](https://doi.org/10.5281/zenodo.19018414)  
 	PDF: [research/Markdown_Native_Architecture.pdf](research/Markdown_Native_Architecture.pdf)

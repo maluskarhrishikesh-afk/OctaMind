@@ -65,6 +65,7 @@ def send_text(
     parse_mode: Optional[str] = "Markdown",
     reply_to_message_id: Optional[int] = None,
     disable_notification: bool = False,
+    reply_markup: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Send a plain-text message to a chat.
 
@@ -84,6 +85,8 @@ def send_text(
         payload["parse_mode"] = parse_mode
     if reply_to_message_id:
         payload["reply_to_message_id"] = reply_to_message_id
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
 
     resp = requests.post(f"{_base_url()}/sendMessage", json=payload, timeout=_TIMEOUT)
     try:
@@ -239,6 +242,7 @@ def edit_message_text(
     message_id: int,
     text: str,
     parse_mode: Optional[str] = "Markdown",
+    reply_markup: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Edit the text of a previously sent message.
 
@@ -254,6 +258,8 @@ def edit_message_text(
     }
     if parse_mode:  # Only include parse_mode when non-None and non-empty
         payload["parse_mode"] = parse_mode
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
     resp = requests.post(f"{_base_url()}/editMessageText", json=payload, timeout=_TIMEOUT)
     try:
         return _unwrap(resp)
@@ -273,6 +279,37 @@ def delete_message_api(chat_id: int | str, message_id: int) -> bool:
     """Delete a message. Returns True on success."""
     payload = {"chat_id": chat_id, "message_id": message_id}
     resp = requests.post(f"{_base_url()}/deleteMessage", json=payload, timeout=_TIMEOUT)
+    return bool(_unwrap(resp))
+
+
+def edit_message_reply_markup(
+    chat_id: int | str,
+    message_id: int,
+    reply_markup: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Edit only the reply markup of a previously sent message."""
+    payload: Dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "reply_markup": reply_markup if reply_markup is not None else {"inline_keyboard": []},
+    }
+    resp = requests.post(f"{_base_url()}/editMessageReplyMarkup", json=payload, timeout=_TIMEOUT)
+    return _unwrap(resp)
+
+
+def answer_callback_query(
+    callback_query_id: str,
+    text: str = "",
+    show_alert: bool = False,
+) -> bool:
+    """Answer a Telegram callback query so button taps stop spinning."""
+    payload: Dict[str, Any] = {
+        "callback_query_id": callback_query_id,
+        "show_alert": show_alert,
+    }
+    if text:
+        payload["text"] = text
+    resp = requests.post(f"{_base_url()}/answerCallbackQuery", json=payload, timeout=_TIMEOUT)
     return bool(_unwrap(resp))
 
 

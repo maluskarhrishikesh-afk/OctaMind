@@ -798,12 +798,12 @@ Manifests     = persistent disk state written by previous tool calls
 - `last_found_paths`, `last_found_folder` — extracted from previous assistant reply text
 
 **Manifests carry** (written by tool calls):
-- `octa_manifest.txt` — all file paths from the most recent file search (unlimited size)
+- `active_file_manifest.json` + `manifests/files/*.txt` — active pointer plus exact file paths from recent file searches (unlimited size)
 - `octa_context.json` — agent-namespaced resolved entities (calendar slots, email IDs)
 - `operation_history.json` — copy/move history for undo
 - `octa_jobs.json` — background task status
 
-**Overlap at `last_found_paths`:** Both sources provide file paths. `_merge_manifest_into_session()` in `skill_dag_engine.py` resolves this by replacing session-state paths with manifest paths whenever the manifest was written in the last 30 minutes (fresher = wins). This prevents stale session state from pointing at old results when a background job updated the manifest.
+**Overlap at `last_found_paths`:** Both sources provide file paths. `_merge_manifest_into_session()` in `skill_dag_engine.py` resolves this by replacing session-state paths with the active manifest paths whenever the manifest was written in the last 30 minutes (fresher = wins). This prevents stale session state from pointing at old results when a background job updated the manifest.
 
 ---
 

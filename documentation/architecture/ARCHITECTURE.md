@@ -1,8 +1,9 @@
 # OctaMind — Architecture
 
-Last updated: 2026-03-08
+Last updated: 2026-03-15
 
 > **See also:** [DAG_WALKTHROUGH.md](DAG_WALKTHROUGH.md) for a complete step-by-step trace of the DAG algorithm through two worked examples (simple single-skill and complex multi-agent).
+> **See also:** [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for the shared security control plane, enterprise roadmap, and research-oriented evaluation plan.
 
 ---
 
@@ -92,6 +93,53 @@ Multi-agent commands use a **two-level ReAct architecture**:
 **Sub-agent DAG engine (new):** `src/agent/workflows/skill_dag_engine.py` — `run_skill_dag()` is the **primary path** for Email, Files and Drive agents. Instead of iterating 1-call-per-step, it uses exactly **2 LLM calls** per task regardless of complexity: one to plan a list of tool steps (JSON), then tools execute deterministically, then one synthesis call produces the friendly final answer. Falls back to `run_skill_react()` automatically if planning fails or returns an unknown tool.
 
 Single-agent commands routed through the Personal Assistant bypass the multi-agent planner and call the individual skill's ReAct orchestrator directly.
+
+### Shared Runtime Tool Maps
+
+Runtime tool discovery is now standardized at the registry layer.
+
+- `src/agent/workflows/agent_registry.py` exposes `get_runtime_tool_map(agent_name, user_query="")` as the shared runtime contract.
+- `src/agent/workflows/step_runner.py` now resolves tools through that contract instead of hardcoding Drive- and Email-only registries.
+- Orchestrators can participate through a staged compatibility chain:
+      - `build_runtime_tool_map(...)`
+      - `_build_all_tools(...)`
+      - `_get_tools(...)`
+
+This removes the old architectural exception where deterministic step execution knew specific tool lists for only a subset of agents.
+
+### Generic Destructive-Action Confirmation
+
+Destructive actions are now guarded by a shared policy layer instead of ad hoc agent-specific logic.
+
+- `src/agent/workflows/confirmation_policy.py` classifies destructive tools such as `delete_*`, `remove_*`, `trash_*`, and related operations.
+- The guard runs inside both shared execution engines:
+      - `skill_dag_engine.py`
+      - `skill_react_engine.py`
+- When a destructive tool needs approval, the workflow returns `status="confirmation_required"` with:
+      - a confirmation message
+      - a stable action key
+      - optional `channel_payloads` for transports such as Telegram inline buttons
+- `src/agent/hub/processor.py` stores and replays pending confirmations per session.
+- `src/telegram/auto_responder.py` maps generic confirm/cancel callbacks into the same flow as typed confirmation replies.
+
+The result is a single Yes/No confirmation architecture that applies across agents and skills.
+
+### Security Architecture
+
+Security now starts before routing instead of being treated as an afterthought inside individual agents.
+
+- `src/agent/security/security_policy.py` applies inbound request screening, redacted security audit logging, and session-scoped request throttling.
+- `src/agent/security/tool_manifest.py` derives a runtime tool security manifest from the same shared tool-map contract used by execution.
+- `src/agent/workflows/confirmation_policy.py` remains the shared approval layer for destructive actions.
+- `src/agent/hub/processor.py` is the enforcement boundary where security decisions are applied before routing.
+
+This gives OctaMind a security control plane with three concrete insertion points:
+
+1. Hub boundary for inbound screening and abuse prevention.
+2. Capability boundary for per-tool authorization and policy tags.
+3. Execution boundary for approvals, denials, and step-up controls.
+
+See [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for the detailed model and enterprise roadmap.
 
 ---
 
@@ -188,7 +236,8 @@ Three categories of log files, **truncated on every `start.py` run**:
 - `drive_agent.log`
 - `email_agent.log`
 - `whatsapp_agent.log`
-- `telegram_agent.log`
+- per-PA Telegram logs such as `My_Assistant.log`
+- per-PA Telegram stderr logs such as `My_Assistant_stderr.txt`
 - `files_agent.log`
 - `personal_assistant.log`
 
@@ -216,6 +265,16 @@ The Files Agent uses two distinct search paths depending on what the user asks:
 PA memories are stored under `memory/<pa_id>/`. Only Personal Assistants have folders here � Skills are stateless and have no memory. Each PA folder holds 6 `.md` memory layers.
 
 The `_collective_memory_` PA hub follows the same 6-layer layout as any other personal assistant, with a hard-coded protective `personality.md`.
+
+---
+
+## Workflow Safety State
+
+Pending destructive confirmations are stored in:
+
+- `your_data/runtime_state/destructive_action_pending.json`
+
+This file preserves the pending request, session, action key, and confirmation metadata so a later typed `yes` / `no` or a Telegram button tap can safely resume or cancel the original operation.
 
 ---
 

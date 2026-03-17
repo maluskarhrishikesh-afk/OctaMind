@@ -30,6 +30,15 @@ User Message
      │
      ▼
 ┌─────────────────────────────────────────────────────────────────────┐
+│  Security Preflight  (security_policy.py)                           │
+│  • Prompt-injection screening                                       │
+│  • Forged internal-context detection                                │
+│  • Session rate limiting                                            │
+│  • Redacted security audit event emission                           │
+└────────────────────────────────┬────────────────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────────────────────────────────┐
 │  HubRequest  (processor.py › _process_message)                      │
 │  • Wraps message + source + agent_id + session_id                   │
 │  • Loads last N conversation turns as `history`                     │
@@ -59,6 +68,7 @@ User Message
 │         │   chat            → _chat_response()                      │
 │         │   1 agent         → _run_single_agent()                   │
 │         │   N agents        → run_workflow() → DAG pipeline         │
+│         │   destructive     → confirmation_required → pending state │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -67,9 +77,49 @@ User Message
 | File | Written by | Read by | Purpose |
 |---|---|---|---|
 | `your_data/octa_context.json` | Agent orchestrators (after tool results) | `_dispatch` + agent orchestrators | Cross-turn context: found files, listed emails, etc. |
-| `your_data/octa_manifest.txt` | Files agent (`search_files` tool) | Files agent (`collect_files_from_manifest`) | Full list of file paths from the last search |
+| `your_data/active_file_manifest.json` + `your_data/manifests/files/*.txt` | Files agent (`save_search_manifest`) | Files agent follow-ups (`collect_files_from_manifest`, `zip_files_from_manifest`) | Active file-manifest pointer plus historical manifests for exact follow-up actions |
 | `your_data/octa_context_history.jsonl` | `write_context()` | Audit/debug only | Append-only history of every context write |
 | `your_data/hub_conversations.json` | HubProcessor | HubProcessor | Full turn history per session |
+| `your_data/runtime_state/destructive_action_pending.json` | HubProcessor + confirmation policy | HubProcessor | Session-scoped pending destructive confirmations |
+| `your_data/runtime_state/security_events.jsonl` | Security policy | Audit/debug and future SOC UI | Redacted security-relevant events |
+| `your_data/runtime_state/security_rate_limits.json` | Security policy | Security policy | Session-scoped rate-limit counters |
+
+### Shared Runtime Tool Contract
+
+Deterministic tool execution now goes through a shared registry contract.
+
+- `agent_registry.get_runtime_tool_map(agent_name, user_query="")` is the standard entry point.
+- `step_runner.py` uses that contract instead of maintaining agent-specific registries for only Drive and Email.
+- Existing orchestrators remain compatible through legacy builder discovery while the codebase converges on one public runtime-tool-map surface.
+
+### Destructive Confirmation Path
+
+Destructive tool calls are intercepted before execution in the shared skill engines.
+
+1. A planned tool call reaches `skill_dag_engine.py` or `skill_react_engine.py`.
+2. `confirmation_policy.py` classifies the tool as destructive or safe.
+3. If approval is required and the action key has not been pre-confirmed:
+  - execution stops before the tool runs
+  - the workflow returns `confirmation_required`
+  - the hub stores pending state in `your_data/runtime_state/destructive_action_pending.json`
+  - Telegram can receive inline Yes/No buttons through `channel_payloads`
+4. A later user reply such as `yes`, `no`, `confirm action <key>`, or `cancel action <key>` is normalized by the hub.
+5. On confirm, the original request is replayed with the approved action key and the destructive tool is allowed to execute.
+6. On cancel, the pending state is cleared and the original operation is not run.
+
+This flow is generic across agents rather than being hardcoded only for a specific email-cleanup path.
+
+### Security Preflight Path
+
+Before routing, every inbound message passes through a shared security preflight.
+
+1. `security_policy.py` evaluates the raw inbound message.
+2. High-confidence prompt-injection or rule-bypass attempts are blocked before routing.
+3. Suspicious meta-prompt references are allowed but logged to the security audit trail.
+4. Request bursts are rate-limited per session before agent selection or tool execution.
+5. Only allowed requests continue into `_dispatch()` and the normal workflow pipeline.
+
+This keeps security logic centralized at the hub boundary instead of re-implementing it inside each skill.
 
 ---
 
@@ -266,7 +316,7 @@ After the search tool returns results, the files agent orchestrator calls
 }
 ```
 
-Simultaneously, `your_data/octa_manifest.txt` is written:
+Simultaneously, a dedicated manifest is written under `your_data/manifests/files/` and active-manifest metadata is updated in `your_data/active_file_manifest.json`:
 ```
 C:\Hrishikesh\Neo\Payslips\Payslip_2025_Dec.pdf
 C:\Hrishikesh\Neo\Payslips\Payslip_2025_Nov.pdf
@@ -799,7 +849,7 @@ Agent: files
 Topic: file_search
 Awaiting: file_action
 The user is acting on files from the previous search.
-File paths are stored in the file manifest (octa_manifest.txt).
+File paths are stored in the active file manifest referenced by `file_manifest`.
 Call collect_files_from_manifest() to copy, or use files from `listed_files`...
 [awaiting-specific instructions]
 Resolved entities: {count: 3, last_found_folder: "C:\...", ...}

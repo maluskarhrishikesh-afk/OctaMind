@@ -103,6 +103,10 @@ def maybe_auto_reply(stored_message: Dict[str, Any]) -> None:
         _handle_reset(chat_id)
         return
 
+    if cmd == "/status":
+        _handle_status(chat_id)
+        return
+
     if cmd in ("/agents", "/skills"):
         _handle_agents(chat_id)
         return
@@ -143,6 +147,126 @@ def maybe_auto_reply(stored_message: Dict[str, Any]) -> None:
         _generate_and_send(chat_id, text)
 
 
+def maybe_handle_callback_query(callback_query: Dict[str, Any]) -> None:
+    """Handle Telegram inline-button taps for critical confirmations."""
+    data = str(callback_query.get("data", "") or "").strip()
+    callback_id = str(callback_query.get("id", "") or "").strip()
+    message = callback_query.get("message") or {}
+    chat_id = (message.get("chat") or {}).get("id")
+    message_id = message.get("message_id")
+
+    if not data or not chat_id or not callback_id:
+        return
+
+    if not (data.startswith("mailbox_cleanup:") or data.startswith("destructive_action:")):
+        return
+
+    from .telegram_service import answer_callback_query, edit_message_reply_markup
+
+    synthetic_text = _callback_query_to_user_text(data)
+    if not synthetic_text:
+        try:
+            answer_callback_query(callback_id, text="Unsupported action")
+        except Exception:
+            pass
+        return
+
+    try:
+        answer_callback_query(callback_id, text="Working on it...")
+    except Exception:
+        pass
+
+    try:
+        if message_id:
+            edit_message_reply_markup(chat_id, int(message_id), {"inline_keyboard": []})
+    except Exception:
+        pass
+
+    with _reply_lock:
+        _generate_and_send(chat_id, synthetic_text)
+
+
+def _callback_query_to_user_text(callback_data: str) -> str:
+    parts = str(callback_data or "").split(":", 2)
+    if len(parts) != 3:
+        return ""
+
+    if parts[0] == "destructive_action":
+        decision, action_key = parts[1], parts[2]
+        if decision == "cancel":
+            return f"cancel action {action_key}"
+        if decision == "confirm":
+            return f"confirm action {action_key}"
+        return ""
+
+    if parts[0] != "mailbox_cleanup":
+        return ""
+
+    decision, action = parts[1], parts[2]
+    if decision == "cancel":
+        return "cancel"
+    if decision != "confirm":
+        return ""
+    if action == "delete_all_filters_and_labels":
+        return "confirm delete all filters and labels"
+    if action == "delete_all_filters":
+        return "confirm delete all filters"
+    return ""
+
+
+def _telegram_reply_markup(result: Any) -> Optional[Dict[str, Any]]:
+    payloads = getattr(result, "channel_payloads", {}) or {}
+    if not isinstance(payloads, dict):
+        return None
+    telegram_payload = payloads.get("telegram", {})
+    if not isinstance(telegram_payload, dict):
+        return None
+    reply_markup = telegram_payload.get("reply_markup")
+    return reply_markup if isinstance(reply_markup, dict) else None
+
+
+def _resolve_current_pa(chat_id: int | str) -> tuple[str, str]:
+    """Resolve the current Personal Assistant id/name for this Telegram chat."""
+    pa_id_env = os.environ.get("PA_ID", "").strip()
+    if pa_id_env:
+        try:
+            from src.agent.hub.pa_manager import get_assistant
+
+            pa = get_assistant(pa_id_env)
+            if pa:
+                return str(pa.get("id") or "_collective_memory_"), str(pa.get("name") or "Personal Assistant")
+        except Exception:
+            pass
+        return pa_id_env or "_collective_memory_", "Personal Assistant"
+
+    try:
+        from .pa_router import get_pa_for_chat
+
+        pa = get_pa_for_chat(chat_id)
+        if pa:
+            return str(pa.get("id") or "_collective_memory_"), str(pa.get("name") or "Personal Assistant")
+    except Exception:
+        pass
+    return "_collective_memory_", "Personal Assistant"
+
+
+def _record_direct_command_turn(chat_id: int | str, user_text: str, assistant_text: str) -> None:
+    """Persist direct Telegram command turns into shared hub/dashboard history."""
+    try:
+        from src.agent.hub.processor import log_external_turn
+
+        pa_id, _ = _resolve_current_pa(chat_id)
+        log_external_turn(
+            session_id=f"telegram_{chat_id}",
+            source="telegram",
+            agent_id=pa_id,
+            user_message=user_text,
+            assistant_message=assistant_text,
+        )
+    except Exception as exc:
+        logger.debug("[AutoReply] Direct command history persist skipped for %s: %s", chat_id, exc)
+
+
 def _send_welcome(chat_id: int | str) -> None:
     """Send a welcome message identifying the PA this bot belongs to."""
     pa_name = "Octa Bot Assistant"
@@ -160,6 +284,7 @@ def _send_welcome(chat_id: int | str) -> None:
         "Send me any message and I'll get right to work. 😊\n\n"
         "**Commands:**\n"
         "• `/reset` — clear conversation history\n"
+        "• `/status` — show runtime and reachability status\n"
         "• `/skills` — view enabled and available skills\n"
         "• `/enable files` — enable a skill\n"
         "• `/enable scheduler` — enable another skill\n"
@@ -172,6 +297,7 @@ def _send_welcome(chat_id: int | str) -> None:
         from .polling.message_store import store_outbound_message
         resp = send_text(chat_id, welcome)
         store_outbound_message(chat_id, welcome, message_id=resp.get("message_id", 0))
+        _record_direct_command_turn(chat_id, "/start", welcome)
     except Exception as exc:
         logger.warning("[AutoReply] Failed to send welcome to %s: %s", chat_id, exc)
 
@@ -188,9 +314,40 @@ def _handle_reset(chat_id: int | str) -> None:
         msg = "🔄 *Conversation reset.* I've cleared our history — let's start fresh! 😊"
         resp = send_text(chat_id, msg)
         store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+        _record_direct_command_turn(chat_id, "/reset", msg)
         logger.info("[AutoReply] Reset conversation for chat %s", chat_id)
     except Exception as exc:
         logger.warning("[AutoReply] /reset failed for %s: %s", chat_id, exc)
+
+
+def _handle_status(chat_id: int | str) -> None:
+    """Send runtime and reachability status for this Telegram-connected assistant."""
+    try:
+        from src.agent.system.runtime_status import get_keep_awake_status
+        from src.telegram.pa_poller_manager import get_pa_poller_status
+
+        pa_id, pa_name = _resolve_current_pa(chat_id)
+        keep_awake = get_keep_awake_status()
+        poller_running = get_pa_poller_status(pa_id) is not None if pa_id and pa_id != "_collective_memory_" else True
+        auto_reply_state = "On" if auto_reply_enabled() else "Off"
+
+        msg = (
+            f"📡 *Status for {pa_name}*\n\n"
+            f"• Telegram bot: {'Running' if poller_running else 'Stopped'}\n"
+            f"• Auto-reply: {auto_reply_state}\n"
+            f"• Sleep protection: {keep_awake['label']}\n"
+            f"• Detail: {keep_awake['detail']}\n\n"
+            f"_Note: {keep_awake['hard_limit']}_"
+        )
+
+        from .telegram_service import send_text
+        from .polling.message_store import store_outbound_message
+
+        resp = send_text(chat_id, msg)
+        store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+        _record_direct_command_turn(chat_id, "/status", msg)
+    except Exception as exc:
+        logger.warning("[AutoReply] /status failed for %s: %s", chat_id, exc)
 
 
 def _handle_agents(chat_id: int | str) -> None:
@@ -233,6 +390,7 @@ def _handle_agents(chat_id: int | str) -> None:
             lines.append(f"\nUse {command_examples} to enable more skills here in Telegram.")
         else:
             lines.append("\nUse `/disable <skill>` if you want to turn a skill off here in Telegram.")
+        lines.append("\nUse `/status` to check whether sleep protection is active on the laptop.")
         msg = "\n".join(lines)
     except Exception:
         msg = "🤖 Skills are loading — try again in a moment."
@@ -242,6 +400,7 @@ def _handle_agents(chat_id: int | str) -> None:
         from .polling.message_store import store_outbound_message
         resp = send_text(chat_id, msg)
         store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+        _record_direct_command_turn(chat_id, "/skills", msg)
     except Exception as exc:
         logger.warning("[AutoReply] /agents response failed for %s: %s", chat_id, exc)
 
@@ -283,6 +442,7 @@ def _handle_google_auth_start(chat_id: int | str, raw_service: str) -> None:
 
         resp = send_text(chat_id, msg)
         store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+        _record_direct_command_turn(chat_id, f"/auth {raw_service}".strip(), msg)
     except (ImportError, OSError, RuntimeError, ValueError) as exc:
         logger.warning("[AutoReply] /auth failed for %s: %s", chat_id, exc)
 
@@ -300,6 +460,7 @@ def _handle_google_auth_complete(chat_id: int | str, raw_payload: str) -> None:
 
         resp = send_text(chat_id, msg)
         store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+        _record_direct_command_turn(chat_id, f"/authcomplete {raw_payload}".strip(), msg)
     except (ImportError, OSError, RuntimeError, ValueError) as exc:
         logger.warning("[AutoReply] /authcomplete failed for %s: %s", chat_id, exc)
 
@@ -343,6 +504,8 @@ def _handle_skill_toggle(chat_id: int | str, raw_skill: str, *, enable: bool) ->
 
         resp = send_text(chat_id, msg)
         store_outbound_message(chat_id, msg, message_id=resp.get("message_id", 0))
+        action = "/enable" if enable else "/disable"
+        _record_direct_command_turn(chat_id, f"{action} {raw_skill}".strip(), msg)
     except Exception as exc:
         logger.warning("[AutoReply] skill toggle failed for %s: %s", chat_id, exc)
 
@@ -429,6 +592,7 @@ def _generate_and_send(chat_id: int | str, user_text: str) -> None:
             on_progress=_on_progress,
         )
         reply_text = result.response or "✅ Done."
+        reply_markup = _telegram_reply_markup(result)
 
         # ── Deliver the text reply ────────────────────────────────────────────
         # Edit the placeholder if it exists, otherwise send a fresh message.
@@ -438,7 +602,7 @@ def _generate_and_send(chat_id: int | str, user_text: str) -> None:
 
         if placeholder_id:
             try:
-                edit_message_text(chat_id, placeholder_id, first_chunk)
+                edit_message_text(chat_id, placeholder_id, first_chunk, reply_markup=reply_markup)
                 store_outbound_message(chat_id, first_chunk, message_id=placeholder_id)
                 # Send any overflow chunks as new messages
                 for chunk in chunks[1:]:
@@ -448,15 +612,15 @@ def _generate_and_send(chat_id: int | str, user_text: str) -> None:
                 # edit_message_text can fail if message is identical or has markdown issues.
                 # Fall back to a fresh sendMessage — use plain text to guarantee delivery.
                 plain = _plain_text(first_chunk)
-                r = send_text(chat_id, plain, parse_mode=None)
+                r = send_text(chat_id, plain, parse_mode=None, reply_markup=reply_markup)
                 store_outbound_message(chat_id, plain, message_id=r.get("message_id", 0))
                 for chunk in chunks[1:]:
                     plain_chunk = _plain_text(chunk)
                     r = send_text(chat_id, plain_chunk, parse_mode=None)
                     store_outbound_message(chat_id, plain_chunk, message_id=r.get("message_id", 0))
         else:
-            for chunk in chunks:
-                r = send_text(chat_id, chunk)
+            for index, chunk in enumerate(chunks):
+                r = send_text(chat_id, chunk, reply_markup=reply_markup if index == 0 else None)
                 store_outbound_message(chat_id, chunk, message_id=r.get("message_id", 0))
 
         # ── Deliver file artifacts (download + send as document) ──────────────

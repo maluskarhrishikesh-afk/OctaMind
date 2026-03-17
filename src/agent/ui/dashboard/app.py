@@ -13,10 +13,13 @@ import streamlit.components.v1 as components
 from src.agent.core.agent_manager import get_agent_manager
 from src.agent.core.process_manager import cleanup_stale, get_agent_status
 from src.agent.runtime_paths import get_runtime_state_path
+from src.agent.system.runtime_status import get_keep_awake_status
 from src.agent.ui.dashboard.configure_panel import show_configure_panel
 from src.agent.ui.dashboard.create_form import show_create_agent_form
 from src.agent.ui.dashboard.helpers import _logo_b64, _logo_icon
 from src.agent.ui.dashboard.log_viewer import show_log_viewer
+from src.agent.ui.dashboard.manifest_inspector import show_manifest_inspector
+from src.agent.ui.dashboard.security_dashboard import show_security_dashboard
 from src.agent.ui.dashboard.styles import inject_css
 
 logger = logging.getLogger("Octa Bot.dashboard")
@@ -28,11 +31,46 @@ _NAV_STATE_KEYS = (
     "configure_agent_id",
     "configure_pa_id",
     "show_log_viewer",
+    "show_security_dashboard",
+    "show_manifest_inspector",
     "show_create_pa_panel",
     "active_pa_id",
     "active_pa_url",
     "dashboard_scroll_target",
 )
+
+
+def _render_channel_card(
+    *,
+    accent_background: str,
+    accent_border: str,
+    title: str,
+    subtitle: str,
+    badge_text: str,
+    badge_color: str,
+) -> None:
+    st.markdown(
+        (
+            "<div style='background:{bg};border:1px solid {border};padding:14px 16px;"
+            "border-radius:12px;min-height:124px;height:124px;display:flex;flex-direction:column;justify-content:space-between;'>"
+            "<div>"
+            "<div style='font-size:1rem;font-weight:700;color:#e2e8f0;line-height:1.25;'>{title}</div>"
+            "<div style='font-size:0.8rem;color:#94a3b8;margin-top:6px;line-height:1.35;'>{subtitle}</div>"
+            "</div>"
+            "<div style='display:flex;justify-content:flex-end;align-items:center;margin-top:12px;'>"
+            "<span style='background:{badge_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;line-height:1.2;'>{badge}</span>"
+            "</div>"
+            "</div>"
+        ).format(
+            bg=accent_background,
+            border=accent_border,
+            title=title,
+            subtitle=subtitle,
+            badge_color=badge_color,
+            badge=badge_text,
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def _startup() -> None:
@@ -156,6 +194,8 @@ def _restore_nav_state(state: dict) -> None:
         "configure_agent_id": None,
         "configure_pa_id": None,
         "show_log_viewer": False,
+        "show_security_dashboard": False,
+        "show_manifest_inspector": False,
         "show_create_pa_panel": False,
         "active_pa_id": None,
         "active_pa_url": None,
@@ -203,6 +243,8 @@ def _open_pa_workspace(pa_id: str, url: str | None = None, push_history: bool = 
     st.session_state.show_create_form = False
     st.session_state.show_create_pa_panel = False
     st.session_state.show_log_viewer = False
+    st.session_state.show_security_dashboard = False
+    st.session_state.show_manifest_inspector = False
     st.session_state.configure_agent_id = None
     st.session_state.dashboard_scroll_target = None
 
@@ -707,9 +749,12 @@ def _show_pa_card(pa: dict) -> None:
 
     pa_id = pa["id"]
     pa_name = pa["name"]
+    bot_error_key = f"bot_error_{pa_id}"
+    bot_notice_key = f"bot_notice_{pa_id}"
     skills = pa.get("skills", [])
     status = get_agent_status(pa_id)
     is_running = status is not None
+    keep_awake = get_keep_awake_status()
 
     tg_token = (pa.get("config") or {}).get("telegram", {}).get("bot_token", "").strip()
     try:
@@ -721,10 +766,15 @@ def _show_pa_card(pa: dict) -> None:
         stop_pa_poller = None
         tg_running = False
 
+    if tg_running:
+        st.session_state.pop(bot_error_key, None)
+
     status_badge = "● Running" if is_running else "● Stopped"
     status_color = "#16a34a" if is_running else "#6b7280"
     tg_badge = "✈️ Bot Running" if tg_running else "✈️ Bot Stopped"
     tg_color = "#229ED9" if tg_running else "#6b7280"
+    keep_awake_badge = f"☕ Awake {keep_awake['label']}"
+    keep_awake_color = "#f59e0b" if keep_awake.get("running") else ("#475569" if not keep_awake.get("enabled") else "#b45309")
     skill_tags = " ".join(
         f"<span style='background:rgba(124,58,237,0.18);color:#c4b5fd;padding:2px 8px;border-radius:10px;font-size:0.73rem;font-weight:600;margin:2px;display:inline-block;'>{skill}</span>"
         for skill in skills[:6]
@@ -738,6 +788,7 @@ def _show_pa_card(pa: dict) -> None:
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <span style="background:{status_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;">{status_badge}</span>
                     <span style="background:{tg_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;">{tg_badge}</span>
+                    <span title="{keep_awake['detail']}" style="background:{keep_awake_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;">{keep_awake_badge}</span>
                 </div>
             </div>
             <div style="font-size:0.76rem;color:#64748b;font-weight:700;letter-spacing:0.06em;margin-bottom:6px;">SKILLS</div>
@@ -746,6 +797,13 @@ def _show_pa_card(pa: dict) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    bot_error = str(st.session_state.get(bot_error_key, "") or "").strip()
+    bot_notice = str(st.session_state.get(bot_notice_key, "") or "").strip()
+    if bot_error:
+        st.error(bot_error)
+    elif bot_notice:
+        st.success(bot_notice)
 
     if not tg_token:
         with st.expander("Add Telegram token", expanded=False):
@@ -764,6 +822,8 @@ def _show_pa_card(pa: dict) -> None:
                     telegram.setdefault("auto_reply", True)
                     config["telegram"] = telegram
                     update_assistant(pa_id, config=config)
+                    st.session_state.pop(bot_error_key, None)
+                    st.session_state[bot_notice_key] = "Telegram token saved. You can start the bot now."
                     st.rerun()
                 else:
                     st.warning("Token cannot be empty.")
@@ -793,10 +853,22 @@ def _show_pa_card(pa: dict) -> None:
             if tg_running:
                 if st.button("✈️ Stop Bot", key=f"stop_tg_{pa_id}", use_container_width=True):
                     stop_pa_poller(pa_id)
+                    st.session_state.pop(bot_error_key, None)
+                    st.session_state[bot_notice_key] = "Telegram bot stopped."
                     st.rerun()
             else:
                 if st.button("✈️ Start Bot", key=f"start_tg_{pa_id}", use_container_width=True):
-                    start_pa_poller(pa_id)
+                    try:
+                        result = start_pa_poller(pa_id)
+                        st.session_state.pop(bot_error_key, None)
+                        if result.get("already_running"):
+                            st.session_state[bot_notice_key] = "Telegram bot is already running."
+                        else:
+                            st.session_state[bot_notice_key] = "Telegram bot started."
+                    except Exception as exc:
+                        logger.warning("Could not start Telegram bot for %s: %s", pa_id, exc)
+                        st.session_state.pop(bot_notice_key, None)
+                        st.session_state[bot_error_key] = f"Telegram bot failed to start: {exc}"
                     st.rerun()
         else:
             st.button("✈️ Start Bot", key=f"disabled_tg_{pa_id}", use_container_width=True, disabled=True)
@@ -851,6 +923,10 @@ def main() -> None:
         st.session_state.configure_pa_id = None
     if "show_log_viewer" not in st.session_state:
         st.session_state.show_log_viewer = False
+    if "show_security_dashboard" not in st.session_state:
+        st.session_state.show_security_dashboard = False
+    if "show_manifest_inspector" not in st.session_state:
+        st.session_state.show_manifest_inspector = False
     if "show_create_pa_panel" not in st.session_state:
         st.session_state.show_create_pa_panel = False
     if "active_pa_id" not in st.session_state:
@@ -917,6 +993,8 @@ def main() -> None:
             st.session_state.show_create_pa_panel = True
             st.session_state.show_create_form = False
             st.session_state.show_log_viewer = False
+            st.session_state.show_security_dashboard = False
+            st.session_state.show_manifest_inspector = False
             st.session_state.configure_agent_id = None
             st.session_state.configure_pa_id = None
             st.session_state.active_pa_id = None
@@ -930,6 +1008,8 @@ def main() -> None:
             st.session_state.show_create_form = True
             st.session_state.show_create_pa_panel = False
             st.session_state.show_log_viewer = False
+            st.session_state.show_security_dashboard = False
+            st.session_state.show_manifest_inspector = False
             st.session_state.configure_agent_id = None
             st.session_state.configure_pa_id = None
             st.session_state.active_pa_id = None
@@ -942,6 +1022,40 @@ def main() -> None:
         if st.button("📊  Log Analyser", use_container_width=True, type=logs_btn_type):
             _push_nav_state()
             st.session_state.show_log_viewer = not st.session_state.show_log_viewer
+            st.session_state.show_security_dashboard = False
+            st.session_state.show_manifest_inspector = False
+            st.session_state.show_create_form = False
+            st.session_state.show_create_pa_panel = False
+            st.session_state.configure_agent_id = None
+            st.session_state.configure_pa_id = None
+            st.session_state.active_pa_id = None
+            st.session_state.active_pa_url = None
+            st.session_state.dashboard_scroll_target = None
+            st.rerun()
+
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        security_btn_type = "primary" if st.session_state.show_security_dashboard else "secondary"
+        if st.button("🛡️  Security Dashboard", use_container_width=True, type=security_btn_type):
+            _push_nav_state()
+            st.session_state.show_security_dashboard = not st.session_state.show_security_dashboard
+            st.session_state.show_log_viewer = False
+            st.session_state.show_manifest_inspector = False
+            st.session_state.show_create_form = False
+            st.session_state.show_create_pa_panel = False
+            st.session_state.configure_agent_id = None
+            st.session_state.configure_pa_id = None
+            st.session_state.active_pa_id = None
+            st.session_state.active_pa_url = None
+            st.session_state.dashboard_scroll_target = None
+            st.rerun()
+
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        manifest_btn_type = "primary" if st.session_state.show_manifest_inspector else "secondary"
+        if st.button("🗂️  Manifest Inspector", use_container_width=True, type=manifest_btn_type):
+            _push_nav_state()
+            st.session_state.show_manifest_inspector = not st.session_state.show_manifest_inspector
+            st.session_state.show_log_viewer = False
+            st.session_state.show_security_dashboard = False
             st.session_state.show_create_form = False
             st.session_state.show_create_pa_panel = False
             st.session_state.configure_agent_id = None
@@ -1003,6 +1117,14 @@ def main() -> None:
 
     if st.session_state.show_log_viewer:
         show_log_viewer()
+        return
+
+    if st.session_state.show_security_dashboard:
+        show_security_dashboard()
+        return
+
+    if st.session_state.show_manifest_inspector:
+        show_manifest_inspector()
         return
 
     active_pa = next((assistant for assistant in assistants if assistant["id"] == st.session_state.active_pa_id), None)
@@ -1124,10 +1246,11 @@ def main() -> None:
         from src.agent.hub.channel_registry import CHANNEL_REGISTRY
         from src.telegram.pa_poller_manager import get_pa_poller_status
 
-        dashboard_col, telegram_col = st.columns(2)
+        dashboard_col, telegram_col, reachability_col = st.columns(3)
         dashboard_channel = CHANNEL_REGISTRY.get("dashboard")
         telegram_channel = CHANNEL_REGISTRY.get("telegram")
         bot_count = sum(1 for assistant in assistants if get_pa_poller_status(assistant["id"]) is not None)
+        keep_awake = get_keep_awake_status()
 
         with dashboard_col:
             if dashboard_channel is not None:
@@ -1136,19 +1259,40 @@ def main() -> None:
                     detail = f"Port {dashboard_status.port}" if dashboard_status.port else (dashboard_status.detail or "Always available")
                 except Exception:
                     detail = "Always available"
-                st.markdown(
-                    f"<div style='background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.28);padding:14px 16px;border-radius:12px;'><div style='display:flex;align-items:center;justify-content:space-between;gap:12px;'><div><div style='font-size:1rem;font-weight:700;color:#e2e8f0;'>{dashboard_channel.icon} {dashboard_channel.display_name}</div><div style='font-size:0.8rem;color:#94a3b8;margin-top:4px;'>Streamlit web dashboard</div></div><span style='background:#16a34a;color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;'>● {detail}</span></div></div>",
-                    unsafe_allow_html=True,
+                _render_channel_card(
+                    accent_background="rgba(22,163,74,0.08)",
+                    accent_border="rgba(22,163,74,0.28)",
+                    title=f"{dashboard_channel.icon} {dashboard_channel.display_name}",
+                    subtitle="Streamlit web dashboard",
+                    badge_text=f"● {detail}",
+                    badge_color="#16a34a",
                 )
 
         with telegram_col:
             if telegram_channel is not None:
                 badge_color = "#229ED9" if bot_count else "#4b5563"
                 state = f"{bot_count} bot{'s' if bot_count != 1 else ''} running" if bot_count else "No bots running"
-                st.markdown(
-                    f"<div style='background:rgba(34,158,217,0.08);border:1px solid rgba(34,158,217,0.24);padding:14px 16px;border-radius:12px;'><div style='display:flex;align-items:center;justify-content:space-between;gap:12px;'><div><div style='font-size:1rem;font-weight:700;color:#e2e8f0;'>{telegram_channel.icon} {telegram_channel.display_name}</div><div style='font-size:0.8rem;color:#94a3b8;margin-top:4px;'>Managed from each PA card</div></div><span style='background:{badge_color};color:#fff;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:700;'>✈️ {state}</span></div></div>",
-                    unsafe_allow_html=True,
+                _render_channel_card(
+                    accent_background="rgba(34,158,217,0.08)",
+                    accent_border="rgba(34,158,217,0.24)",
+                    title=f"{telegram_channel.icon} {telegram_channel.display_name}",
+                    subtitle="Managed from each PA card",
+                    badge_text=f"✈️ {state}",
+                    badge_color=badge_color,
                 )
+
+        with reachability_col:
+            badge_color = "#f59e0b" if keep_awake.get("running") else ("#4b5563" if not keep_awake.get("enabled") else "#b45309")
+            state = keep_awake.get("label", "Unknown")
+            detail = keep_awake.get("detail", "")
+            _render_channel_card(
+                accent_background="rgba(245,158,11,0.08)",
+                accent_border="rgba(245,158,11,0.24)",
+                title="☕ Sleep Protection",
+                subtitle=detail,
+                badge_text=f"☕ {state}",
+                badge_color=badge_color,
+            )
     except Exception as exc:
         st.warning(f"Could not load channel registry: {exc}")
 

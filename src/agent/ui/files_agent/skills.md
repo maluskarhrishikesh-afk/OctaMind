@@ -23,7 +23,7 @@
 
 ### search_by_name
 - **signature**: `search_by_name(query, directory="~", recursive=True, limit=50)`
-- **description**: Check if a specific file or folder named X exists inside a directory and locate it. Use when the user asks "is there a folder named X in Downloads?", "do I have a file called X?", "find a folder named X", "is there a file named X on my computer?", "check if X exists in Y", "does folder X exist in Downloads?", "locate file X in Documents", "find file named report.pdf", "is there a Text folder in Downloads". The query is the exact file/folder name, directory is where to search.
+- **description**: Check if a specific file or folder named X exists inside a known directory and locate it. Use when the user asks "is there a folder named X in Downloads?", "do I have a file called X?", "find a folder named X", "check if X exists in Y", "does folder X exist in Downloads?", "locate file X in Documents", "find file named report.pdf", or "is there a Text folder in Downloads". Pass only the target name as `query` like `Text` or `report.pdf`, not the whole natural-language sentence. Use the directory parameter for the known scope such as Downloads or Documents.
 - **tags**: search, find, exists, check, name, locate, is there, folder named, file named, does it exist, present, find named, locate file
 
 ### search_by_extension
@@ -43,8 +43,13 @@
 
 ### search_file_all_drives
 - **signature**: `search_file_all_drives(query, extensions=None, limit=20, include_folders=True)`
-- **description**: Search ALL drives (C:, D:, external drives) for a file or folder anywhere on the entire computer. ALWAYS use this when the user says "find X on my computer", "search my whole laptop for X", "is X anywhere on my PC", "look everywhere for file X", "search my entire system for Y", "find the file on any drive". query is a name or glob pattern; extensions optionally filters by type (e.g. ["pdf","docx"]). Use limit=500 for "how many" counting queries.
+- **description**: Search ALL drives (C:, D:, external drives) for a file or folder anywhere on the entire computer. Use this when the user says "find X on my computer", "search my whole laptop for X", "is X anywhere on my PC", "look everywhere for file X", or "search my entire system for Y". Pass only the filename term or fragment as `query`, such as `octa` for "image file containing octa in its filename" or `payslip` for "how many payslips are there on my computer". Use `extensions` to restrict file type and set `include_folders=False` for filename-only file searches. Use limit=500 for "how many" counting queries.
 - **tags**: search, all drives, computer, laptop, global, find, locate, everywhere, entire system, whole computer, any drive, all of PC
+
+### get_recycle_bin_info
+- **signature**: `get_recycle_bin_info()`
+- **description**: Return the current Windows Recycle Bin item count and total size. Use when the user asks "how many files are in my recycle bin", "count items in the recycle bin", "how full is my recycle bin", or "what is in the recycle bin". Prefer this instead of scanning `$Recycle.Bin` manually because Windows permissions and hidden system folders make direct folder counting unreliable.
+- **tags**: recycle bin, trash count, bin size, how many deleted files, deleted items count, recycle bin info
 
 ### search_files_by_content
 - **signature**: `search_files_by_content(query, directory="~", extensions=None, max_results=50, case_sensitive=False)`

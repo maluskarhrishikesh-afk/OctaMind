@@ -10,8 +10,9 @@ With 10 agents: ~100 tokens for planning context   (vs ~8,000 tokens with the ol
 from __future__ import annotations
 
 import importlib
+import inspect
 import logging
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 logger = logging.getLogger("workflows")
 
@@ -261,6 +262,50 @@ def get_executor(agent_name: str) -> Optional[Callable]:
     except Exception as exc:
         logger.error("Failed to load executor for agent '%s': %s", agent_name, exc)
         return None
+
+
+def get_runtime_tool_map(agent_name: str, user_query: str = "") -> Dict[str, Callable[..., Any]]:
+    """Return the runtime tool map for an agent using the shared orchestrator contract.
+
+    Preferred contract: the agent orchestrator module exposes `build_runtime_tool_map`.
+    Legacy compatibility: `_build_all_tools` or `_get_tools` are accepted until every
+    agent exports the public builder.
+    """
+    info = AGENT_REGISTRY.get(agent_name)
+    if info is None:
+        logger.warning("Agent '%s' not found in registry", agent_name)
+        return {}
+
+    try:
+        mod = importlib.import_module(info["module"])
+    except Exception as exc:
+        logger.error("Failed to load tool map module for agent '%s': %s", agent_name, exc)
+        return {}
+
+    builder = None
+    for name in ("build_runtime_tool_map", "_build_all_tools", "_get_tools"):
+        candidate = getattr(mod, name, None)
+        if callable(candidate):
+            builder = candidate
+            break
+
+    if builder is None:
+        logger.warning("Agent '%s' does not expose a runtime tool-map builder", agent_name)
+        return {}
+
+    try:
+        params = inspect.signature(builder).parameters
+        if "user_query" in params:
+            tool_map = builder(user_query=user_query)
+        elif len(params) == 1:
+            tool_map = builder(user_query)
+        else:
+            tool_map = builder()
+    except Exception as exc:
+        logger.error("Failed to build runtime tool map for agent '%s': %s", agent_name, exc)
+        return {}
+
+    return tool_map if isinstance(tool_map, dict) else {}
 
 
 def registered_agents() -> list[str]:

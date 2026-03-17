@@ -9,8 +9,8 @@
 
 ### send_email_with_attachment
 - **signature**: `send_email_with_attachment(to, subject, message, attachment_path)`
-- **description**: Send an email that includes a local file as an attachment. This is the correct tool after generating a report, PDF, spreadsheet, or zip file. Use when the user says "summarize them and send it to me", "email the report to me", "send the PDF to X", "attach the file and send", "mail this document", "send me the summary", "forward the generated report", or "email it with the attachment". Provide the full local path to the file to attach.
-- **tags**: send, attachment, file, attach, mail, compose, report, document, pdf, spreadsheet, send it to me, email it to me, generated report, summary attachment, forward with attachment
+- **description**: Send an email that includes a local file as an attachment. This is the correct tool after generating a report, PDF, spreadsheet, or zip file ONLY when the user explicitly wants email delivery: they say "email", "mail", "forward", mention an inbox, or provide an email address. Do not use this for Telegram/dashboard delivery phrases like "send it to me", "give me the zip", or "share the file here" — those should use current-channel file delivery instead. Provide the full local path to the file to attach.
+- **tags**: email attachment, mail attachment, attach and email, forward by email, send PDF by email, generated report email, summary attachment email
 
 ### create_draft
 - **signature**: `create_draft(to, subject, body)`
@@ -178,6 +178,21 @@
 - **description**: Create a new Gmail label (equivalent to a folder or category). Use when the user says "create a label called X", "make a new Gmail folder", "add a label for work emails", "create a category for emails", "set up a label called Finance", "I want a Gmail folder named X". Creates label only if it doesn't already exist.
 - **tags**: label, folder, create, category, organize, tag, new label, gmail folder, new category
 
+### list_all_filters_and_labels
+- **signature**: `list_all_filters_and_labels()`
+- **description**: Show a read-only preview of every Gmail filter plus all user-created and system labels currently in the mailbox. Use when the user says "show me all my filters and labels", "preview my Gmail rules before deleting them", "list all mailbox filters", or "show me all labels first".
+- **tags**: list filters, show filters, preview labels, show labels first, list all labels, mailbox preview, preview mailbox rules
+
+### delete_all_filters
+- **signature**: `delete_all_filters()`
+- **description**: Delete every Gmail filter rule from the mailbox while preserving labels. Use when the user says "delete all the rules applied to my mailbox", "remove all Gmail filters", "clear all email rules", or "delete all mailbox rules but keep labels".
+- **tags**: delete all rules, delete all filters, remove mailbox rules, clear gmail filters, delete rules only
+
+### delete_all_filters_and_labels
+- **signature**: `delete_all_filters_and_labels()`
+- **description**: Delete every Gmail filter rule and every user-created Gmail label from the mailbox in one action. Use when the user says "delete all the rules and labels applied to my mailbox", "remove all my Gmail filters and labels", "clear all mailbox rules", "wipe all email automation and labels", or "reset my Gmail organization". This preserves Gmail system labels like Inbox, Sent, Trash, and Categories.
+- **tags**: delete all rules, delete all filters, delete all labels, remove all mailbox rules, clear mailbox organization, wipe email automation, reset gmail labels, remove all filters and labels
+
 ### move_emails_to_label
 - **signature**: `move_emails_to_label(query, label_name, max_results=50)`
 - **description**: Apply a Gmail label to all emails matching a search query and remove them from Inbox. Use when the user says "move all emails from X to label Y", "organize project emails into folder Z", "label these emails as Work", "sort emails from boss into Management label", "put these emails in the Finance folder", "categorize emails about project into X label". Creates the label automatically if needed.
@@ -185,8 +200,13 @@
 
 ### create_smart_label_rule
 - **signature**: `create_smart_label_rule(label_name, from_email="", subject_contains="", to_email="", also_archive=False)`
-- **description**: Apply a label to all matching existing emails and instruct the user how to create a Gmail filter for all future incoming emails. Use when the user says "automatically label emails from X", "create a rule to always label emails about Y", "auto-organize emails from X into label Z", "set up a Gmail filter so emails from boss go to Management", "smart rule for newsletter X", "always put emails from X in Y folder".
+- **description**: Apply a label to all matching existing emails and create a Gmail filter for all future incoming emails. Use when the user says "automatically label emails from X", "create a rule to always label emails about Y", "auto-organize emails from X into label Z", "set up a Gmail filter so emails from boss go to Management", "smart rule for newsletter X", "always put emails from X in Y folder".
 - **tags**: rule, filter, auto, label, smart, automate, organize, automatic label, email filter, always label, gmail rule
+
+### delete_smart_label_rule
+- **signature**: `delete_smart_label_rule(from_email="", subject_contains="", to_email="", label_name="")`
+- **description**: Delete an existing Gmail filter rule for future incoming emails without changing labels on already processed emails. Use when the user says "remove the rule for emails from X", "delete the Gmail filter from boss", "stop automatically moving emails from X", "undo the auto-label rule", "remove the filter we created earlier", or "stop future emails from going to this folder".
+- **tags**: delete rule, remove rule, remove filter, delete gmail filter, stop auto label, undo rule, stop future emails, remove automation
 
 ---
 

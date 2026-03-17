@@ -494,6 +494,36 @@ class IntentResult:
         return self.category == "fresh_task"
 
 
+_EMAIL_ADDRESS_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+_EXPLICIT_EMAIL_DELIVERY_RE = re.compile(r"\b(email|mail|inbox|gmail|outlook)\b", re.IGNORECASE)
+_CURRENT_CHANNEL_DELIVERY_RE = re.compile(
+    r"\bsend\s+(it|them|those|that)\s+to\s+me\b"
+    r"|\bshare\s+(it|them|those|that)\s+here\b"
+    r"|\bgive\s+me\s+the\s+(file|zip|folder)\b"
+    r"|\bdownload\s+(it|them|those|that)\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_followup_agents(command: str, active_context: Optional[dict], agents: List[str]) -> List[str]:
+    if not active_context or not agents:
+        return agents
+
+    ctx_agent = str(active_context.get("agent", "") or "").strip().lower()
+    lowered = str(command or "")
+    if ctx_agent != "files":
+        return agents
+    if not _CURRENT_CHANNEL_DELIVERY_RE.search(lowered):
+        return agents
+    if _EMAIL_ADDRESS_RE.search(lowered) or _EXPLICIT_EMAIL_DELIVERY_RE.search(lowered):
+        return agents
+
+    normalized = [agent for agent in agents if agent != "email"]
+    if "files" not in normalized:
+        normalized.insert(0, "files")
+    return normalized
+
+
 def _build_intent_prompt(
     command: str,
     active_context: Optional[dict],
@@ -560,14 +590,15 @@ The user is acting on results from the PREVIOUS turn.
 REQUIRES: active context above is ACTIVE (not "(none)").
 Signals: pronouns ("that", "them", "those", "it", "these"), short action commands
 that refer to something already found/listed/searched.
-→ "Can you zip that and send it to me?" (after finding files)        → ["files","email"]
+→ "Can you zip that and send it to me?" (after finding files)        → ["files"]
 → "Copy them to my Downloads folder" (after finding files)           → ["files"]
 → "Reply to the first one" (after listing emails)                    → ["email"]
 → "Book the 2 PM slot" (after listing calendar free slots)           → ["scheduler"]
 → "Can you update me on my search?" (after file search)              → ["files"]
 → "Send those to alice@example.com" (after finding files)            → ["files","email"]
 For CONTEXT_FOLLOWUP: include the source agent from context PLUS any new agent the
-action requires (e.g. context files + "send it to me" → ["files","email"]).
+action requires. Current-channel delivery phrases like "send it to me" or "share it here"
+stay on the files agent unless the user explicitly says email/mail or provides an email address.
 
 ─── FRESH_TASK ──────────────────────────────────────────────────────────────
 A new actionable request for specific agents. No pronouns referring to prior results.
@@ -686,6 +717,8 @@ def classify_and_route(
             if ctx_agent and ctx_agent in valid:
                 agents = [ctx_agent]
 
+        agents = _normalize_followup_agents(command, active_context, agents)
+
         logger.info(
             "Router [intent]: category=%s  agents=%s  reason=%s",
             category, agents, reason,
@@ -744,7 +777,7 @@ def classify_and_route(
                 logger.info("Router [keyword fallback]: pronoun + active context → context_followup")
                 return IntentResult(
                     category="context_followup",
-                    agents=[ctx_agent],
+                    agents=_normalize_followup_agents(command, active_context, [ctx_agent]),
                     reason="keyword fallback: pronoun + active context",
                 )
 
@@ -756,6 +789,7 @@ def classify_and_route(
             reason="keyword fallback: freshness-sensitive public-web query",
         )
 
+    agents = _normalize_followup_agents(command, active_context, agents)
     category = "fresh_task" if agents else "chat"
     logger.info("Router [keyword fallback]: category=%s  agents=%s", category, agents)
     return IntentResult(category=category, agents=agents, reason="keyword fallback")

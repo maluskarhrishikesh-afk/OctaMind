@@ -783,6 +783,155 @@ class GmailServiceClient:
         except Exception as exc:
             return {'status': 'error', 'message': f"Error creating label: {exc}"}
 
+    def delete_all_filters_and_labels(self) -> Dict:
+        """Delete every Gmail filter and every user-created label.
+
+        System labels such as INBOX, SENT, TRASH, and category labels are
+        preserved because Gmail does not allow deleting them.
+        """
+        try:
+            filters = self.gmail_service.users().settings().filters().list(
+                userId=self.user_id,
+            ).execute().get('filter', [])
+
+            deleted_filter_ids = []
+            for existing in filters:
+                filter_id = existing.get('id', '')
+                if not filter_id:
+                    continue
+                self.gmail_service.users().settings().filters().delete(
+                    userId=self.user_id,
+                    id=filter_id,
+                ).execute()
+                deleted_filter_ids.append(filter_id)
+
+            labels = self.gmail_service.users().labels().list(
+                userId=self.user_id,
+            ).execute().get('labels', [])
+            custom_labels = [
+                label for label in labels
+                if str(label.get('type', '')).lower() != 'system'
+            ]
+
+            deleted_label_ids = []
+            deleted_label_names = []
+            for label in custom_labels:
+                label_id = label.get('id', '')
+                if not label_id:
+                    continue
+                self.gmail_service.users().labels().delete(
+                    userId=self.user_id,
+                    id=label_id,
+                ).execute()
+                deleted_label_ids.append(label_id)
+                deleted_label_names.append(label.get('name', label_id))
+
+            return {
+                'status': 'success',
+                'filters_deleted': len(deleted_filter_ids),
+                'labels_deleted': len(deleted_label_ids),
+                'deleted_filter_ids': deleted_filter_ids,
+                'deleted_label_ids': deleted_label_ids,
+                'deleted_label_names': deleted_label_names,
+                'message': (
+                    f"Deleted {len(deleted_filter_ids)} Gmail filter(s) and "
+                    f"{len(deleted_label_ids)} user label(s). System labels were preserved."
+                ),
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error deleting filters and labels: {exc}"}
+
+    def delete_all_filters(self) -> Dict:
+        """Delete every Gmail filter while preserving all labels."""
+        try:
+            filters = self.gmail_service.users().settings().filters().list(
+                userId=self.user_id,
+            ).execute().get('filter', [])
+
+            deleted_filter_ids = []
+            for existing in filters:
+                filter_id = existing.get('id', '')
+                if not filter_id:
+                    continue
+                self.gmail_service.users().settings().filters().delete(
+                    userId=self.user_id,
+                    id=filter_id,
+                ).execute()
+                deleted_filter_ids.append(filter_id)
+
+            return {
+                'status': 'success',
+                'filters_deleted': len(deleted_filter_ids),
+                'deleted_filter_ids': deleted_filter_ids,
+                'message': f"Deleted {len(deleted_filter_ids)} Gmail filter(s). Existing labels were preserved.",
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error deleting filters: {exc}"}
+
+    def list_all_filters_and_labels(self) -> Dict:
+        """Return a read-only preview of Gmail filters and labels.
+
+        This is intended for mailbox-cleanup preview flows before destructive
+        actions are confirmed.
+        """
+        try:
+            filters = self.gmail_service.users().settings().filters().list(
+                userId=self.user_id,
+            ).execute().get('filter', [])
+            labels = self.gmail_service.users().labels().list(
+                userId=self.user_id,
+            ).execute().get('labels', [])
+
+            custom_labels = [
+                {
+                    'id': label.get('id', ''),
+                    'name': label.get('name', ''),
+                    'type': label.get('type', ''),
+                }
+                for label in labels
+                if str(label.get('type', '')).lower() != 'system'
+            ]
+            system_labels = [
+                {
+                    'id': label.get('id', ''),
+                    'name': label.get('name', ''),
+                    'type': label.get('type', ''),
+                }
+                for label in labels
+                if str(label.get('type', '')).lower() == 'system'
+            ]
+
+            filter_summaries = []
+            for existing in filters:
+                criteria = existing.get('criteria', {})
+                action = existing.get('action', {})
+                filter_summaries.append({
+                    'id': existing.get('id', ''),
+                    'from': criteria.get('from', ''),
+                    'to': criteria.get('to', ''),
+                    'subject': criteria.get('subject', ''),
+                    'query': criteria.get('query', ''),
+                    'add_label_ids': action.get('addLabelIds', []),
+                    'remove_label_ids': action.get('removeLabelIds', []),
+                    'forward': action.get('forward', ''),
+                })
+
+            return {
+                'status': 'success',
+                'filters': filter_summaries,
+                'filters_count': len(filter_summaries),
+                'user_labels': custom_labels,
+                'user_labels_count': len(custom_labels),
+                'system_labels': system_labels,
+                'system_labels_count': len(system_labels),
+                'message': (
+                    f"Found {len(filter_summaries)} Gmail filter(s), "
+                    f"{len(custom_labels)} user label(s), and {len(system_labels)} system label(s)."
+                ),
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error listing filters and labels: {exc}"}
+
     def move_emails_to_label(
         self,
         query: str,
@@ -1334,8 +1483,7 @@ class GmailServiceClient:
         to_email: str = "",
         also_archive: bool = False,
     ) -> Dict:
-        """Label all existing emails matching criteria and report the Gmail
-        filter-creation URL for automating future emails.
+        """Label matching existing emails and create a Gmail filter for future mail.
 
         Args:
             label_name:       Target label to create/apply.
@@ -1363,8 +1511,8 @@ class GmailServiceClient:
                 userId=self.user_id, q=query, maxResults=500,
             ).execute().get('messages', [])
 
+            remove = ['INBOX'] if also_archive else []
             if messages:
-                remove = ['INBOX'] if also_archive else []
                 self.gmail_service.users().messages().batchModify(
                     userId=self.user_id,
                     body={'ids': [m['id'] for m in messages],
@@ -1372,19 +1520,158 @@ class GmailServiceClient:
                           'removeLabelIds': remove},
                 ).execute()
 
+            filter_body = {
+                'criteria': {},
+                'action': {'addLabelIds': [label_id]},
+            }
+            if from_email:
+                filter_body['criteria']['from'] = from_email
+            if subject_contains:
+                filter_body['criteria']['subject'] = subject_contains
+            if to_email:
+                filter_body['criteria']['to'] = to_email
+            if remove:
+                filter_body['action']['removeLabelIds'] = remove
+
+            existing_filters = self.gmail_service.users().settings().filters().list(
+                userId=self.user_id,
+            ).execute().get('filter', [])
+
+            matching_filter = next(
+                (
+                    existing for existing in existing_filters
+                    if existing.get('criteria', {}).get('from', '') == filter_body['criteria'].get('from', '')
+                    and existing.get('criteria', {}).get('subject', '') == filter_body['criteria'].get('subject', '')
+                    and existing.get('criteria', {}).get('to', '') == filter_body['criteria'].get('to', '')
+                    and label_id in existing.get('action', {}).get('addLabelIds', [])
+                    and set(existing.get('action', {}).get('removeLabelIds', [])) == set(remove)
+                ),
+                None,
+            )
+
+            filter_id = ''
+            future_rule_created = False
+            if matching_filter:
+                filter_id = matching_filter.get('id', '')
+            else:
+                try:
+                    created_filter = self.gmail_service.users().settings().filters().create(
+                        userId=self.user_id,
+                        body=filter_body,
+                    ).execute()
+                    filter_id = created_filter.get('id', '')
+                    future_rule_created = True
+                except Exception as exc:
+                    labeled_count = len(messages)
+                    return {
+                        'status': 'error',
+                        'label_name': label_name,
+                        'query': query,
+                        'emails_labeled': labeled_count,
+                        'future_rule_created': False,
+                        'message': (
+                            f"Applied label '{label_name}' to {labeled_count} existing email(s) matching '{query}', "
+                            f"but could not create the Gmail filter for future emails: {exc}"
+                        ),
+                    }
+
             return {
                 'status': 'success',
                 'label_name': label_name,
                 'query': query,
                 'emails_labeled': len(messages),
+                'filter_id': filter_id,
+                'future_rule_created': future_rule_created,
                 'message': (
-                    f"Applied label '{label_name}' to {len(messages)} existing email(s) "
-                    f"matching '{query}'. To auto-label future emails, open Gmail → Settings → "
-                    "Filters and Blocked Addresses → Create new filter."
+                    f"Applied label '{label_name}' to {len(messages)} existing email(s) matching '{query}'. "
+                    + (
+                        "Created a Gmail filter for future matching emails."
+                        if future_rule_created
+                        else "A matching Gmail filter already exists for future emails."
+                    )
                 ),
             }
         except Exception as exc:
             return {'status': 'error', 'message': f"Error creating label rule: {exc}"}
+
+    def delete_smart_label_rule(
+        self,
+        from_email: str = "",
+        subject_contains: str = "",
+        to_email: str = "",
+        label_name: str = "",
+    ) -> Dict:
+        """Delete Gmail filter rules that match the supplied criteria.
+
+        Existing labels on already-processed emails are left unchanged; this only
+        removes the future automation rule.
+        """
+        try:
+            if not any((from_email, subject_contains, to_email, label_name)):
+                return {
+                    'status': 'error',
+                    'message': 'Specify at least one of: from_email, subject_contains, to_email, label_name',
+                }
+
+            target_label_id = ""
+            if label_name:
+                labels = self.gmail_service.users().labels().list(
+                    userId=self.user_id,
+                ).execute().get('labels', [])
+                matching_label = next(
+                    (label for label in labels if label.get('name', '').lower() == label_name.lower()),
+                    None,
+                )
+                if matching_label:
+                    target_label_id = matching_label.get('id', '')
+
+            filters = self.gmail_service.users().settings().filters().list(
+                userId=self.user_id,
+            ).execute().get('filter', [])
+
+            matched_filters = []
+            for existing in filters:
+                criteria = existing.get('criteria', {})
+                action = existing.get('action', {})
+                if from_email and criteria.get('from', '') != from_email:
+                    continue
+                if subject_contains and criteria.get('subject', '') != subject_contains:
+                    continue
+                if to_email and criteria.get('to', '') != to_email:
+                    continue
+                if target_label_id and target_label_id not in action.get('addLabelIds', []):
+                    continue
+                matched_filters.append(existing)
+
+            if not matched_filters:
+                return {
+                    'status': 'success',
+                    'filters_deleted': 0,
+                    'message': 'No matching Gmail filters were found to delete.',
+                }
+
+            deleted_ids = []
+            for existing in matched_filters:
+                filter_id = existing.get('id', '')
+                if not filter_id:
+                    continue
+                self.gmail_service.users().settings().filters().delete(
+                    userId=self.user_id,
+                    id=filter_id,
+                ).execute()
+                deleted_ids.append(filter_id)
+
+            return {
+                'status': 'success',
+                'filters_deleted': len(deleted_ids),
+                'deleted_filter_ids': deleted_ids,
+                'message': (
+                    f"Deleted {len(deleted_ids)} Gmail filter(s) matching the requested rule. "
+                    "Existing labeled emails were left unchanged."
+                ),
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error deleting label rule: {exc}"}
 
     def find_unanswered_emails(self, days: int = 3, max_results: int = 20) -> Dict:
         """Find sent emails that received no reply within the last N days."""
@@ -2172,6 +2459,18 @@ def create_label(label_name: str) -> Dict:
     return _get_client().create_label(label_name)
 
 
+def delete_all_filters_and_labels() -> Dict:
+    return _get_client().delete_all_filters_and_labels()
+
+
+def delete_all_filters() -> Dict:
+    return _get_client().delete_all_filters()
+
+
+def list_all_filters_and_labels() -> Dict:
+    return _get_client().list_all_filters_and_labels()
+
+
 def move_emails_to_label(query: str, label_name: str, max_results: int = 50) -> Dict:
     return _get_client().move_emails_to_label(query, label_name, max_results)
 
@@ -2234,6 +2533,17 @@ def create_smart_label_rule(
 ) -> Dict:
     return _get_client().create_smart_label_rule(
         label_name, from_email, subject_contains, to_email, also_archive
+    )
+
+
+def delete_smart_label_rule(
+    from_email: str = "",
+    subject_contains: str = "",
+    to_email: str = "",
+    label_name: str = "",
+) -> Dict:
+    return _get_client().delete_smart_label_rule(
+        from_email, subject_contains, to_email, label_name
     )
 
 

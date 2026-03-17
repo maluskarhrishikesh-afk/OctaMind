@@ -2,6 +2,7 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
+Last updated: 2026-03-17 (Session 9 - security control plane, active manifest registry, per-PA Telegram runtime hardening, dashboard operations panels)
 Last updated: 2026-03-08 (Session 7 — repo hygiene cleanup, persistent JSON error registry, runtime clutter policy)  
 Last updated: 2026-03-12 (Session 8 — dashboard-embedded PA workspace, unified Telegram/dashboard history, embedded chat-shell layout fix)  
 Last updated: 2026-03-07 (Session 6 — 6 pipeline architecture gaps fixed: trigger_keywords routing, keyed context store, scope field, auto-write context safety net, clear-after-delivery, search_paths in Dashboard messages)  
@@ -11,6 +12,56 @@ Previous: 2026-03-02 (Session 3 — New Files tools: search_file_all_drives, del
 Previous: 2026-03-02 (Bug fixes: calendar date-context loss, ReAct observation truncation, Telegram Markdown entity crash, DAG JSON fence parsing verified; added human-friendly per-request workflow summary log; DAG algorithm walkthrough document added)  
 Previous: 2026-03-02 (Telegram UX overhaul: typing indicators, real-time progress editing, /reset & /agents commands, long-message splitting, file-artifact delivery; Dashboard download button for file artifacts; HubProcessor scheduling-context enrichment propagated to Telegram channel; `send_document_file` multipart upload added to telegram_service)  
 Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine causing cascading `unknown action ''` failures; fixed tilde path expansion in dag_planner instruction resolver; added total LLM call count to workflow completion log; fixed website unicode emoji rendering; updated quickstart to remove internal Python snippet)
+
+---
+
+## ✅ 2026-03-17 Session 9 — Security + Active Manifests + Telegram Runtime Hardening
+
+### 1. Security control plane is now live
+
+**What shipped:**
+- inbound prompt-injection screening before routing
+- session-scoped abuse throttling with persisted rate-limit state
+- shared destructive-action confirmation policy with stable action keys
+- Telegram inline-button confirmations for destructive actions
+- a dashboard Security Dashboard for audit events, live rate limits, pending confirmations, and runtime tool-risk manifests
+
+**Key runtime files:**
+- `your_data/runtime_state/security_events.jsonl`
+- `your_data/runtime_state/security_rate_limits.json`
+- `your_data/runtime_state/destructive_action_pending.json`
+
+### 2. Files follow-up context now uses an active file-manifest registry
+
+**What changed:**
+- searches now write dedicated manifest files under `your_data/manifests/files/`
+- the active manifest is tracked separately and mirrored for backward compatibility
+- follow-up file actions use the active manifest referenced from files context instead of assuming a single legacy `octa_manifest.txt`
+- the dashboard now includes a Manifest Inspector for active and historical file manifests
+
+**Behavioral impact:**
+- current-channel follow-ups like "send it to me" stay on the files path unless the user explicitly says email or provides an email address
+- rename and zip follow-ups can resolve against live files context without forcing a new search
+
+### 3. Telegram runtime is per-PA and more defensive now
+
+**What changed:**
+- Telegram bots are started per Personal Assistant, not as one shared global runtime
+- each PA bot uses a dedicated poller process, message store, and named log file
+- poller startup now fails fast if the assistant has no bot token or the child process exits immediately
+- duplicate inbound updates are deduplicated before auto-reply dispatch so one Telegram update should not trigger two assistant replies
+- direct Telegram commands now include `/status` for bot and reachability state
+
+**Operational notes:**
+- active PA logs should be read from files like `logs/My_Assistant.log`
+- message stores are PA-specific files like `your_data/tg_<pa_id>.json`
+
+### 4. Gmail automation and destructive mailbox cleanup are implemented
+
+**What changed:**
+- Gmail smart label rules now create real Gmail filters for future mail instead of only instructing the user manually
+- mailbox-wide filter and label cleanup supports preview-first and confirmation-required execution
+- Telegram can render confirmation buttons for that mailbox cleanup flow
 
 ---
 
@@ -510,10 +561,10 @@ All tools described in TOOL_REFERENCE.md are implemented and wired to the Telegr
 | AI smart features | summarize_chat, detect_urgent_messages, draft_message, translate_message, sentiment_analysis, extract_action_items | ? |
 | Cross-agent | forward_to_email, share_drive_file | ? |
 
-**Polling:** Background thread runs `getUpdates` long-poll loop; messages stored in `your_data/telegram_messages.json`.  
-**Credentials:** `TELEGRAM_BOT_TOKEN` env var or `config/settings.json["telegram"]["bot_token"]` � get token from **@BotFather**.  
+**Polling:** Per-PA background pollers run `getUpdates`; messages are stored in PA-specific files such as `your_data/tg_<pa_id>.json`.  
+**Credentials:** Production Telegram bot startup is per Personal Assistant using the token saved in `your_data/assistants.json`; lower-level service calls still honor `TELEGRAM_BOT_TOKEN` when present.  
 **Composite IDs:** All stored messages are addressed as `"chat_id:message_id"` (e.g. `"1001:5"`).  
-**Auto-responder (2026-03-02):** `auto_responder.py` rewritten — typing indicator, `⏳ Thinking…` placeholder edited in real-time, `/reset` (clear history), `/agents` (list skills), long-message splitting at 4000 chars, file-artifact delivery via `send_document_file()` multipart upload.
+**Auto-responder:** typing indicator, `⏳ Thinking…` placeholder edited in real-time, `/reset`, `/skills`, `/status`, long-message splitting, file-artifact delivery, inline confirmation buttons, and duplicate-update suppression before auto-reply dispatch.
 
 ### Files Agent � 48 Tools
 All tools use Python stdlib only (`pathlib`, `shutil`, `zipfile`, `hashlib`, `os`). No credentials required for 43/48 tools.

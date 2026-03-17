@@ -62,6 +62,10 @@ from .gmail_service import (
     update_scheduled_email,
     suggest_vip_contacts,
     export_contacts,
+    delete_all_filters_and_labels,
+    delete_all_filters,
+    list_all_filters_and_labels,
+    delete_smart_label_rule,
 )
 
 __all__ = [
@@ -119,4 +123,8 @@ __all__ = [
     'update_scheduled_email',
     'suggest_vip_contacts',
     'export_contacts',
+    'delete_all_filters_and_labels',
+    'delete_all_filters',
+    'list_all_filters_and_labels',
+    'delete_smart_label_rule',
 ]

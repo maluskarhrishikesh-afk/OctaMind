@@ -40,6 +40,18 @@ _COMPUTER_SCOPE_RE = re.compile(
     r"\b(on\s+my\s+(computer|laptop|pc|machine)|across\s+all\s+drives|all\s+drives|whole\s+(computer|system)|entire\s+(computer|laptop|system))\b",
     re.IGNORECASE,
 )
+_SCOPED_SYSTEM_FOLDER_RE = re.compile(
+    r"\b(?:is\s+there|do\s+i\s+have|find|search\s+for|look\s+for|locate|check\s+if|how\s+many\s+files\s+are\s+there\s+in)\b.*?\b(?:(file|folder)\s+)?(?:named|called)\s+[\"']?([^\"'?.\n]+?)[\"']?\s+in\s+(downloads?|desktop|documents?|pictures?|videos?|music)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_FILENAME_CONTAINS_RE = re.compile(
+    r"\b(?:containing|contains|with)\s+[\"']?([^\"'?.\n]+?)[\"']?\s+in\s+(?:its|the)\s+file\s*name\b",
+    re.IGNORECASE,
+)
+_RECYCLE_BIN_COUNT_RE = re.compile(
+    r"\b(?:how\s+many|count|number\s+of|what\s+is\s+in|how\s+full\s+is)\b.*\b(?:recycle\s+bin|trash\s+bin|bin)\b",
+    re.IGNORECASE,
+)
 
 
 def _infer_extension_filter(user_query: str) -> Optional[List[str]]:
@@ -107,15 +119,75 @@ def _parse_precise_full_computer_search(user_query: str) -> Optional[Dict[str, A
     return None
 
 
+def _system_folder_path(keyword: str) -> Optional[Path]:
+    home = Path.home()
+    mapping = {
+        "downloads": home / "Downloads",
+        "download": home / "Downloads",
+        "desktop": home / "Desktop",
+        "documents": home / "Documents",
+        "document": home / "Documents",
+        "pictures": home / "Pictures",
+        "picture": home / "Pictures",
+        "videos": home / "Videos",
+        "video": home / "Videos",
+        "music": home / "Music",
+    }
+    lowered = str(keyword or "").strip().lower()
+    return mapping.get(lowered, mapping.get(lowered.rstrip("s")))
+
+
+def _parse_scoped_named_search(user_query: str) -> Optional[Dict[str, Any]]:
+    match = _SCOPED_SYSTEM_FOLDER_RE.search(str(user_query or ""))
+    if not match:
+        return None
+
+    item_type = (match.group(1) or "").strip().lower()
+    term = str(match.group(2) or "").strip().rstrip("?.!,")
+    folder_keyword = str(match.group(3) or "").strip().lower()
+    scope_path = _system_folder_path(folder_keyword)
+    if not term or scope_path is None:
+        return None
+
+    return {
+        "term": term,
+        "item_type": item_type,
+        "scope_label": scope_path.name,
+        "directory": str(scope_path),
+    }
+
+
+def _parse_filename_contains_search(user_query: str) -> Optional[Dict[str, Any]]:
+    raw_query = str(user_query or "")
+    contains_match = _FILENAME_CONTAINS_RE.search(raw_query)
+    if not contains_match:
+        return None
+
+    term = str(contains_match.group(1) or "").strip().rstrip("?.!,")
+    if not term:
+        return None
+
+    return {
+        "term": term,
+        "extensions": _infer_extension_filter(raw_query),
+        "include_folders": False,
+        "limit": 50,
+    }
+
+
 def _save_precise_search_context(result: Dict[str, Any], query: str) -> None:
     try:
         from src.agent.manifest.context_manifest import auto_save_files_context  # noqa: PLC0415
         from src.files.features.file_ops import save_search_manifest  # noqa: PLC0415
 
-        auto_save_files_context(result, query)
         paths = [str(item.get("path", "")).strip() for item in result.get("results", []) if str(item.get("path", "")).strip()]
         if paths:
-            save_search_manifest(paths)
+            manifest_result = save_search_manifest(paths, label=query or "search_results")
+            if manifest_result.get("status") == "success":
+                result["manifest_path"] = manifest_result.get("manifest_path", "")
+                result["manifest_id"] = manifest_result.get("manifest_id", "")
+                result["manifest_label"] = manifest_result.get("label", "")
+        auto_save_files_context(result, query)
     except (AttributeError, OSError, TypeError, ValueError):
         pass
 
@@ -208,14 +280,221 @@ _FOLLOW_UP_ZIP_RE = re.compile(
     r'|\bzip searched\b',
     re.IGNORECASE | re.DOTALL,
 )
+_LIST_NAMES_RE = re.compile(
+    r'\b(type|list|show|display|write)\b.{0,40}\b(file|folder|item)?\s*names?\b'
+    r'|\bwhat are the file names\b'
+    r'|\btype the file names here\b',
+    re.IGNORECASE | re.DOTALL,
+)
+_DIRECTORY_FILE_COUNT_RE = re.compile(
+    r'\bhow many\s+files\b'
+    r'|\bfile\s+count\b'
+    r'|\bnumber\s+of\s+files\b',
+    re.IGNORECASE,
+)
+_FOLLOW_UP_RENAME_RE = re.compile(
+    r'\brename\b.*?\bto\b\s+["\']?([^"\'\n]+?)["\']?\s*[?!.]?$',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_injected_blocks(user_query: str) -> str:
+    raw_query = user_query.split("## Context from Previous Turn")[0]
+    raw_query = raw_query.split("## Conversation Diary")[0]
+    return raw_query.split("## Session State")[0].strip()
+
+
+def _build_archive_output_path(folder_name: str) -> Path:
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", folder_name).strip("._") or "search_results"
+    return get_your_data_dir("archives", f"{safe_name}.zip")
+
+
+def _try_list_names_from_files_context(user_query: str) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if _FRESH_SEARCH_RE.search(raw_query):
+        return None
+    if not _LIST_NAMES_RE.search(raw_query):
+        return None
+
+    from src.agent.manifest.context_manifest import auto_save_files_context, read_context  # noqa: PLC0415
+    from src.files.features.file_ops import list_directory  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+    directory_path = str(entities.get("directory_path", "") or "").strip()
+    listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+
+    if (not isinstance(listed_files, list) or not listed_files) and directory_path:
+        refreshed = list_directory(directory_path, limit=200)
+        if refreshed.get("status") == "success":
+            auto_save_files_context(refreshed, raw_query)
+            ctx = read_context(agent="files") or {}
+            entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+            listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+
+    if not isinstance(listed_files, list) or not listed_files:
+        return None
+
+    file_items = [item for item in listed_files if isinstance(item, dict) and str(item.get("type", "") or "").lower() == "file"]
+    display_items = file_items or [item for item in listed_files if isinstance(item, dict)]
+    if not display_items:
+        return None
+
+    folder_label = Path(directory_path).name if directory_path else "the current folder"
+    lines = [f"Here are the file names from the **{folder_label}** folder:"]
+    for idx, item in enumerate(display_items[:50], start=1):
+        name = str(item.get("name", "") or Path(str(item.get("path", "") or "")).name).strip()
+        if name:
+            lines.append(f"{idx}. **{name}**")
+    if len(display_items) > 50:
+        lines.append("")
+        lines.append(f"Showing 50 of {len(display_items)} names.")
+
+    return {
+        "status": "success",
+        "message": "\n\n".join(lines),
+        "action": "react_response",
+    }
+
+
+def _try_direct_rename_from_files_context(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if _FRESH_SEARCH_RE.search(raw_query):
+        return None
+
+    rename_match = _FOLLOW_UP_RENAME_RE.search(raw_query)
+    if not rename_match:
+        return None
+
+    candidate_name = str(rename_match.group(1) or "").strip().rstrip("?.!,")
+    if not candidate_name:
+        return None
+
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+    from src.files.features.file_ops import rename_file  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+
+    target_path: Optional[Path] = None
+    directory_path = Path(str(entities.get("directory_path", "") or "").strip())
+    if directory_path.exists():
+        target_path = directory_path
+    else:
+        selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+        if isinstance(selected_paths, list) and len(selected_paths) == 1:
+            selected_path = Path(str(selected_paths[0] or "").strip())
+            if selected_path.exists():
+                target_path = selected_path
+        elif isinstance(entities.get("listed_files", []), list) and len(entities.get("listed_files", [])) == 1:
+            listed_entry = entities["listed_files"][0]
+            if isinstance(listed_entry, dict):
+                listed_path = Path(str(listed_entry.get("path", "") or "").strip())
+                if listed_path.exists():
+                    target_path = listed_path
+
+    if target_path is None:
+        return None
+
+    new_name = Path(candidate_name).name.strip()
+    if not new_name:
+        return None
+
+    result = rename_file(str(target_path), new_name)
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Rename failed."),
+            "action": "react_response",
+        }
+
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = result.get("new_path", "")
+
+    return {
+        "status": "success",
+        "message": result.get("message", "Rename successful."),
+        "action": "react_response",
+        "file_path": result.get("new_path", ""),
+    }
+
+
+def _try_direct_zip_from_files_context(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if _FRESH_SEARCH_RE.search(raw_query):
+        return None
+    if not _FOLLOW_UP_ZIP_RE.search(raw_query) and "zip that" not in raw_query.lower():
+        return None
+
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+    from src.files.features.archives import zip_folder  # noqa: PLC0415
+    from src.files.features.file_ops import zip_files_from_manifest  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+
+    bundle_dir_raw = str(entities.get("search_bundle_dir", "") or "").strip()
+    bundle_dir = Path(bundle_dir_raw) if bundle_dir_raw else None
+    if bundle_dir is not None and bundle_dir.exists() and bundle_dir.is_dir():
+        archive_path = _build_archive_output_path(bundle_dir.name)
+        result = zip_folder(str(bundle_dir), str(archive_path))
+    else:
+        directory_path = Path(str(entities.get("directory_path", "") or "").strip())
+        selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+        listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+        folder_target: Optional[Path] = None
+
+        if directory_path.exists() and directory_path.is_dir():
+            folder_target = directory_path
+        elif isinstance(selected_paths, list) and len(selected_paths) == 1:
+            selected_path = Path(str(selected_paths[0] or "").strip())
+            if selected_path.exists() and selected_path.is_dir():
+                folder_target = selected_path
+        elif isinstance(listed_files, list) and len(listed_files) == 1 and isinstance(listed_files[0], dict):
+            single_path = Path(str(listed_files[0].get("path", "") or "").strip())
+            if single_path.exists() and single_path.is_dir():
+                folder_target = single_path
+
+        if folder_target is not None:
+            archive_path = _build_archive_output_path(folder_target.name)
+            result = zip_folder(str(folder_target), str(archive_path))
+        else:
+            manifest_path = str(entities.get("file_manifest", "") or "").strip()
+            if not manifest_path:
+                return None
+            archive_stem = directory_path.name if directory_path else "search_results"
+            archive_path = _build_archive_output_path(archive_stem)
+            result = zip_files_from_manifest(manifest_path=manifest_path, output_path=str(archive_path))
+
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Zip failed."),
+            "action": "react_response",
+        }
+
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = result.get("file_path", "")
+
+    return {
+        "status": "success",
+        "message": f"Created zip archive: {result.get('file_path', '')}",
+        "action": "react_response",
+        "file_path": result.get("file_path", ""),
+    }
 
 
 def _try_direct_zip_from_search_bundle(
     user_query: str,
     artifacts_out: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    raw_query = user_query.split("## Context from Previous Turn")[0]
-    raw_query = raw_query.split("## Session State")[0].strip()
+    raw_query = _strip_injected_blocks(user_query)
 
     if _FRESH_SEARCH_RE.search(raw_query):
         return None
@@ -324,6 +603,138 @@ def _try_precise_full_computer_search(
         "raw": result,
     }
 
+
+def _try_scoped_named_search(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    parsed = _parse_scoped_named_search(user_query)
+    if not parsed:
+        return None
+
+    from src.agent.manifest.context_manifest import auto_save_files_context  # noqa: PLC0415
+    from src.files.features.file_ops import list_directory  # noqa: PLC0415
+    from src.files.features.search import search_by_name  # noqa: PLC0415
+
+    result = search_by_name(parsed["term"], directory=parsed["directory"], recursive=True, limit=50)
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Search failed."),
+            "action": "react_response",
+        }
+
+    matches = result.get("results", []) or []
+    item_type = parsed.get("item_type")
+    if item_type in {"file", "folder"}:
+        matches = [item for item in matches if str(item.get("type", "")).lower() == item_type]
+        result["results"] = matches
+        result["count"] = len(matches)
+
+    paths = [str(item.get("path", "") or "").strip() for item in matches if str(item.get("path", "") or "").strip()]
+    first_path = paths[0] if paths else ""
+    if artifacts_out is not None and first_path:
+        artifacts_out["file_path"] = first_path
+    if artifacts_out is not None and paths:
+        artifacts_out["found_paths"] = paths
+
+    noun = item_type or "item"
+    if matches:
+        _save_precise_search_context(result, parsed["term"])
+        if item_type == "folder" and len(matches) == 1 and _DIRECTORY_FILE_COUNT_RE.search(user_query):
+            directory_result = list_directory(first_path, limit=200)
+            if directory_result.get("status") == "success":
+                auto_save_files_context(directory_result, parsed["term"])
+                file_count = int(directory_result.get("files", 0) or 0)
+                folder_count = int(directory_result.get("folders", 0) or 0)
+                message = (
+                    f"I found {file_count} file(s) and {folder_count} folder(s) in "
+                    f"'{parsed['term']}' in {parsed['scope_label']}."
+                )
+                return {
+                    "status": "success",
+                    "message": message,
+                    "action": "react_response",
+                    "raw": directory_result,
+                }
+        if len(matches) == 1:
+            message = f"Yes — I found 1 matching {noun} named '{parsed['term']}' in {parsed['scope_label']}:\n{first_path}"
+        else:
+            preview = "\n".join(f"- {path}" for path in paths[:10])
+            message = (
+                f"Yes — I found {len(matches)} matching {noun}s named '{parsed['term']}' in {parsed['scope_label']}."
+                f"\n\nTop matches:\n{preview}"
+            )
+    else:
+        message = f"I couldn't find any matching {noun} named '{parsed['term']}' in {parsed['scope_label']}."
+
+    return {
+        "status": "success",
+        "message": message,
+        "action": "react_response",
+        "raw": result,
+    }
+
+
+def _try_filename_contains_search(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    parsed = _parse_filename_contains_search(user_query)
+    if not parsed:
+        return None
+
+    from src.files.features.search import search_file_all_drives  # noqa: PLC0415
+
+    result = search_file_all_drives(
+        query=parsed["term"],
+        extensions=parsed.get("extensions"),
+        limit=parsed.get("limit", 50),
+        include_folders=parsed.get("include_folders", False),
+    )
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Search failed."),
+            "action": "react_response",
+        }
+
+    result = _filter_precise_search_results(user_query, result)
+    result = _stage_precise_search_results(parsed["term"], result)
+    _save_precise_search_context(result, parsed["term"])
+
+    paths = [str(item.get("path", "") or "").strip() for item in result.get("results", []) if str(item.get("path", "") or "").strip()]
+    first_path = str(result.get("file_path", "") or "").strip()
+    if artifacts_out is not None and first_path:
+        artifacts_out["file_path"] = first_path
+    if artifacts_out is not None and paths:
+        artifacts_out["found_paths"] = paths
+    bundle_dir = str(result.get("search_bundle_dir", "") or "").strip()
+    if artifacts_out is not None and bundle_dir:
+        artifacts_out["search_bundle_dir"] = bundle_dir
+
+    return {
+        "status": "success",
+        "message": _format_precise_search_response("named_search", parsed["term"], result),
+        "action": "react_response",
+        "raw": result,
+    }
+
+
+def _try_recycle_bin_query(user_query: str) -> Optional[Dict[str, Any]]:
+    if not _RECYCLE_BIN_COUNT_RE.search(str(user_query or "")):
+        return None
+
+    from src.files.features.file_ops import get_recycle_bin_info  # noqa: PLC0415
+
+    result = get_recycle_bin_info()
+    return {
+        "status": result.get("status", "error"),
+        "message": result.get("message", "Recycle Bin query failed."),
+        "action": "react_response",
+        "raw": result,
+    }
+
 def _build_skill_context() -> str:
     """Build the files-agent system prompt with real OS paths injected from skill_context.md."""
     import sys as _sys
@@ -390,12 +801,13 @@ def _build_skill_context() -> str:
 
 def _build_all_tools() -> Dict[str, Any]:
     from src.files.features.file_ops import (  # noqa: PLC0415
-        list_directory, get_file_info, copy_file, move_file,
+        list_directory as _list_directory, get_file_info, copy_file, move_file,
         delete_file, create_folder, rename_file, open_file,
         list_laptop_structure, deliver_file,
         write_pdf_report, write_excel_report, organize_folder,
         analyze_disk_usage, get_drive_info, find_duplicate_files,
         count_files_and_folders_all_drives,
+        get_recycle_bin_info,
         search_files_by_content, batch_rename, secure_delete,
         cleanup_temp_files, monitor_folder,
         cleanup_app_caches, archive_old_files, resolve_shortcut,
@@ -422,6 +834,24 @@ def _build_all_tools() -> Dict[str, Any]:
     def search_by_extension(ext: str, directory: str = "~", recursive: bool = True, limit: int = 100):
         result = _sbe(ext, directory, recursive, limit)
         return auto_save_files_context(result, ext)
+
+    def list_directory(path: str, show_hidden: bool = False, limit: int = 200):
+        result = _list_directory(path, show_hidden=show_hidden, limit=limit)
+        if result.get("status") == "success":
+            directory_path = str(result.get("path", "") or "").strip()
+            entry_paths = [
+                str(Path(directory_path) / str(entry.get("name", "") or "").strip())
+                for entry in result.get("entries", [])
+                if isinstance(entry, dict) and str(entry.get("name", "") or "").strip()
+            ]
+            if entry_paths:
+                manifest_result = save_search_manifest(entry_paths, label=Path(directory_path).name or path)
+                if manifest_result.get("status") == "success":
+                    result["manifest_path"] = manifest_result.get("manifest_path", "")
+                    result["manifest_id"] = manifest_result.get("manifest_id", "")
+                    result["manifest_label"] = manifest_result.get("label", "")
+        return auto_save_files_context(result, path)
+
     from src.files.features.archives import (  # noqa: PLC0415
         zip_folder, zip_files, unzip_file, list_archive_contents,
     )
@@ -456,6 +886,7 @@ def _build_all_tools() -> Dict[str, Any]:
         "find_duplicates":         find_duplicates,
         "find_empty_folders":      find_empty_folders,
         "find_duplicate_files":    find_duplicate_files,
+        "get_recycle_bin_info":    get_recycle_bin_info,
         # File Operations
         "copy_file":               copy_file,
         "move_file":               move_file,
@@ -526,7 +957,7 @@ def _get_tool_map_for_react(
 
 
 def _maybe_save_manifest(artifacts_out: Optional[Dict[str, Any]]) -> None:
-    """Save found_paths to the manifest file if the current execution produced any."""
+    """Save found_paths to the active file manifest if the current execution produced any."""
     if not artifacts_out:
         return
     found = artifacts_out.get("found_paths", [])
@@ -537,7 +968,7 @@ def _maybe_save_manifest(artifacts_out: Optional[Dict[str, Any]]) -> None:
         save_search_manifest(found)
         import logging as _lg
         _lg.getLogger("files.orchestrator").info(
-            "[manifest] saved %d paths to octa_manifest.txt", len(found)
+            "[manifest] saved %d paths to the active file manifest", len(found)
         )
     except _FILES_ORCHESTRATOR_ERRORS as exc:
         import logging as _lg
@@ -692,7 +1123,7 @@ def _try_direct_copy_from_manifest(
     """
     Bypass the LLM entirely when:
       1. The query is a follow-up copy/move/collect request, AND
-      2. The manifest file (octa_manifest.txt) exists and is non-empty.
+            2. An active file manifest exists and is non-empty.
 
     Returns a result dict on success/failure, or None if conditions are not met
     (so the caller falls through to the normal LLM path).
@@ -1074,9 +1505,33 @@ def execute_with_llm_orchestration(
     if direct is not None:
         return direct
 
+    list_names = _try_list_names_from_files_context(user_query)
+    if list_names is not None:
+        return list_names
+
+    direct_rename = _try_direct_rename_from_files_context(user_query, artifacts_out)
+    if direct_rename is not None:
+        return direct_rename
+
+    direct_zip_from_context = _try_direct_zip_from_files_context(user_query, artifacts_out)
+    if direct_zip_from_context is not None:
+        return direct_zip_from_context
+
     direct_zip = _try_direct_zip_from_search_bundle(user_query, artifacts_out)
     if direct_zip is not None:
         return direct_zip
+
+    recycle_bin = _try_recycle_bin_query(user_query)
+    if recycle_bin is not None:
+        return recycle_bin
+
+    scoped = _try_scoped_named_search(user_query, artifacts_out)
+    if scoped is not None:
+        return scoped
+
+    filename_contains = _try_filename_contains_search(user_query, artifacts_out)
+    if filename_contains is not None:
+        return filename_contains
 
     # ── Pre-flight: deterministic targeted full-computer search ───────────
     precise = _try_precise_full_computer_search(user_query, artifacts_out)

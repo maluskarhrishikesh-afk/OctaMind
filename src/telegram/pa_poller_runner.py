@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import signal
 import sys
 import time
@@ -26,7 +27,7 @@ if str(_ROOT) not in sys.path:
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 # Headless process — stdout/stderr are DEVNULL; use the unified log manager
-# which writes to logs/<pa_id>.log.  console=False prevents a StreamHandler
+# which writes to logs/<pa_name>.log.  console=False prevents a StreamHandler
 # on a null stream (silent crash risk on Windows).
 pa_id = os.environ.get("PA_ID", "")
 from src.agent.logging.log_manager import setup_pa_logging, bind_correlation, new_correlation_id  # noqa: E402
@@ -50,6 +51,9 @@ def main() -> None:
     if not pa:
         logger.error("PA '%s' not found in assistants.json", pa_id)
         sys.exit(1)
+
+    safe_log_name = re.sub(r"[^\w\-.]", "_", pa.get("name", pa_id))
+    setup_pa_logging(safe_log_name or pa_id, console=False)
 
     token = (pa.get("config") or {}).get("telegram", {}).get("bot_token", "").strip()
     if not token or token.startswith("<"):

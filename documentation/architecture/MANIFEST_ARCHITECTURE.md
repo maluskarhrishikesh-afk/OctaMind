@@ -173,10 +173,11 @@ A common point of confusion: both Session State and manifests carry "context". T
 │             MANIFEST FILES  (disk-persistent)              │
 │                                                            │
 │  Written by: Tool calls inside agent executors             │
-│  Lifetime: Overwritten per action; survives restarts       │
-│  Size limit: None (manifest.txt can hold 100k+ paths)      │
+│  Lifetime: Active pointer + historical manifests survive   │
+│  Size limit: None (manifest files can hold 100k+ paths)    │
 │                                                            │
-│  octa_manifest.txt      → ALL file paths from last search  │
+│  active_file_manifest   → active file-manifest metadata    │
+│  manifests/files/*.txt  → exact file paths from searches   │
 │  octa_context.json      → calendar slots, email IDs, etc. │
 │  operation_history.json → copy/move history (undo)         │
 │  octa_jobs.json         → background task status           │
@@ -201,7 +202,7 @@ A common point of confusion: both Session State and manifests carry "context". T
 
 `last_found_paths` appears in both. `_merge_manifest_into_session()` in `skill_dag_engine.py` handles this:
 1. Extract `last_found_paths` from conversation history → session state
-2. If `octa_manifest.txt` was written within the last **30 minutes**, replace session-state paths with manifest paths (manifest is fresher — it's written directly by the tool, not parsed from assistant text)
+2. If the active file manifest was written within the last **30 minutes**, replace session-state paths with manifest paths (manifest is fresher — it's written directly by the tool, not parsed from assistant text)
 3. The DAG planner then uses `{__session__.last_found_paths}` which resolves to the manifest paths
 
 This ensures that paths from background jobs (which update the manifest but never appear in the conversation) are still available to follow-up commands.
@@ -255,6 +256,9 @@ agents' contexts can coexist without overwriting each other.
   "files": {
     "schema_version": 2,
     "written_at": "2026-03-05T14:33:10",
+  ### Current Rule: One Active Manifest, Many Historical Manifests
+
+  OctaMind now treats manifests as a registry, not a singleton file hidden behind prompt instructions.
     "expires_at": "2026-03-05T15:33:10",
     "agent": "files",
     "topic": "file_search",
@@ -335,13 +339,13 @@ Turn 2:
 
 ### 4.2 File Manifest — Search Results
 
-**File:** `<workspace>/your_data/octa_manifest.txt`  
+**Files:** `<workspace>/your_data/active_file_manifest.json`, `<workspace>/your_data/manifests/files/*.txt`  
 **Status:** ✅ IMPLEMENTED
 
 **Purpose:** Store all file paths returned by a search so the next turn
 can copy/move/zip all of them — not just the few that fit in the LLM reply.
 
-**Format:** Plain text, one absolute path per line.
+**Format:** Active pointer JSON plus plain-text manifest files with one absolute path per line.
 ```
 C:\Users\malus\Pictures\family\birthday.jpg
 C:\Hrishikesh\OctaMind\your_data\wallpaper.png
@@ -409,6 +413,8 @@ a single "undo" command, and reviewed via the audit history.
 ]
 ```
 
+**Current implementation note:** `octa_manifest.txt` is retained for backward compatibility, but new searches also write a dedicated manifest file under the workspace manifest registry and update active-manifest metadata. Immediate follow-ups should use the active manifest path referenced from files context, not assume the legacy singleton file is the only result source.
+
 **Implemented API (`src/files/features/file_ops.py`):**
 - `_log_operation(op_type, destination, count)` — pushes to front; prunes entries >30 days
 - `undo_last_file_operation() → dict` — finds most-recent non-undone entry, deletes folder, marks `undone: true`
@@ -448,7 +454,7 @@ for status at any time, even from a different session.
       "status": "running",
       "progress_pct": 67,
       "progress_detail": "Scanned 312 of 467 folders",
-      "result_manifest": "<workspace>/your_data/octa_manifest.txt",
+      "result_manifest": "<workspace>/your_data/manifests/files/images_20260305_140430.txt",
       "started_by": "pa_7ea1659c",
       "estimated_done_at": "2026-03-05T14:06:00"
     }
@@ -539,7 +545,7 @@ the failure point — not from the beginning.
     {
       "stage": "collect_pdfs",
       "status": "completed",
-      "output_manifest": "octa_manifest.txt",
+      "output_manifest": "images_20260305_140430.txt",
       "completed_at": "2026-03-05T15:01:10",
       "file_count": 23
     },
@@ -680,8 +686,11 @@ tool-call granularity. Below is the planned per-event schema:
 ```
 <workspace>/your_data/
 │
-├── octa_manifest.txt              ← File search results (paths, one per line)
-│                                     OVERWRITTEN on each new search
+├── active_file_manifest.json      ← Active file-manifest pointer + metadata
+├── manifests/
+│   └── files/
+│       ├── images_20260305_140430.txt
+│       └── images_20260305_140430.json
 │
 ├── octa_context.json              ← Conversational context (resolved entities,
 │                                     pending selections, awaiting state)
@@ -734,7 +743,7 @@ tool-call granularity. Below is the planned per-event schema:
 3. **Multi-agent access:** Multiple agents (files, calendar, email) can all read the
    same `octa_context.json`. Session state is isolated per agent process.
 
-4. **Human-inspectable:** You can open `octa_manifest.txt` in Notepad right now and
+4. **Human-inspectable:** You can open the active manifest file in Notepad right now and
    see exactly what the agent found. Session state is invisible.
 
 5. **Deterministic:** Reading a manifest file cannot fail due to LLM hallucination.
@@ -755,7 +764,7 @@ tool-call granularity. Below is the planned per-event schema:
 
 | Manifest              | File                        | Status              | Notes                              |
 |-----------------------|-----------------------------|---------------------|------------------------------------|
-| File Manifest         | `octa_manifest.txt`         | ✅ LIVE             | `save_search_manifest()`, `collect_files_from_manifest()` |
+| File Manifest         | `active_file_manifest.json` + `manifests/files/*.txt` | ✅ LIVE | `save_search_manifest()`, `collect_files_from_manifest()`, `zip_files_from_manifest()` |
 | Context Manifest      | `octa_context.json`         | ✅ LIVE (Phase 1)   | Scheduler ✅ Email ✅ Drive ✅ Files ✅ |
 | Operation Manifest    | `operation_history.json`    | ✅ LIVE (Phase 2)   | Undo/rollback + 30-day audit |
 | Job Manifest          | `octa_jobs.json`            | ✅ LIVE (Phase 3)   | Async background tasks + Telegram notification |

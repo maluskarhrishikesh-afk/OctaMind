@@ -8,6 +8,7 @@ State is persisted to running_agents.json so it survives dashboard reruns.
 
 import json
 import os
+import re
 import sys
 import subprocess
 import signal
@@ -118,7 +119,8 @@ def start_agent(agent_id: str, agent_name: str, agent_type: str) -> Dict[str, An
 
     logs_dir = _PROJECT_ROOT / "logs"
     logs_dir.mkdir(exist_ok=True)
-    stderr_log = open(logs_dir / f"pa_{agent_id}_stderr.txt", "w", encoding="utf-8")
+    safe_name = re.sub(r"[^\w\-.]", "_", agent_name or agent_id)
+    stderr_log = open(logs_dir / f"{safe_name}_stderr.txt", "w", encoding="utf-8")
 
     proc = subprocess.Popen(
         [

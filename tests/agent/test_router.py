@@ -219,6 +219,30 @@ class TestKeywordFallbackRouting:
         matched = [agent for agent, agent_kws in km.items() if tokens & agent_kws]
         return matched
 
+
+def test_normalize_followup_agents_keeps_current_channel_delivery_on_files() -> None:
+    from src.agent.workflows.router import _normalize_followup_agents
+
+    normalized = _normalize_followup_agents(
+        "Zip that and send it to me",
+        active_context={"agent": "files"},
+        agents=["files", "email"],
+    )
+
+    assert normalized == ["files"]
+
+
+def test_normalize_followup_agents_preserves_email_when_explicit() -> None:
+    from src.agent.workflows.router import _normalize_followup_agents
+
+    normalized = _normalize_followup_agents(
+        "Zip that and email it to me",
+        active_context={"agent": "files"},
+        agents=["files", "email"],
+    )
+
+    assert normalized == ["files", "email"]
+
     def test_payslip_routes_to_files(self):
         agents = self._route_via_keywords("find my payslip")
         assert "files" in agents
