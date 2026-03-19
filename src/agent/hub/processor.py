@@ -901,7 +901,7 @@ class HubProcessor:
 
         Returns (response_text, actions, status, file_artifacts, search_paths, channel_payloads).
         """
-        from src.agent.workflows import classify_and_route, run_workflow
+        from src.agent.workflows import run_routing_pipeline, run_workflow
 
         def _progress(msg: str) -> None:
             if on_progress:
@@ -959,12 +959,37 @@ class HubProcessor:
 
         t_dispatch = time.perf_counter()
         _progress("🔍 Analyzing your request…")
-        intent = classify_and_route(routing_message, _active_ctx, _session_state)
+        routing_pipeline = run_routing_pipeline(routing_message, _active_ctx, _session_state)
+        intent = routing_pipeline.intent
         agents_needed = intent.agents if not intent.is_chat else None
         logger.info(
-            "│  [INTENT]  category=%s  agents=%s  reason=%s  source=%s",
-            intent.category, agents_needed or "conversational", intent.reason, req.source,
+            "│  [INTENT:CLASSIFY]  category=%s  source=%s  reason=%s",
+            routing_pipeline.classification.category,
+            routing_pipeline.classification.source,
+            routing_pipeline.classification.reason,
         )
+        logger.info(
+            "│  [INTENT:RESOLVE]  category=%s  context_agent=%s  default_agents=%s  reason=%s",
+            routing_pipeline.context_resolution.category,
+            routing_pipeline.context_resolution.context_agent or "-",
+            routing_pipeline.context_resolution.default_agents or [],
+            routing_pipeline.context_resolution.reason,
+        )
+        logger.info(
+            "│  [INTENT:PLAN]  category=%s  agents=%s  source=%s  reason=%s  request_source=%s",
+            intent.category,
+            agents_needed or "conversational",
+            routing_pipeline.planning.source,
+            intent.reason,
+            req.source,
+        )
+        if intent.is_context_followup and agents_needed:
+            try:
+                from src.agent.telemetry import log_context_followup_resolved  # noqa: PLC0415
+
+                log_context_followup_resolved(req.source, agents_needed)
+            except Exception:
+                pass
 
         # ── Pronoun clarification guard ────────────────────────────────────
         # When classify_and_route returns a non-chat intent but can resolve no

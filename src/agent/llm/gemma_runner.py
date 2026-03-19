@@ -24,7 +24,7 @@ def find_local_snapshot(cache_dir, model_id):
     return None
 
 
-def generate_response(model, processor, device, user_query, max_tokens=400):
+def generate_response(model, processor, device, user_query, max_tokens=400, temperature=0.7):
     """Generate a response for a given user query."""
     messages = [
         {
@@ -48,15 +48,19 @@ def generate_response(model, processor, device, user_query, max_tokens=400):
               for k, v in inputs.items()}
 
     try:
-        outputs = model.generate(
+        do_sample = temperature > 0
+        generate_kwargs = {
             **inputs,
-            max_new_tokens=max_tokens,
-            do_sample=True,
-            temperature=0.7,
-            top_p=0.9,
-            top_k=50,
-            repetition_penalty=1.1,
-        )
+            "max_new_tokens": max_tokens,
+            "do_sample": do_sample,
+            "temperature": max(temperature, 0.0),
+            "repetition_penalty": 1.1,
+        }
+        if do_sample:
+            generate_kwargs["top_p"] = 0.9
+            generate_kwargs["top_k"] = 50
+
+        outputs = model.generate(**generate_kwargs)
         seq_len = inputs["input_ids"].shape[-1]
         gen = outputs[0][seq_len:]
         result = processor.decode(gen)

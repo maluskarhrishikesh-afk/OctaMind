@@ -5,7 +5,11 @@ Provider is configured via config/providers.json.
 Switch models by changing 'active' — no code changes needed.
 """
 
+from __future__ import annotations
+
+import json
 import logging
+from typing import Any, Optional
 
 # Setup logger
 logger = logging.getLogger("email_agent.llm_parser")
@@ -13,6 +17,81 @@ logger.setLevel(logging.DEBUG)
 
 # Module-level singleton — populated lazily by get_llm_client()
 _llm_client = None
+_provider_clients: dict[str, "GitHubModelsLLM"] = {}
+
+_LOCAL_FALLBACK_TOKEN_CAPS = {
+    "routing": 48,
+    "intent_classification": 64,
+    "agent_planning": 96,
+    "dag_planning": 192,
+    "skill_dag_planning": 224,
+    "nl_workflow_planning": 224,
+}
+
+
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    retryable_markers = (
+        "429",
+        "rate limit",
+        "ratelimitreached",
+        "too many requests",
+        "timeout",
+        "timed out",
+        "temporarily unavailable",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "connection error",
+        "apiconnectionerror",
+        "internal server error",
+        "bad gateway",
+        "service unavailable",
+        "gateway timeout",
+    )
+    return any(marker in text for marker in retryable_markers)
+
+
+def _fallback_reason(exc: Exception) -> str:
+    text = str(exc).lower()
+    if "429" in text or "rate limit" in text or "ratelimitreached" in text:
+        return "rate_limit"
+    if "timeout" in text or "timed out" in text or "gateway timeout" in text:
+        return "timeout"
+    return "transient_error"
+
+
+def _get_planner_fallback_provider_name() -> str:
+    from src.agent.llm.provider_registry import load_provider_config
+
+    config = load_provider_config()
+    if config.get("planner_fallback_enabled", True) is False:
+        return ""
+
+    provider_name = str(config.get("planner_fallback_model", "gemma3_local") or "").strip()
+    providers = config.get("providers", {})
+    if provider_name and provider_name in providers:
+        return provider_name
+    return ""
+
+
+def _cap_local_fallback_tokens(purpose: str, max_tokens: int) -> int:
+    cap = _LOCAL_FALLBACK_TOKEN_CAPS.get(purpose)
+    if cap is None:
+        return max_tokens
+    return min(max_tokens, cap)
+
+
+def _strip_markdown_code_fence(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        lines = cleaned.splitlines()
+        if lines:
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        cleaned = "\n".join(lines).strip()
+    return cleaned
 
 
 class GitHubModelsLLM:
@@ -28,13 +107,140 @@ class GitHubModelsLLM:
     or calling ``src.agent.llm.provider_registry.set_active_provider(name)``.
     """
 
-    def __init__(self):
-        from src.agent.llm.provider_registry import build_client
-        self.client, self.model, self.provider_type = build_client()
+    def __init__(self, provider_name: Optional[str] = None):
+        from src.agent.llm.provider_registry import build_client, get_active_provider
+
+        self.provider_name = provider_name or get_active_provider()
+        self.client, self.model, self.provider_type = build_client(provider_name=provider_name)
         logger.info(
-            "LLM client initialised — provider_type=%s  model=%s",
-            self.provider_type, self.model,
+            "LLM client initialised — provider=%s  provider_type=%s  model=%s",
+            self.provider_name, self.provider_type, self.model,
         )
+
+    def create_chat_completion(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        temperature: float = 0.2,
+        max_tokens: int = 300,
+        timeout: int = 40,
+        purpose: str = "general",
+        allow_local_fallback: bool = False,
+    ) -> Any:
+        try:
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            fallback_provider = _get_planner_fallback_provider_name()
+            if (
+                not allow_local_fallback
+                or not _is_retryable_llm_error(exc)
+                or not fallback_provider
+                or fallback_provider == self.provider_name
+            ):
+                raise
+
+            fallback_llm = get_llm_client(provider_name=fallback_provider)
+            fallback_max_tokens = _cap_local_fallback_tokens(purpose, max_tokens)
+            fallback_temperature = 0.0 if temperature <= 0.2 else min(temperature, 0.2)
+            fallback_timeout = max(timeout, 300)
+
+            logger.warning(
+                "Planner fallback to local model — purpose=%s primary=%s fallback=%s reason=%s max_tokens=%d→%d",
+                purpose,
+                self.provider_name,
+                fallback_provider,
+                _fallback_reason(exc),
+                max_tokens,
+                fallback_max_tokens,
+            )
+            try:
+                from src.agent.telemetry import log_counter
+
+                log_counter(
+                    "llm_local_fallback",
+                    purpose=purpose,
+                    primary_provider=self.provider_name,
+                    fallback_provider=fallback_provider,
+                    reason=_fallback_reason(exc),
+                )
+            except Exception:
+                pass
+
+            return fallback_llm.client.chat.completions.create(
+                model=fallback_llm.model,
+                messages=messages,
+                temperature=fallback_temperature,
+                max_tokens=fallback_max_tokens,
+                timeout=fallback_timeout,
+            )
+
+    def orchestrate_mcp_tool(
+        self,
+        user_query: str,
+        memory_context: str = "",
+        *,
+        tools_description: str = "",
+    ) -> dict[str, Any]:
+        if not str(tools_description or "").strip():
+            return {
+                "tool": None,
+                "params": {},
+                "reasoning": "No tools_description provided for MCP orchestration.",
+            }
+
+        system_prompt = (
+            "You are an MCP tool orchestrator. Choose exactly one tool from the provided tool list "
+            "and return only valid JSON with keys tool, params, and reasoning.\n\n"
+            "Available tools:\n"
+            f"{tools_description.strip()}"
+        )
+        user_prompt = (
+            f"User request: {str(user_query or '').strip()}\n\n"
+            "Memory context:\n"
+            f"{memory_context.strip() if memory_context else 'No prior memory available.'}"
+        )
+
+        try:
+            response = self.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.1,
+                max_tokens=300,
+                timeout=40,
+            )
+            content = response.choices[0].message.content if response and response.choices else ""
+            payload = json.loads(_strip_markdown_code_fence(str(content or "")))
+        except Exception as exc:
+            logger.warning("MCP tool orchestration failed: %s", exc)
+            return {
+                "tool": None,
+                "params": {},
+                "reasoning": f"MCP orchestration failed: {exc}",
+            }
+
+        if not isinstance(payload, dict):
+            return {
+                "tool": None,
+                "params": {},
+                "reasoning": "MCP orchestration returned a non-object payload.",
+            }
+
+        tool_name = payload.get("tool")
+        params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+        reasoning = str(payload.get("reasoning", "") or "")
+        return {
+            "tool": tool_name if tool_name else None,
+            "params": params,
+            "reasoning": reasoning,
+        }
 
     def chat(
         self,
@@ -156,19 +362,18 @@ After EVERY response (including pure conversation), end with a short section:
         messages.append({"role": "user", "content": user_message})
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
+            response = self.create_chat_completion(
                 messages=messages,
                 temperature=0.7,  # Balanced creativity and consistency
                 max_tokens=300,
-                timeout=30  # 30 second timeout to prevent hanging
+                timeout=30,  # 30 second timeout to prevent hanging
             )
 
             return response.choices[0].message.content.strip()
 
         except Exception as e:
             # Log error
-            logger.error(f"LLM chat error: {str(e)}")
+            logger.error("LLM chat error: %s", e)
             err_str = str(e)
             if "429" in err_str or "RateLimitReached" in err_str or "rate limit" in err_str.lower():
                 import re as _re
@@ -177,7 +382,37 @@ After EVERY response (including pure conversation), end with a short section:
                 return f"⏳ **API rate limit reached.**{wait_msg}"
             return f"I'm having trouble processing that right now. As {agent_name}, I'm here to help - could you try rephrasing?"
 
-def get_llm_client() -> GitHubModelsLLM:
+
+def request_completion(
+    *,
+    llm: Optional[Any] = None,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.2,
+    max_tokens: int = 300,
+    timeout: int = 40,
+    purpose: str = "general",
+    allow_local_fallback: bool = False,
+) -> Any:
+    llm_client = llm or get_llm_client()
+    if isinstance(llm_client, GitHubModelsLLM):
+        return llm_client.create_chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            purpose=purpose,
+            allow_local_fallback=allow_local_fallback,
+        )
+    return llm_client.client.chat.completions.create(
+        model=llm_client.model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )
+
+
+def get_llm_client(provider_name: Optional[str] = None) -> GitHubModelsLLM:
     """
     Return the shared LLM client.
 
@@ -186,6 +421,14 @@ def get_llm_client() -> GitHubModelsLLM:
     so the next call here rebuilds with the new provider.
     """
     global _llm_client
+
+    if provider_name:
+        cached = _provider_clients.get(provider_name)
+        if cached is None:
+            cached = GitHubModelsLLM(provider_name=provider_name)
+            _provider_clients[provider_name] = cached
+        return cached
+
     if _llm_client is None:
         _llm_client = GitHubModelsLLM()
     return _llm_client

@@ -60,8 +60,9 @@ User Message
 │         │   Loads your_data/octa_context.json if <60 min old        │
 │         │   Contains: agent, topic, resolved_entities, awaiting     │
 │                                                                     │
-│  Step 4 │ classify_and_route()  — Unified Intent Classifier         │
-│         │   LLM call (max_tokens=100) → JSON {category, agents}     │
+│  Step 4 │ run_routing_pipeline()  — Staged Router                  │
+│         │   classification → context resolution → agent planning   │
+│         │   returns stage outputs plus final intent                │
 │         │   category ∈ { "chat", "fresh_task", "context_followup" } │
 │                                                                     │
 │  Step 5 │ Route on category + agent count                           │
@@ -83,6 +84,7 @@ User Message
 | `your_data/runtime_state/destructive_action_pending.json` | HubProcessor + confirmation policy | HubProcessor | Session-scoped pending destructive confirmations |
 | `your_data/runtime_state/security_events.jsonl` | Security policy | Audit/debug and future SOC UI | Redacted security-relevant events |
 | `your_data/runtime_state/security_rate_limits.json` | Security policy | Security policy | Session-scoped rate-limit counters |
+| `your_data/runtime_state/telegram_reply_claims/` | Telegram auto responder | Telegram auto responder | Per-message claim files used to suppress duplicate inbound auto replies |
 
 ### Shared Runtime Tool Contract
 
@@ -172,9 +174,9 @@ Are there any payslips on my computer?
 
 ---
 
-### Step 4 — Intent Classification
+### Step 4 — Routing Pipeline
 
-`classify_and_route("Are there any payslips on my computer?", active_context=None, session_state={...})`
+`run_routing_pipeline("Are there any payslips on my computer?", active_context=None, session_state={...})`
 
 **Fast-path check:** `active_context is None` AND `keyword_pre_filter()` returns `True`
 (the word "payslips" is not in the broad keyword map, but "computer" also isn't —
@@ -192,7 +194,15 @@ actually "files" doesn't appear either, so keyword_pre_filter may return False).
 When `keyword_pre_filter()` returns `False` but the message is clearly a task, the
 fast-path incorrectly returns `chat`. The LLM call must succeed to route correctly.
 
-**LLM call — the intent prompt sent to gpt-4o-mini (max_tokens=100):**
+The router now has three stages:
+
+1. classification chooses `chat`, `fresh_task`, or `context_followup`
+2. context resolution binds any active context agent and default follow-up agents
+3. planning chooses the minimum agent set needed for execution
+
+Routing and planning calls can retry on a configured local fallback provider for transient failures such as rate limits and timeouts.
+
+**Representative classification call:**
 
 ```
 You are an intent classifier for a multi-agent AI assistant…
@@ -210,7 +220,7 @@ User message: "Are there any payslips on my computer?"
 …
 ```
 
-**LLM response:**
+**Representative planning result:**
 
 ```json
 {
@@ -429,9 +439,9 @@ _active_ctx = {
 
 ---
 
-### Step 4 — Intent Classification
+### Step 4 — Routing Pipeline
 
-`classify_and_route("Can you zip that and mail it to me?", active_context=_active_ctx, session_state={...})`
+`run_routing_pipeline("Can you zip that and mail it to me?", active_context=_active_ctx, session_state={...})`
 
 The active context is NOT None so the fast-path is skipped.
 
@@ -449,7 +459,7 @@ User message: "Can you zip that and mail it to me?"
 Classify: CHAT | FRESH_TASK | CONTEXT_FOLLOWUP
 ```
 
-**LLM response:**
+**Representative planning result:**
 
 ```json
 {
@@ -665,9 +675,9 @@ Assume Scenario A was run earlier but the context has expired (TTL 60 min).
 
 ---
 
-### Step 4 — Intent Classification
+### Step 4 — Routing Pipeline
 
-`classify_and_route("Do you know about cricket?", active_context=None, session_state={...})`
+`run_routing_pipeline("Do you know about cricket?", active_context=None, session_state={...})`
 
 **Fast-path check:**
 - `active_context is None` ✓
@@ -885,7 +895,7 @@ This section documents what each problem was and exactly what was changed to res
 
 ### What Works Well (unchanged)
 
-1. **Single routing decision point** — `classify_and_route()` handles all three
+1. **Single routing pipeline** — `run_routing_pipeline()` now handles classification, context binding, and agent planning in one staged flow
    intent types in one place, with no bolt-on overrides scattered across files.
 
 2. **Context-aware routing** — The router reads the live context manifest before

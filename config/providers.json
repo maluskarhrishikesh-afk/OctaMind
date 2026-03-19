@@ -3,6 +3,10 @@
 
   "active": "github_models",
 
+  "_planner_fallback_comment": "Optional: use a local model only for intent/routing/planning retries when the active provider is rate-limited or transiently unavailable.",
+  "planner_fallback_enabled": true,
+  "planner_fallback_model": "gemma3_local",
+
   "_memory_model_comment": "Optional: dedicated provider for memory consolidation LLM calls (insight enrichment in _enrich_recent_insights). Falls back to 'active' if not set. Set to 'gemma3_local' for fully offline/fast consolidation.",
   "memory_model": "github_models",
 

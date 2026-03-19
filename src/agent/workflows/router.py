@@ -27,9 +27,9 @@ from typing import Dict, FrozenSet, List, Optional
 logger = logging.getLogger("workflows")
 
 # ---------------------------------------------------------------------------
-# Dynamic keyword fallback — built once from the registry at import time.
-# Each agent gets a frozenset of significant words extracted from its description.
-# No words are hardcoded here.
+# Dynamic keyword fallback — built from curated trigger keywords and
+# agent-name tokens. Free-text descriptions stay useful for the LLM prompt,
+# but they are too noisy for deterministic fallback routing.
 # ---------------------------------------------------------------------------
 
 # Common English stop-words to skip when extracting capability keywords
@@ -60,30 +60,25 @@ _STOP_WORDS: frozenset[str] = frozenset(
 
 def _build_keyword_map() -> Dict[str, FrozenSet[str]]:
     """
-    Extract significant words from each agent's description in the registry
-    and return a dict: {agent_name → frozenset of keywords}.
-    Also merges in the curated ``trigger_keywords`` list so hand-picked terms
-    (e.g. "payslip", "whatsapp", "rsi") are always present regardless of
-    how many agents mention similar words.
+    Build a dict: {agent_name → frozenset of deterministic routing keywords}.
+
+    The fallback router intentionally uses ONLY curated trigger keywords plus
+    agent-name tokens. Description text is excluded here because cross-agent
+    descriptions contain noisy words like "list", "show", "image", "email",
+    and delivery examples that cause false multi-agent matches.
+
     Called lazily the first time the fallback is needed.
     """
     from src.agent.workflows.agent_registry import AGENT_REGISTRY
     keyword_map: Dict[str, FrozenSet[str]] = {}
     for name, info in AGENT_REGISTRY.items():
-        desc = info.get("description", "")
-        # Split on non-alpha chars, lowercase, remove stop-words and short tokens
-        words = frozenset(
-            w for w in re.findall(r"[a-z]{3,}", desc.lower())
-            if w not in _STOP_WORDS
-        )
-        # Curated trigger_keywords are unioned in directly (multi-word phrases are
-        # split into tokens, e.g. "google drive" → {"google", "drive"})
         trigger_kw = frozenset(
             w
             for kw in info.get("trigger_keywords", [])
             for w in re.findall(r"[a-z]{3,}", kw.lower())
         )
-        keyword_map[name] = words | trigger_kw
+        name_tokens = frozenset(re.findall(r"[a-z]{3,}", name.lower()))
+        keyword_map[name] = trigger_kw | name_tokens
         logger.debug("Router keyword map [%s]: %s", name, sorted(keyword_map[name]))
     return keyword_map
 
@@ -147,9 +142,8 @@ def _get_keyword_map() -> Dict[str, FrozenSet[str]]:
 
 
 # ── IDF-filtered "distinctive" keyword map — used by classify_and_route ─────
-# Only keeps words that appear in ≤ 30 % of agent descriptions.  Generic words
-# like "files" (found in 6+ descriptions) are excluded so they can't cause a
-# false-positive multi-agent result when the LLM is unavailable.
+# Only keeps words that appear in ≤ 30 % of agent trigger sets. Generic words
+# are filtered further for tie-breaking when the LLM is unavailable.
 
 _DISTINCTIVE_KEYWORD_MAP: Optional[Dict[str, FrozenSet[str]]] = None
 
@@ -158,15 +152,17 @@ def _build_distinctive_keyword_map() -> Dict[str, FrozenSet[str]]:
     from collections import Counter
     from src.agent.workflows.agent_registry import AGENT_REGISTRY
 
-    # Build raw keyword sets first (same logic as _build_keyword_map)
+    # Build raw keyword sets from deterministic trigger keywords, not from
+    # descriptive prose, so tie-breaking stays stable and domain-driven.
     raw_map: Dict[str, FrozenSet[str]] = {}
     for name, info in AGENT_REGISTRY.items():
-        desc = info.get("description", "")
-        words = frozenset(
-            w for w in re.findall(r"[a-z]{3,}", desc.lower())
-            if w not in _STOP_WORDS
+        trigger_kw = frozenset(
+            w
+            for kw in info.get("trigger_keywords", [])
+            for w in re.findall(r"[a-z]{3,}", kw.lower())
         )
-        raw_map[name] = words
+        name_tokens = frozenset(re.findall(r"[a-z]{3,}", name.lower()))
+        raw_map[name] = trigger_kw | name_tokens
 
     # Count how many agents each word appears in (document frequency)
     n_agents = len(raw_map)
@@ -235,6 +231,8 @@ Rules:
 - Only use names from this list: {valid_names}
 - Return [] (empty array) if no agent is needed (pure conversation / small talk)
 - Return multiple agents when the command spans more than one agent's capabilities
+- Prefer the MINIMUM number of agents needed to complete the request
+- Do NOT include an agent just because its description mentions downstream delivery, reports, images, email, or cross-agent workflows
 - Return agents in the order they should logically execute
 - Output ONLY the JSON array — no explanation, no markdown, no extra text
 
@@ -303,6 +301,9 @@ def _looks_like_fresh_web_query(command: str) -> bool:
         return False
 
     if re.search(r"\b(my|our)\b", lower):
+        return False
+
+    if re.search(r"\bhow are you(?: doing)?\b|\bhow'?s it going\b|\bwhat'?s up\b", lower):
         return False
 
     public_info_signals = (
@@ -376,6 +377,11 @@ def detect_agents_needed(command: str) -> Optional[List[str]]:
 
     valid = set(registered_agents())
 
+    fast_multi_route = _route_high_confidence_multi_agent(command, valid)
+    if fast_multi_route:
+        logger.info("Router [high-confidence multi]: %s", fast_multi_route.agents)
+        return fast_multi_route.agents
+
     if _looks_like_fresh_web_query(command) and "browser" in valid:
         logger.info("Router [freshness fast-path]: routing to browser")
         return ["browser"]
@@ -387,15 +393,18 @@ def detect_agents_needed(command: str) -> Optional[List[str]]:
 
     # ── Step 2: LLM-based detection (1 LLM call) ────────────────────────────
     try:
-        from src.agent.llm.llm_parser import get_llm_client
+        from src.agent.llm.llm_parser import get_llm_client, request_completion
         llm = get_llm_client()
 
         prompt = _build_routing_prompt(command)
-        response = llm.client.chat.completions.create(
-            model=llm.model,
+        response = request_completion(
+            llm=llm,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=30,
             temperature=0,
+            timeout=40,
+            purpose="routing",
+            allow_local_fallback=True,
         )
         raw = response.choices[0].message.content.strip()
 
@@ -424,10 +433,11 @@ def detect_agents_needed(command: str) -> Optional[List[str]]:
     kmap = _get_keyword_map()
     lower = command.lower()
     cmd_words = set(re.findall(r"[a-z]{3,}", lower))
+    cmd_stems = cmd_words | {_stem(word) for word in cmd_words}
 
     matched: List[str] = [
         agent for agent, keywords in kmap.items()
-        if keywords & cmd_words
+        if (keywords | {_stem(word) for word in keywords}) & cmd_stems
     ]
 
     if not matched:
@@ -494,6 +504,40 @@ class IntentResult:
         return self.category == "fresh_task"
 
 
+@dataclass
+class ClassificationStageResult:
+    category: str
+    reason: str = ""
+    preset_agents: List[str] = field(default_factory=list)
+    source: str = "heuristic"
+
+
+@dataclass
+class ContextResolutionStageResult:
+    category: str
+    reason: str = ""
+    context_agent: str = ""
+    default_agents: List[str] = field(default_factory=list)
+    active_context: Optional[dict] = None
+    session_state: Optional[dict] = None
+
+
+@dataclass
+class PlanningStageResult:
+    category: str
+    agents: List[str] = field(default_factory=list)
+    reason: str = ""
+    source: str = "heuristic"
+
+
+@dataclass
+class RoutingPipelineResult:
+    classification: ClassificationStageResult
+    context_resolution: ContextResolutionStageResult
+    planning: PlanningStageResult
+    intent: IntentResult
+
+
 _EMAIL_ADDRESS_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 _EXPLICIT_EMAIL_DELIVERY_RE = re.compile(r"\b(email|mail|inbox|gmail|outlook)\b", re.IGNORECASE)
 _CURRENT_CHANNEL_DELIVERY_RE = re.compile(
@@ -503,6 +547,103 @@ _CURRENT_CHANNEL_DELIVERY_RE = re.compile(
     r"|\bdownload\s+(it|them|those|that)\b",
     re.IGNORECASE,
 )
+_MAILBOX_DOMAIN_RE = re.compile(r"\b(email|emails|mail|mails|gmail|inbox|spam|junk)\b", re.IGNORECASE)
+_MAILBOX_TIME_RE = re.compile(
+    r"\b(today|today's|yesterday|yesterday's|last\s+week|this\s+week|last\s+month|between|from|since|before|after|on)\b"
+    r"|\b\d{4}-\d{2}-\d{2}\b"
+    r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b",
+    re.IGNORECASE,
+)
+_FILENAME_SEARCH_RE = re.compile(
+    r"\b(filename|file\s*name)\b.*\bcontain(?:s|ing)?\b"
+    r"|\bcontain(?:s|ing)?\b.*\b(filename|file\s*name)\b",
+    re.IGNORECASE,
+)
+_FOLLOWUP_NOISY_TOKENS: FrozenSet[str] = frozenset(
+    {"can", "could", "would", "please", "show", "check", "tell", "give", "work", "best", "free", "time"}
+)
+
+
+def _looks_like_mailbox_query(command: str) -> bool:
+    lower = str(command or "").lower().strip()
+    if not lower or not _MAILBOX_DOMAIN_RE.search(lower):
+        return False
+    if re.search(r"\b(calendar|meeting|meetings|event|events|schedule|scheduler|drive|file|files|folder|folders|linkedin|whatsapp|telegram)\b", lower):
+        return False
+    if _MAILBOX_TIME_RE.search(lower):
+        return True
+    if re.search(r"\b(list|show|find|search|count|what|which|latest|recent|unread|received)\b", lower):
+        return True
+    return False
+
+
+def _looks_like_filename_search(command: str) -> bool:
+    lower = str(command or "").lower().strip()
+    if not lower or not _FILENAME_SEARCH_RE.search(lower):
+        return False
+    return bool(
+        re.search(
+            r"\b(file|files|image|images|photo|photos|picture|pictures|video|videos|document|documents|pdf)\b",
+            lower,
+        )
+    )
+
+
+def _looks_like_local_file_search(command: str) -> bool:
+    lower = str(command or "").lower().strip()
+    if not lower:
+        return False
+    if re.search(r"\b(gdrive|google drive|drive link|shared drive)\b", lower):
+        return False
+    if not re.search(
+        r"\b(folder|folders|pdf|image|images|photo|photos|video|videos|payslip|invoice|receipt|computer|laptop|desktop|downloads|documents|resume|letter|letters)\b",
+        lower,
+    ):
+        return False
+    return bool(re.search(r"\b(find|search|look for|locate|zip|copy|move|rename|delete|show|list|count|download)\b", lower))
+
+
+def _looks_like_explicit_email_delivery(command: str) -> bool:
+    lower = str(command or "").lower().strip()
+    if not lower:
+        return False
+    if _EMAIL_ADDRESS_RE.search(lower):
+        return True
+    return bool(re.search(r"\b(email|mail|send (?:it|them|that).*(?:email|mail))\b", lower))
+
+
+def _route_high_confidence_multi_agent(command: str, valid: set[str]) -> Optional[IntentResult]:
+    lower = str(command or "").lower().strip()
+    drive_explicit = bool(
+        re.search(r"\b(gdrive|google drive|shared drive)\b", lower)
+        or re.search(r"\bupload\b.*\bdrive\b", lower)
+        or re.search(r"\bdrive\b.*\bupload\b", lower)
+    )
+    if "files" in valid and "email" in valid and not drive_explicit and _looks_like_local_file_search(command) and _looks_like_explicit_email_delivery(command):
+        return IntentResult(
+            category="fresh_task",
+            agents=["files", "email"],
+            reason="high-confidence: local file search plus email delivery",
+        )
+    return None
+
+
+def _route_high_confidence_single_agent(command: str, valid: set[str]) -> Optional[IntentResult]:
+    if "files" in valid and _looks_like_filename_search(command):
+        return IntentResult(
+            category="fresh_task",
+            agents=["files"],
+            reason="high-confidence: filename-based local file search",
+        )
+
+    if "email" in valid and _looks_like_mailbox_query(command):
+        return IntentResult(
+            category="fresh_task",
+            agents=["email"],
+            reason="high-confidence: mailbox query",
+        )
+
+    return None
 
 
 def _normalize_followup_agents(command: str, active_context: Optional[dict], agents: List[str]) -> List[str]:
@@ -524,23 +665,15 @@ def _normalize_followup_agents(command: str, active_context: Optional[dict], age
     return normalized
 
 
-def _build_intent_prompt(
+def _build_classification_prompt(
     command: str,
     active_context: Optional[dict],
     session_state: Optional[dict],
-    agent_registry: dict,
 ) -> str:
-    """Build the unified intent-routing prompt for the LLM."""
-    agent_lines = "\n".join(
-        f'  "{name}": {info["description"]}'
-        for name, info in agent_registry.items()
-    )
-    valid_names = json.dumps(list(agent_registry.keys()))
-
-    # --- Active context block ------------------------------------------------
+    """Build the stage-1 classification prompt for the LLM."""
     if active_context:
-        ctx_agent    = active_context.get("agent", "?")
-        ctx_topic    = active_context.get("topic", "?")
+        ctx_agent = active_context.get("agent", "?")
+        ctx_topic = active_context.get("topic", "?")
         ctx_awaiting = active_context.get("awaiting", "?")
         ctx_entities = active_context.get("resolved_entities", {})
         entities_str = json.dumps(ctx_entities, ensure_ascii=False)[:500]
@@ -552,7 +685,6 @@ def _build_intent_prompt(
     else:
         context_block = "(none — no active context from previous turn)"
 
-    # --- Session state block -------------------------------------------------
     state_block = "(none)"
     if session_state:
         relevant = {
@@ -563,17 +695,14 @@ def _build_intent_prompt(
             state_block = json.dumps(relevant, ensure_ascii=False)[:400]
 
     return f"""\
-You are the intent router for a multi-agent AI personal assistant.
-Classify the user's message into exactly one category, then list which agents are needed.
+You are stage 1 of the intent router for a multi-agent AI personal assistant.
+Your only job is to classify the user's message into exactly one category.
 
 ## Active Context (from previous assistant turn)
 {context_block}
 
 ## Session State (extracted facts)
 {state_block}
-
-## Available Agents
-{agent_lines}
 
 ## Three Categories
 
@@ -596,9 +725,6 @@ that refer to something already found/listed/searched.
 → "Book the 2 PM slot" (after listing calendar free slots)           → ["scheduler"]
 → "Can you update me on my search?" (after file search)              → ["files"]
 → "Send those to alice@example.com" (after finding files)            → ["files","email"]
-For CONTEXT_FOLLOWUP: include the source agent from context PLUS any new agent the
-action requires. Current-channel delivery phrases like "send it to me" or "share it here"
-stay on the files agent unless the user explicitly says email/mail or provides an email address.
 
 ─── FRESH_TASK ──────────────────────────────────────────────────────────────
 A new actionable request for specific agents. No pronouns referring to prior results.
@@ -611,15 +737,419 @@ A new actionable request for specific agents. No pronouns referring to prior res
 
 ## Rules
 1. NEVER return "context_followup" when active context is "(none)".
-2. Return "chat" for pure conversation — no agents needed.
-3. Only include agent names from: {valid_names}
-4. If unsure between fresh_task and context_followup and context IS active,
+2. Return "chat" for pure conversation.
+3. If unsure between fresh_task and context_followup and context IS active,
    prefer context_followup for short commands with pronouns.
 
 Return ONLY a single-line JSON object (no markdown, no explanation):
-{{"category": "chat|context_followup|fresh_task", "agents": [...], "reason": "one sentence"}}
+{{"category": "chat|context_followup|fresh_task", "reason": "one sentence"}}
 
 User message: {command}"""
+
+
+def _build_planning_prompt(
+    command: str,
+    category: str,
+    active_context: Optional[dict],
+    session_state: Optional[dict],
+    agent_registry: dict,
+    default_agents: Optional[List[str]] = None,
+) -> str:
+    """Build the stage-3 agent planning prompt for the LLM."""
+    agent_lines = "\n".join(
+        f'  "{name}": {info["description"]}'
+        for name, info in agent_registry.items()
+    )
+    valid_names = json.dumps(list(agent_registry.keys()))
+    default_agents = default_agents or []
+
+    if active_context:
+        ctx_agent = active_context.get("agent", "?")
+        ctx_topic = active_context.get("topic", "?")
+        ctx_awaiting = active_context.get("awaiting", "?")
+        ctx_entities = active_context.get("resolved_entities", {})
+        entities_str = json.dumps(ctx_entities, ensure_ascii=False)[:500]
+        context_block = (
+            f"ACTIVE — source_agent={ctx_agent} | topic={ctx_topic} | "
+            f"awaiting={ctx_awaiting}\n"
+            f"data: {entities_str}"
+        )
+    else:
+        context_block = "(none — no active context from previous turn)"
+
+    state_block = "(none)"
+    if session_state:
+        relevant = {
+            k: v for k, v in session_state.items()
+            if k in ("last_found_file_path", "last_found_folder", "last_found_bundle_dir", "file_manifest", "found_count", "last_assistant_action") and v
+        }
+        if relevant:
+            state_block = json.dumps(relevant, ensure_ascii=False)[:400]
+
+    if category == "context_followup":
+        category_rules = (
+            "The message is already classified as CONTEXT_FOLLOWUP. "
+            "Include the source agent from active context plus any additional agent needed to complete the action. "
+            "Current-channel delivery phrases like 'send it to me' or 'share it here' stay on the files agent unless the user explicitly says email/mail or provides an email address."
+        )
+    else:
+        category_rules = (
+            "The message is already classified as FRESH_TASK. "
+            "Return the minimum agent set needed to complete the new request."
+        )
+
+    default_block = json.dumps(default_agents)
+    return f"""\
+You are stage 3 of the intent router for a multi-agent AI personal assistant.
+The message category has already been classified as {category!r}.
+
+## Active Context
+{context_block}
+
+## Session State
+{state_block}
+
+## Available Agents
+{agent_lines}
+
+## Planning Rules
+{category_rules}
+- Prefer the MINIMUM number of agents needed to complete the request.
+- Only include names from this list: {valid_names}
+- Default context agents, if useful: {default_block}
+- Return [] only if no agent is required for the already-classified category.
+
+Return ONLY a single-line JSON object (no markdown, no explanation):
+{{"agents": [...], "reason": "one sentence"}}
+
+User message: {command}"""
+
+
+def _classify_message(
+    command: str,
+    active_context: Optional[dict],
+    session_state: Optional[dict],
+    valid: set[str],
+) -> ClassificationStageResult:
+    fast_multi_route = _route_high_confidence_multi_agent(command, valid)
+    if fast_multi_route:
+        return ClassificationStageResult(
+            category=fast_multi_route.category,
+            reason=fast_multi_route.reason,
+            preset_agents=list(fast_multi_route.agents),
+            source="high_confidence",
+        )
+
+    fast_route = _route_high_confidence_single_agent(command, valid)
+    if fast_route:
+        return ClassificationStageResult(
+            category=fast_route.category,
+            reason=fast_route.reason,
+            preset_agents=list(fast_route.agents),
+            source="high_confidence",
+        )
+
+    if (
+        _looks_like_fresh_web_query(command)
+        and "browser" in valid
+        and not (active_context and _looks_like_pronoun_followup(command))
+    ):
+        return ClassificationStageResult(
+            category="fresh_task",
+            reason="freshness-priority: public-web query",
+            preset_agents=["browser"],
+            source="freshness_priority",
+        )
+
+    if active_context and _looks_like_pronoun_followup(command):
+        return ClassificationStageResult(
+            category="context_followup",
+            reason="heuristic: pronoun follow-up with active context",
+            source="pronoun_followup",
+        )
+
+    has_keywords = keyword_pre_filter(command)
+    if active_context is None and not has_keywords:
+        return ClassificationStageResult(
+            category="chat",
+            reason="fast-path: no agent keywords and no active context",
+            source="fast_path",
+        )
+
+    try:
+        from src.agent.llm.llm_parser import get_llm_client, request_completion
+
+        prompt = _build_classification_prompt(command, active_context, session_state)
+        llm = get_llm_client()
+        response = request_completion(
+            llm=llm,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=60,
+            temperature=0,
+            timeout=40,
+            purpose="intent_classification",
+            allow_local_fallback=True,
+        )
+        raw = response.choices[0].message.content.strip()
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
+        parsed = json.loads(raw)
+        category = str(parsed.get("category", "")).lower().replace("-", "_")
+        if category not in ("chat", "context_followup", "fresh_task"):
+            raise ValueError(f"Unexpected category: {category!r}")
+        return ClassificationStageResult(
+            category=category,
+            reason=str(parsed.get("reason", "") or "llm classification"),
+            source="llm",
+        )
+    except Exception as exc:
+        logger.warning("Router classification failed (%s) — using heuristic fallback", exc)
+
+    if active_context and _looks_like_pronoun_followup(command):
+        category = "context_followup"
+        reason = "classification fallback: pronoun + active context"
+    elif has_keywords:
+        category = "fresh_task"
+        reason = "classification fallback: agent keywords present"
+    else:
+        category = "chat"
+        reason = "classification fallback: no agent keywords"
+
+    return ClassificationStageResult(category=category, reason=reason, source="fallback")
+
+
+def _resolve_context_stage(
+    command: str,
+    classification: ClassificationStageResult,
+    active_context: Optional[dict],
+    session_state: Optional[dict],
+    valid: set[str],
+) -> ContextResolutionStageResult:
+    del command
+
+    category = classification.category
+    reason_parts = [classification.reason] if classification.reason else []
+    context_agent = ""
+    default_agents: List[str] = []
+
+    if category == "context_followup":
+        if not active_context:
+            category = "fresh_task"
+            reason_parts.append("demoted: no active context available")
+        else:
+            context_agent = str(active_context.get("agent", "") or "").strip().lower()
+            if context_agent in valid:
+                default_agents = [context_agent]
+                reason_parts.append(f"bound to active context agent '{context_agent}'")
+            else:
+                reason_parts.append("active context agent unavailable in registry")
+
+    return ContextResolutionStageResult(
+        category=category,
+        reason="; ".join(part for part in reason_parts if part),
+        context_agent=context_agent,
+        default_agents=default_agents,
+        active_context=active_context,
+        session_state=session_state,
+    )
+
+
+def _keyword_plan_agents(
+    command: str,
+    active_context: Optional[dict],
+    category: str,
+    valid: set[str],
+    default_agents: Optional[List[str]] = None,
+) -> List[str]:
+    default_agents = [agent for agent in (default_agents or []) if agent in valid]
+
+    kmap = _get_keyword_map()
+    dmap = _get_distinctive_keyword_map()
+    lower = command.lower()
+    cmd_words = set(re.findall(r"[a-z]{3,}", lower))
+    cmd_stems = cmd_words | {_stem(word) for word in cmd_words}
+    broad_agents = [
+        ag for ag, kws in kmap.items()
+        if (kws | {_stem(word) for word in kws}) & cmd_stems
+    ]
+
+    if category == "context_followup" and broad_agents:
+        filtered_agents: List[str] = []
+        for agent in broad_agents:
+            agent_keywords = kmap.get(agent, frozenset())
+            matched_tokens = {
+                token for token in (agent_keywords | {_stem(word) for word in agent_keywords})
+                if token in cmd_stems
+            }
+            if any(token not in _FOLLOWUP_NOISY_TOKENS for token in matched_tokens):
+                filtered_agents.append(agent)
+        broad_agents = filtered_agents
+
+    if len(broad_agents) > 1:
+        distinctive_agents = [
+            ag for ag in broad_agents
+            if (dmap.get(ag, frozenset()) | {_stem(word) for word in dmap.get(ag, frozenset())}) & cmd_stems
+        ]
+        if distinctive_agents:
+            agents = distinctive_agents
+            logger.info(
+                "Router [keyword fallback:plan]: narrowed %s → %s via distinctive map",
+                broad_agents, distinctive_agents,
+            )
+        else:
+            _preference = ["files", "email", "calendar", "drive", "whatsapp",
+                           "file_organizer", "habit_tracker", "browser",
+                           "stock_market", "linkedin", "scheduler"]
+            agents = sorted(broad_agents, key=lambda a: _preference.index(a)
+                            if a in _preference else 999)[:1]
+            logger.info(
+                "Router [keyword fallback:plan]: all generic matches %s → picking %s",
+                broad_agents, agents,
+            )
+    else:
+        agents = broad_agents
+
+    if category == "context_followup" and default_agents:
+        combined: List[str] = []
+        for agent in [*default_agents, *agents]:
+            if agent in valid and agent not in combined:
+                combined.append(agent)
+        agents = combined or list(default_agents)
+
+    if category == "context_followup" and _EMAIL_ADDRESS_RE.search(command) and "email" in valid:
+        if "email" not in agents:
+            agents.append("email")
+
+    if not agents and category == "fresh_task" and _looks_like_fresh_web_query(command) and "browser" in valid:
+        return ["browser"]
+
+    return _normalize_followup_agents(command, active_context, agents)
+
+
+def _plan_agents_stage(
+    command: str,
+    classification: ClassificationStageResult,
+    context_resolution: ContextResolutionStageResult,
+    agent_registry: dict,
+    valid: set[str],
+) -> PlanningStageResult:
+    if classification.preset_agents:
+        return PlanningStageResult(
+            category=context_resolution.category,
+            agents=_normalize_followup_agents(command, context_resolution.active_context, list(classification.preset_agents)),
+            reason=classification.reason,
+            source=classification.source,
+        )
+
+    if context_resolution.category == "chat":
+        return PlanningStageResult(
+            category="chat",
+            agents=[],
+            reason=context_resolution.reason or "chat routing",
+            source="no_plan",
+        )
+
+    try:
+        from src.agent.llm.llm_parser import get_llm_client, request_completion
+
+        prompt = _build_planning_prompt(
+            command,
+            context_resolution.category,
+            context_resolution.active_context,
+            context_resolution.session_state,
+            agent_registry,
+            default_agents=context_resolution.default_agents,
+        )
+        llm = get_llm_client()
+        response = request_completion(
+            llm=llm,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=80,
+            temperature=0,
+            timeout=40,
+            purpose="agent_planning",
+            allow_local_fallback=True,
+        )
+        raw = response.choices[0].message.content.strip()
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
+        parsed = json.loads(raw)
+        planned_agents = [a.lower() for a in parsed.get("agents", []) if a.lower() in valid]
+        if context_resolution.category == "context_followup" and context_resolution.default_agents:
+            combined: List[str] = []
+            for agent in [*context_resolution.default_agents, *planned_agents]:
+                if agent in valid and agent not in combined:
+                    combined.append(agent)
+            planned_agents = combined or list(context_resolution.default_agents)
+        planned_agents = _normalize_followup_agents(command, context_resolution.active_context, planned_agents)
+        return PlanningStageResult(
+            category=context_resolution.category,
+            agents=planned_agents,
+            reason=str(parsed.get("reason", "") or context_resolution.reason or "llm planning"),
+            source="llm",
+        )
+    except Exception as exc:
+        logger.warning("Agent planning failed (%s) — using keyword fallback", exc)
+
+    planned_agents = _keyword_plan_agents(
+        command,
+        context_resolution.active_context,
+        context_resolution.category,
+        valid,
+        default_agents=context_resolution.default_agents,
+    )
+    return PlanningStageResult(
+        category=context_resolution.category,
+        agents=planned_agents,
+        reason=context_resolution.reason or "keyword fallback",
+        source="keyword_fallback",
+    )
+
+
+def run_routing_pipeline(
+    command: str,
+    active_context: Optional[dict] = None,
+    session_state: Optional[dict] = None,
+) -> RoutingPipelineResult:
+    from src.agent.workflows.agent_registry import AGENT_REGISTRY, registered_agents
+
+    valid = set(registered_agents())
+    classification = _classify_message(command, active_context, session_state, valid)
+    logger.info(
+        "Router [classify]: category=%s source=%s reason=%s preset_agents=%s",
+        classification.category,
+        classification.source,
+        classification.reason,
+        classification.preset_agents or [],
+    )
+
+    context_resolution = _resolve_context_stage(command, classification, active_context, session_state, valid)
+    logger.info(
+        "Router [resolve]: category=%s context_agent=%s default_agents=%s reason=%s",
+        context_resolution.category,
+        context_resolution.context_agent or "-",
+        context_resolution.default_agents or [],
+        context_resolution.reason,
+    )
+
+    planning = _plan_agents_stage(command, classification, context_resolution, AGENT_REGISTRY, valid)
+    logger.info(
+        "Router [plan]: category=%s source=%s agents=%s reason=%s",
+        planning.category,
+        planning.source,
+        planning.agents or [],
+        planning.reason,
+    )
+
+    intent = IntentResult(
+        category=planning.category,
+        agents=planning.agents,
+        reason=planning.reason,
+    )
+    return RoutingPipelineResult(
+        classification=classification,
+        context_resolution=context_resolution,
+        planning=planning,
+        intent=intent,
+    )
 
 
 def classify_and_route(
@@ -650,146 +1180,4 @@ def classify_and_route(
     -------
     IntentResult
     """
-    from src.agent.workflows.agent_registry import AGENT_REGISTRY, registered_agents
-
-    valid = set(registered_agents())
-
-    if (
-        _looks_like_fresh_web_query(command)
-        and "browser" in valid
-        and not (active_context and _looks_like_pronoun_followup(command))
-    ):
-        logger.info("Router [freshness priority]: routing to browser")
-        return IntentResult(
-            category="fresh_task",
-            agents=["browser"],
-            reason="freshness-priority: public-web query",
-        )
-
-    # ── Fast-paths: no context → either freshness browser route or chat ─────
-    # Saves one LLM call for common casual questions while still routing
-    # freshness-sensitive public-web queries to the browser agent.
-    if active_context is None:
-        if not keyword_pre_filter(command):
-            logger.info("Router [fast-path]: no context, no agent keywords → chat")
-            return IntentResult(
-                category="chat",
-                agents=[],
-                reason="fast-path: no agent keywords and no active context",
-            )
-
-    # ── LLM three-way classification ─────────────────────────────────────────
-    try:
-        from src.agent.llm.llm_parser import get_llm_client
-
-        prompt = _build_intent_prompt(command, active_context, session_state, AGENT_REGISTRY)
-        llm = get_llm_client()
-        response = llm.client.chat.completions.create(
-            model=llm.model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=100,
-            temperature=0,
-        )
-        raw = response.choices[0].message.content.strip()
-        # Tolerate models that wrap the JSON in code fences
-        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw).strip()
-        parsed = json.loads(raw)
-
-        category = parsed.get("category", "").lower().replace("-", "_")
-        if category not in ("chat", "context_followup", "fresh_task"):
-            raise ValueError(f"Unexpected category: {category!r}")
-
-        agents = [a.lower() for a in parsed.get("agents", []) if a.lower() in valid]
-        reason = parsed.get("reason", "")
-
-        # Safety guards ---------------------------------------------------
-        # 1. LLM returned context_followup but no active context exists
-        if category == "context_followup" and active_context is None:
-            logger.warning(
-                "Router: LLM returned context_followup but no active context — "
-                "demoting to fresh_task"
-            )
-            category = "fresh_task"
-
-        # 2. context_followup with empty agents → default to context source agent
-        if category == "context_followup" and not agents and active_context:
-            ctx_agent = active_context.get("agent", "")
-            if ctx_agent and ctx_agent in valid:
-                agents = [ctx_agent]
-
-        agents = _normalize_followup_agents(command, active_context, agents)
-
-        logger.info(
-            "Router [intent]: category=%s  agents=%s  reason=%s",
-            category, agents, reason,
-        )
-        return IntentResult(category=category, agents=agents, reason=reason)
-
-    except Exception as exc:
-        logger.warning("Intent classification failed (%s) — using keyword fallback", exc)
-
-    # ── Keyword fallback (LLM call failed) ───────────────────────────────────
-    # Use the broad map for matching (preserves "files", "email" etc.) but
-    # deduplicate with the IDF-filtered distinctive map: if an agent appears in
-    # both maps it gets a bonus score, preferring it over agents that only
-    # matched a generic word from the broad map.
-    kmap = _get_keyword_map()
-    dmap = _get_distinctive_keyword_map()
-    lower = command.lower()
-    cmd_words = set(re.findall(r"[a-z]{3,}", lower))
-    broad_agents = [ag for ag, kws in kmap.items() if kws & cmd_words]
-
-    # Prefer agents that also match on DISTINCTIVE keywords (IDF-filtered).
-    # This handles "payslip files" matching 6 agents through "files" — we keep
-    # only the ones with a stronger (non-generic) signal from the distinctive map.
-    if len(broad_agents) > 1:
-        distinctive_agents = [ag for ag in broad_agents if dmap.get(ag, frozenset()) & cmd_words]
-        if distinctive_agents:
-            agents = distinctive_agents
-            logger.info(
-                "Router [keyword fallback]: narrowed %s → %s via distinctive map",
-                broad_agents, distinctive_agents,
-            )
-        else:
-            # All matched only via generic words — keep the most likely one
-            # (files > drive > email > whatsapp by default preference order)
-            _preference = ["files", "email", "calendar", "drive", "whatsapp",
-                           "file_organizer", "habit_tracker", "browser",
-                           "stock_market", "linkedin", "scheduler"]
-            agents = sorted(broad_agents, key=lambda a: _preference.index(a)
-                            if a in _preference else 999)[:1]
-            logger.info(
-                "Router [keyword fallback]: all generic matches %s → picking %s",
-                broad_agents, agents,
-            )
-    else:
-        agents = broad_agents
-
-    # If context is active and the command has a pronoun, treat as follow-up
-    if active_context and not agents:
-        _pronoun_pat = re.compile(
-            r"\b(them|those|it|that|these|the files|the folder|the ones)\b",
-            re.IGNORECASE,
-        )
-        if _pronoun_pat.search(command):
-            ctx_agent = active_context.get("agent", "")
-            if ctx_agent and ctx_agent in valid:
-                logger.info("Router [keyword fallback]: pronoun + active context → context_followup")
-                return IntentResult(
-                    category="context_followup",
-                    agents=_normalize_followup_agents(command, active_context, [ctx_agent]),
-                    reason="keyword fallback: pronoun + active context",
-                )
-
-    if not agents and _looks_like_fresh_web_query(command) and "browser" in valid:
-        logger.info("Router [keyword fallback]: freshness-sensitive query → browser")
-        return IntentResult(
-            category="fresh_task",
-            agents=["browser"],
-            reason="keyword fallback: freshness-sensitive public-web query",
-        )
-
-    agents = _normalize_followup_agents(command, active_context, agents)
-    category = "fresh_task" if agents else "chat"
-    logger.info("Router [keyword fallback]: category=%s  agents=%s", category, agents)
-    return IntentResult(category=category, agents=agents, reason="keyword fallback")
+    return run_routing_pipeline(command, active_context, session_state).intent

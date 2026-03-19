@@ -24,8 +24,10 @@ def reset_llm_singleton():
     """Reset the module-level _llm_client singleton between tests."""
     import src.agent.llm.llm_parser as m
     m._llm_client = None
+    m._provider_clients = {}
     yield
     m._llm_client = None
+    m._provider_clients = {}
 
 
 def _make_llm():
@@ -195,6 +197,91 @@ class TestGetLlmClient:
             c1 = mod.get_llm_client()
             c2 = mod.get_llm_client()
         assert c1 is c2
+
+
+class TestPlannerLocalFallback:
+    def test_retryable_planning_error_uses_local_fallback(self):
+        import src.agent.llm.llm_parser as mod
+
+        primary_client = MagicMock()
+        primary_client.chat.completions.create.side_effect = RuntimeError("429 rate limit reached")
+
+        fallback_client = MagicMock()
+        fallback_client.chat.completions.create.return_value = _fake_completion('["files"]')
+
+        def fake_build_client(provider_name=None):
+            if provider_name == "gemma3_local":
+                return fallback_client, "google/gemma-3-4b-it", "local_hf"
+            return primary_client, "gpt-4o-mini", "openai_compatible"
+
+        provider_cfg = {
+            "active": "github_models",
+            "planner_fallback_enabled": True,
+            "planner_fallback_model": "gemma3_local",
+            "providers": {
+                "github_models": {"type": "openai_compatible"},
+                "gemma3_local": {"type": "local_hf"},
+            },
+        }
+
+        with patch("src.agent.llm.provider_registry.build_client", side_effect=fake_build_client), patch(
+            "src.agent.llm.provider_registry.load_provider_config",
+            return_value=provider_cfg,
+        ):
+            llm = mod.get_llm_client()
+            response = llm.create_chat_completion(
+                messages=[{"role": "user", "content": "Route this command"}],
+                temperature=0,
+                max_tokens=800,
+                timeout=40,
+                purpose="skill_dag_planning",
+                allow_local_fallback=True,
+            )
+
+        assert response.choices[0].message.content == '["files"]'
+        fallback_kwargs = fallback_client.chat.completions.create.call_args.kwargs
+        assert fallback_kwargs["max_tokens"] == 224
+        assert fallback_kwargs["temperature"] == 0.0
+
+    def test_non_retryable_error_does_not_use_local_fallback(self):
+        import src.agent.llm.llm_parser as mod
+
+        primary_client = MagicMock()
+        primary_client.chat.completions.create.side_effect = RuntimeError("401 invalid api key")
+
+        fallback_client = MagicMock()
+
+        def fake_build_client(provider_name=None):
+            if provider_name == "gemma3_local":
+                return fallback_client, "google/gemma-3-4b-it", "local_hf"
+            return primary_client, "gpt-4o-mini", "openai_compatible"
+
+        provider_cfg = {
+            "active": "github_models",
+            "planner_fallback_enabled": True,
+            "planner_fallback_model": "gemma3_local",
+            "providers": {
+                "github_models": {"type": "openai_compatible"},
+                "gemma3_local": {"type": "local_hf"},
+            },
+        }
+
+        with patch("src.agent.llm.provider_registry.build_client", side_effect=fake_build_client), patch(
+            "src.agent.llm.provider_registry.load_provider_config",
+            return_value=provider_cfg,
+        ):
+            llm = mod.get_llm_client()
+            with pytest.raises(RuntimeError, match="401"):
+                llm.create_chat_completion(
+                    messages=[{"role": "user", "content": "Plan this task"}],
+                    temperature=0,
+                    max_tokens=200,
+                    timeout=40,
+                    purpose="dag_planning",
+                    allow_local_fallback=True,
+                )
+
+        fallback_client.chat.completions.create.assert_not_called()
 
 
 if __name__ == "__main__":

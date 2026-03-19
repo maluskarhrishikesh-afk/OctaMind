@@ -72,9 +72,12 @@ Current high-value categories include:
 - provider rate limits
 - email follow-up selection failures
 - DAG planner fallbacks
+- planner-local fallback activations
 - general tool execution errors
 
 This turns operational failures into a durable tuning input for `skills.md`, `skill_context.md`, fallback rules, and planner result-shape conventions.
+
+The dashboard Log Analyser also reads structured telemetry counters from PA logs, including fast-path hits, context saves, and fallback-to-ReAct events.
 
 ---
 

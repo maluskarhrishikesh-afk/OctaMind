@@ -8,11 +8,14 @@ from __future__ import annotations
 import ast
 import json
 import re
-from typing import Any, Dict, Optional
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 from src.agent.runtime_paths import get_runtime_state_path
+from src.agent.telemetry import log_fallback_to_react, log_fast_path_hit
 
 
 _PENDING_MAILBOX_CLEANUP_PATH = get_runtime_state_path(
@@ -20,6 +23,102 @@ _PENDING_MAILBOX_CLEANUP_PATH = get_runtime_state_path(
     "email_mailbox_cleanup_pending.json",
     create_parent=True,
 )
+
+_EMAIL_ADDRESS_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+_EMAIL_SUMMARY_INTENT_RE = re.compile(r"\b(summary|summarize|summarise)\b", re.IGNORECASE)
+_EMAIL_SELECTION_RE = re.compile(
+    r"\b(first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last|latest)\b",
+    re.IGNORECASE,
+)
+_EMAIL_LIST_ACTION_RE = re.compile(r"\b(list|show|display)\b", re.IGNORECASE)
+_EMAIL_LIST_REFERENCE_RE = re.compile(
+    r"\b(emails?|mails?|messages?|them|those|all\s+of\s+them|all\s+\d+)\b",
+    re.IGNORECASE,
+)
+_EMAIL_COUNT_INTENT_RE = re.compile(
+    r"\b(how\s+many|count|did\s+i\s+receive\s+only|only\s+\d+\s+emails?)\b",
+    re.IGNORECASE,
+)
+_EMAIL_RELATIVE_DAY_RE = re.compile(r"\b(today|yesterday)\b", re.IGNORECASE)
+_EXPLICIT_EMAIL_DELIVERY_PHRASES = (
+    "email it to me",
+    "mail it to me",
+    "forward it to me",
+    "email this to me",
+    "mail this to me",
+    "forward this to me",
+    "email the summary to me",
+    "mail the summary to me",
+    "forward the summary to me",
+)
+_CURRENT_CHANNEL_DELIVERY_RE = re.compile(
+    r"\b(send|share|show|tell)\b.{0,24}\b(it|this|that|me|here)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_EMAIL_REFERENCE_STOP_WORDS = frozenset(
+    {
+        "the",
+        "email",
+        "mail",
+        "message",
+        "messages",
+        "one",
+        "ones",
+        "and",
+        "from",
+        "with",
+        "about",
+        "please",
+        "send",
+        "share",
+        "show",
+        "tell",
+        "summarize",
+        "summarise",
+        "summary",
+        "third",
+        "second",
+        "first",
+        "last",
+        "latest",
+        "me",
+        "it",
+        "to",
+        "here",
+    }
+)
+_COUNT_WORD_MAP = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+
+def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    fast_path = str(result.get("_fast_path", "") or result.get("action", "unknown"))
+    log_fast_path_hit("email", fast_path)
+    return result
+_ORDINAL_INDEX_MAP = {
+    "first": 0,
+    "1st": 0,
+    "second": 1,
+    "2nd": 1,
+    "third": 2,
+    "3rd": 2,
+    "fourth": 3,
+    "4th": 3,
+    "fifth": 4,
+    "5th": 4,
+    "last": -1,
+    "latest": -1,
+}
 
 
 def _coerce_report_content(content: Any) -> str:
@@ -121,6 +220,570 @@ def _get_session_id(artifacts_out: Optional[Dict[str, Any]]) -> str:
     if not isinstance(artifacts_out, dict):
         return ""
     return str(artifacts_out.get("_session_id", "") or "").strip()
+
+
+def _extract_ordinal_index(normalized_query: str) -> Optional[int]:
+    for token, index in _ORDINAL_INDEX_MAP.items():
+        if re.search(rf"\b{re.escape(token)}\b", normalized_query):
+            return index
+    return None
+
+
+def _extract_email_selection_indices(
+    raw_query: str,
+    normalized_query: str,
+    available_count: int,
+) -> List[int]:
+    if available_count <= 0:
+        return []
+    if not _EMAIL_SUMMARY_INTENT_RE.search(normalized_query):
+        return []
+    if "email" not in normalized_query and "emails" not in normalized_query:
+        return []
+
+    selections: List[int] = []
+    has_multi_separator = "," in raw_query or bool(re.search(r"\band\b", normalized_query))
+
+    for token, index in _ORDINAL_INDEX_MAP.items():
+        if re.search(rf"\b{re.escape(token)}\b", normalized_query):
+            resolved_index = available_count - 1 if index == -1 else index
+            if 0 <= resolved_index < available_count and resolved_index not in selections:
+                selections.append(resolved_index)
+
+    if has_multi_separator:
+        for match in re.finditer(r"\b(\d{1,2})(?:st|nd|rd|th)?\b", normalized_query):
+            resolved_index = int(match.group(1)) - 1
+            if 0 <= resolved_index < available_count and resolved_index not in selections:
+                selections.append(resolved_index)
+
+    return selections
+
+
+def _extract_requested_count(normalized_query: str) -> Optional[int]:
+    digit_match = re.search(r"\b(\d{1,2})\b", normalized_query)
+    if digit_match:
+        return max(int(digit_match.group(1)), 1)
+    for token, value in _COUNT_WORD_MAP.items():
+        if re.search(rf"\b{token}\b", normalized_query):
+            return value
+    return None
+
+
+def _read_email_context_entities() -> Dict[str, Any]:
+    try:
+        from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+        ctx = read_context(agent="email") or {}
+        entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+        return entities if isinstance(entities, dict) else {}
+    except Exception:
+        return {}
+
+
+def _read_files_context_entities() -> Dict[str, Any]:
+    try:
+        from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+        ctx = read_context(agent="files") or {}
+        entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+        return entities if isinstance(entities, dict) else {}
+    except Exception:
+        return {}
+
+
+def _read_listed_emails_from_context() -> List[Dict[str, Any]]:
+    try:
+        entities = _read_email_context_entities()
+        listed = entities.get("listed_emails", []) if isinstance(entities, dict) else []
+        return [item for item in listed if isinstance(item, dict) and str(item.get("id", "") or "").strip()]
+    except Exception:
+        return []
+
+
+def _extract_relative_day(normalized_query: str) -> str:
+    match = _EMAIL_RELATIVE_DAY_RE.search(str(normalized_query or ""))
+    return str(match.group(1) or "").lower() if match else ""
+
+
+def _build_relative_day_email_query(normalized_query: str, now: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
+    relative_day = _extract_relative_day(normalized_query)
+    if relative_day not in {"today", "yesterday"}:
+        return None
+
+    current = now or datetime.now()
+    target_day = current if relative_day == "today" else current - timedelta(days=1)
+    start_of_day = target_day.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = start_of_day + timedelta(days=1)
+    query = f"after:{int(start_of_day.timestamp())} before:{int(end_of_day.timestamp())} in:inbox"
+    return {
+        "relative_day": relative_day,
+        "query": query,
+        "label": f"{target_day.strftime('%B')} {target_day.day}, {target_day.year}",
+    }
+
+
+def _looks_like_relative_day_listing_intent(normalized_query: str) -> bool:
+    lowered = str(normalized_query or "").strip().lower()
+    if not lowered or not _extract_relative_day(lowered):
+        return False
+    if _EMAIL_SUMMARY_INTENT_RE.search(lowered):
+        return False
+    if _EMAIL_COUNT_INTENT_RE.search(lowered):
+        return False
+    return bool(
+        _EMAIL_LIST_ACTION_RE.search(lowered)
+        or re.search(r"\bwhat\s+emails?\b", lowered)
+        or re.search(r"\bwhich\s+emails?\b", lowered)
+    )
+
+
+def _looks_like_relative_day_count_intent(normalized_query: str) -> bool:
+    lowered = str(normalized_query or "").strip().lower()
+    if not lowered or not _extract_relative_day(lowered):
+        return False
+    return bool(_EMAIL_COUNT_INTENT_RE.search(lowered))
+
+
+def _format_relative_day_email_list_message(
+    emails: List[Dict[str, Any]],
+    total_count: int,
+    relative_day: str,
+    date_label: str,
+) -> str:
+    shown = len(emails)
+    if total_count <= 0:
+        return f"There were no emails received {relative_day}."
+
+    prefix = f"Here {'is' if shown == 1 else 'are'} {shown} of {total_count} email{'s' if total_count != 1 else ''} received {relative_day}"
+    if date_label:
+        prefix += f" ({date_label})"
+    prefix += ":"
+    lines = [prefix]
+    for index, item in enumerate(emails, start=1):
+        subject = str(item.get("subject", "No Subject") or "No Subject").strip()
+        sender = str(item.get("sender", "Unknown") or "Unknown").strip()
+        date = str(item.get("date", "") or "").strip()
+        snippet = str(item.get("snippet", "") or "").strip()
+        lines.append("")
+        lines.append(f"{index}. Subject: {subject}")
+        lines.append(f"   From: {sender}")
+        if date:
+            lines.append(f"   Date: {date}")
+        if snippet:
+            lines.append(f"   Preview: {snippet}")
+    if shown < total_count:
+        lines.append("")
+        lines.append(f"Showing the first {shown} emails from that day.")
+    return "\n".join(lines).strip()
+
+
+def _try_relative_day_email_list_or_count(
+    raw_query: str,
+    normalized_query: str,
+    all_tools: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    day_info = _build_relative_day_email_query(normalized_query)
+    if not day_info:
+        return None
+
+    if not (_looks_like_relative_day_listing_intent(normalized_query) or _looks_like_relative_day_count_intent(normalized_query)):
+        return None
+
+    count_result = all_tools["count_matching_emails"](day_info["query"])
+    if count_result.get("status") != "success":
+        return count_result
+
+    total_count = int(count_result.get("total_count", 0) or 0)
+    if _looks_like_relative_day_count_intent(normalized_query):
+        return {
+            "status": "success",
+            "action": "count_matching_emails",
+            "_fast_path": "relative_day_email_count",
+            "query": day_info["query"],
+            "total_count": total_count,
+            "message": f"You received {total_count} email{'s' if total_count != 1 else ''} {day_info['relative_day']}."
+            + (f" ({day_info['label']})" if day_info["label"] else ""),
+        }
+
+    requested_count = _extract_requested_count(normalized_query)
+    display_count = requested_count if requested_count is not None else min(total_count, 10)
+    if "all" in normalized_query and requested_count is None:
+        display_count = min(total_count, 10)
+    if total_count <= 0:
+        return {
+            "status": "success",
+            "action": "list_emails",
+            "_fast_path": "relative_day_email_list",
+            "query": day_info["query"],
+            "emails": [],
+            "count": 0,
+            "total_count": 0,
+            "message": f"There were no emails received {day_info['relative_day']}."
+            + (f" ({day_info['label']})" if day_info["label"] else ""),
+        }
+
+    list_result = all_tools["list_emails"](query=day_info["query"], max_results=max(display_count, 1))
+    if list_result.get("status") != "success":
+        return list_result
+
+    emails = list_result.get("results", []) if isinstance(list_result, dict) else []
+    list_result["total_count"] = total_count
+    try:
+        from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
+
+        auto_save_email_context({
+            "results": emails,
+            "count": len(emails),
+            "total_count": total_count,
+        }, day_info["query"])
+    except Exception:
+        pass
+
+    return {
+        "status": "success",
+        "action": "list_emails",
+        "_fast_path": "relative_day_email_list",
+        "query": day_info["query"],
+        "emails": emails,
+        "count": len(emails),
+        "total_count": total_count,
+        "message": _format_relative_day_email_list_message(
+            emails,
+            total_count,
+            day_info["relative_day"],
+            day_info["label"],
+        ),
+    }
+
+
+def _email_reference_tokens(raw_query: str) -> List[str]:
+    cleaned = re.sub(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", " ", str(raw_query or ""), flags=re.IGNORECASE)
+    tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]{3,}", cleaned.lower())
+        if token not in _EMAIL_REFERENCE_STOP_WORDS
+    ]
+    return tokens
+
+
+def _resolve_email_from_context(raw_query: str, normalized_query: str) -> Optional[Dict[str, Any]]:
+    try:
+        emails = _read_listed_emails_from_context()
+        if not emails:
+            return None
+
+        ordinal_index = _extract_ordinal_index(normalized_query)
+        if ordinal_index is not None:
+            if ordinal_index == -1:
+                return emails[-1]
+            if 0 <= ordinal_index < len(emails):
+                return emails[ordinal_index]
+
+        tokens = _email_reference_tokens(raw_query)
+        if not tokens:
+            return None
+
+        scored: List[tuple[int, Dict[str, Any]]] = []
+        for item in emails:
+            blob = " ".join(
+                [
+                    str(item.get("subject", "") or ""),
+                    str(item.get("sender", "") or ""),
+                    str(item.get("snippet", "") or ""),
+                ]
+            ).lower()
+            score = sum(1 for token in tokens if token in blob)
+            if score:
+                scored.append((score, item))
+        if not scored:
+            return None
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        top_score = scored[0][0]
+        top_items = [item for score, item in scored if score == top_score]
+        return top_items[0] if len(top_items) == 1 else None
+    except Exception:
+        return None
+
+
+def _resolve_email_selection_from_context(raw_query: str, normalized_query: str) -> List[Dict[str, Any]]:
+    emails = _read_listed_emails_from_context()
+    if not emails:
+        return []
+
+    indices = _extract_email_selection_indices(raw_query, normalized_query, len(emails))
+    if indices:
+        return [emails[index] for index in indices if 0 <= index < len(emails)]
+
+    selected = _resolve_email_from_context(raw_query, normalized_query)
+    return [selected] if selected else []
+
+
+def _looks_like_listed_email_display_intent(normalized_query: str) -> bool:
+    lowered = str(normalized_query or "").strip().lower()
+    if not lowered:
+        return False
+    if _EMAIL_SUMMARY_INTENT_RE.search(lowered):
+        return False
+    if re.search(r"\b(reply|forward|delete|archive|send)\b", lowered):
+        return False
+    if not _EMAIL_LIST_ACTION_RE.search(lowered):
+        return False
+    return bool(_EMAIL_LIST_REFERENCE_RE.search(lowered))
+
+
+def _format_listed_emails_message(emails: List[Dict[str, Any]]) -> str:
+    count = len(emails)
+    lines = [f"Here {'is' if count == 1 else 'are'} the {count} email{'s' if count != 1 else ''} from the current list:"]
+    for index, item in enumerate(emails, start=1):
+        subject = str(item.get("subject", "No Subject") or "No Subject").strip()
+        sender = str(item.get("sender", "Unknown") or "Unknown").strip()
+        date = str(item.get("date", "") or "").strip()
+        snippet = str(item.get("snippet", "") or "").strip()
+        lines.append("")
+        lines.append(f"{index}. Subject: {subject}")
+        lines.append(f"   From: {sender}")
+        if date:
+            lines.append(f"   Date: {date}")
+        if snippet:
+            lines.append(f"   Preview: {snippet}")
+    return "\n".join(lines).strip()
+
+
+def _try_listed_email_display_followup(normalized_query: str, all_tools: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not _looks_like_listed_email_display_intent(normalized_query):
+        return None
+
+    entities = _read_email_context_entities()
+    emails = _read_listed_emails_from_context()
+    if not emails:
+        return None
+
+    requested_count = _extract_requested_count(normalized_query)
+    total_count = int(entities.get("total_count", len(emails)) or len(emails))
+    query = str(entities.get("query", "") or "").strip()
+
+    if requested_count is not None and query and requested_count > len(emails):
+        list_result = all_tools["list_emails"](query=query, max_results=requested_count)
+        if list_result.get("status") == "success":
+            refreshed = list_result.get("results", []) if isinstance(list_result, dict) else []
+            if isinstance(refreshed, list) and refreshed:
+                emails = refreshed
+                try:
+                    from src.agent.manifest.context_manifest import auto_save_email_context  # noqa: PLC0415
+
+                    auto_save_email_context(
+                        {
+                            "results": emails,
+                            "count": len(emails),
+                            "total_count": max(total_count, len(emails)),
+                        },
+                        query,
+                    )
+                except Exception:
+                    pass
+
+    display_emails = emails[:requested_count] if requested_count is not None else emails
+    if not display_emails:
+        return None
+
+    message = _format_listed_emails_message(display_emails)
+    if requested_count is not None and total_count > len(display_emails):
+        message = f"{message}\n\nShowing {len(display_emails)} of {total_count} emails from the current list."
+
+    return {
+        "status": "success",
+        "action": "list_emails",
+        "_fast_path": "listed_email_display",
+        "message": message,
+        "emails": display_emails,
+        "count": len(display_emails),
+        "total_count": max(total_count, len(display_emails)),
+    }
+
+
+def _looks_like_selected_email_summary_intent(normalized_query: str) -> bool:
+    if not _EMAIL_SUMMARY_INTENT_RE.search(normalized_query):
+        return False
+    if _EMAIL_SELECTION_RE.search(normalized_query):
+        return True
+    if " email " in f" {normalized_query} ":
+        return True
+    return bool(
+        re.search(
+            r"\b\d{1,2}(?:st|nd|rd|th)?(?:\s*,\s*\d{1,2}(?:st|nd|rd|th)?)*(?:\s*(?:,?\s*and\s+\d{1,2}(?:st|nd|rd|th)?))?\s+emails?\b",
+            normalized_query,
+        )
+    )
+
+
+def _extract_delivery_recipient(raw_query: str) -> str:
+    address_match = _EMAIL_ADDRESS_RE.search(str(raw_query or ""))
+    if address_match:
+        return address_match.group(0).strip()
+    normalized_query = _normalize_query_text(raw_query)
+    if any(phrase in normalized_query for phrase in _EXPLICIT_EMAIL_DELIVERY_PHRASES):
+        return "me"
+    return ""
+
+
+def _resolve_file_attachment_from_context() -> str:
+    entities = _read_files_context_entities()
+
+    selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+    if isinstance(selected_paths, list):
+        for raw_path in selected_paths:
+            candidate = str(raw_path or "").strip()
+            if candidate and Path(candidate).exists() and Path(candidate).is_file():
+                return candidate
+
+    listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+    if isinstance(listed_files, list):
+        for item in listed_files:
+            if not isinstance(item, dict):
+                continue
+            candidate = str(item.get("path", "") or "").strip()
+            if candidate and Path(candidate).exists() and Path(candidate).is_file():
+                return candidate
+
+    return ""
+
+
+def _try_context_file_attachment_delivery(
+    raw_query: str,
+    normalized_query: str,
+    all_tools: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if "send_email_with_attachment" not in all_tools:
+        return None
+    recipient = _extract_delivery_recipient(raw_query)
+    if not recipient and re.search(r"\b(mail|email|forward|send)\b.{0,24}\b(it|this|that)\b.{0,24}\bto\s+me\b", normalized_query):
+        recipient = "me"
+    if not recipient:
+        return None
+    if _EMAIL_SUMMARY_INTENT_RE.search(normalized_query):
+        return None
+    if not any(token in normalized_query for token in ("mail", "email", "forward", "send")):
+        return None
+
+    attachment_path = _resolve_file_attachment_from_context()
+    if not attachment_path:
+        return None
+
+    attachment_name = Path(attachment_path).name
+    delivery_result = all_tools["send_email_with_attachment"](
+        recipient,
+        f"Requested file: {attachment_name}",
+        f"Please find the attached file: {attachment_name}",
+        attachment_path,
+    )
+    if delivery_result.get("status") != "success":
+        return delivery_result
+
+    return {
+        "status": "success",
+        "action": "send_email_with_attachment",
+        "_fast_path": "context_file_attachment_delivery",
+        "message": f"I emailed {attachment_name} to {recipient}.",
+        "attachment_path": attachment_path,
+        "delivery": delivery_result,
+    }
+
+
+def _format_email_summary_message(summary_result: Dict[str, Any]) -> str:
+    subject = str(summary_result.get("subject", "No Subject") or "No Subject").strip()
+    sender = str(summary_result.get("sender", "Unknown") or "Unknown").strip()
+    date = str(summary_result.get("date", "") or "").strip()
+    summary = str(summary_result.get("summary", "") or "").strip()
+    key_points = summary_result.get("key_points", []) if isinstance(summary_result, dict) else []
+    action_items = summary_result.get("action_items", []) if isinstance(summary_result, dict) else []
+
+    lines = [
+        f"Email Summary\nSubject: {subject}",
+        f"From: {sender}",
+    ]
+    if date:
+        lines.append(f"Date: {date}")
+    if summary:
+        lines.append("")
+        lines.append(summary)
+    if isinstance(key_points, list) and key_points:
+        lines.append("")
+        lines.append("Key points:")
+        lines.extend(f"- {str(point).strip()}" for point in key_points if str(point).strip())
+    if isinstance(action_items, list) and action_items:
+        lines.append("")
+        lines.append("Action items:")
+        lines.extend(f"- {str(item).strip()}" for item in action_items if str(item).strip())
+    return "\n".join(lines).strip()
+
+
+def _format_email_summaries_message(summary_results: List[Dict[str, Any]]) -> str:
+    if not summary_results:
+        return ""
+    if len(summary_results) == 1:
+        return _format_email_summary_message(summary_results[0])
+
+    sections: List[str] = []
+    for index, result in enumerate(summary_results, start=1):
+        sections.append(f"Email {index}\n{_format_email_summary_message(result)}")
+    return "\n\n".join(sections).strip()
+
+
+def _try_selected_email_summary_followup(
+    raw_query: str,
+    normalized_query: str,
+    all_tools: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    if not _looks_like_selected_email_summary_intent(normalized_query):
+        return None
+
+    selected_emails = _resolve_email_selection_from_context(raw_query, normalized_query)
+    if not selected_emails:
+        return None
+
+    summary_results: List[Dict[str, Any]] = []
+    for selected_email in selected_emails:
+        summary_result = all_tools["summarize_email"](selected_email.get("id", ""))
+        if summary_result.get("status") != "success":
+            return summary_result
+        summary_results.append(summary_result)
+
+    message = _format_email_summaries_message(summary_results)
+    recipient = _extract_delivery_recipient(raw_query)
+    if recipient:
+        subject = (
+            f"Email Summary: {summary_results[0].get('subject', 'Selected Email')}"
+            if len(summary_results) == 1
+            else f"Email Summaries: {len(summary_results)} selected emails"
+        )
+        email_result = all_tools["send_email"](
+            recipient,
+            subject,
+            message,
+        )
+        if email_result.get("status") != "success":
+            return email_result
+        return {
+            "status": "success",
+            "action": "summarize_email",
+            "_fast_path": "selected_email_summary",
+            "message": f"{message}\n\nThe summary was emailed to {recipient}.",
+            "summary_result": summary_results[0] if len(summary_results) == 1 else None,
+            "summary_results": summary_results,
+            "delivery": email_result,
+        }
+
+    if _CURRENT_CHANNEL_DELIVERY_RE.search(raw_query) or not recipient:
+        return {
+            "status": "success",
+            "action": "summarize_email",
+            "_fast_path": "selected_email_summary",
+            "message": message,
+            "summary_result": summary_results[0] if len(summary_results) == 1 else None,
+            "summary_results": summary_results,
+        }
+
+    return None
 
 
 def _mailbox_cleanup_scope(normalized_query: str) -> str:
@@ -342,10 +1005,18 @@ def _build_all_tools() -> Dict[str, Any]:
 
     def _wrap_email_listing(messages: Any, query: str, label: str) -> dict:
         emails = messages if isinstance(messages, list) else []
-        auto_save_email_context(emails, query)
+        auto_save_email_context(
+            {
+                "results": emails,
+                "count": len(emails),
+                "total_count": len(emails),
+            },
+            query,
+        )
         return {
             "status": "success",
             "count": len(emails),
+            "total_count": len(emails),
             "query": query,
             "results": emails,
             "emails": emails,
@@ -791,7 +1462,7 @@ def execute_with_llm_orchestration(
             result.setdefault("action", pending_action)
             result.setdefault("_fast_path", "mailbox_cleanup")
             result["preview"] = pending_cleanup.get("preview", {})
-            return result
+            return _return_fast_path_result(result)
 
     if is_sender_rule_intent and "create_smart_label_rule" in all_tools:
         request = _extract_sender_rule_request(fast_path_query)
@@ -799,7 +1470,9 @@ def execute_with_llm_orchestration(
             label_name=request["label_name"],
             from_email=request["from_email"],
         )
-        return _format_sender_rule_result(result, request["from_email"], request["label_name"])
+        return _return_fast_path_result(
+            _format_sender_rule_result(result, request["from_email"], request["label_name"])
+        )
 
     if is_mailbox_preview:
         preview = all_tools["list_all_filters_and_labels"]()
@@ -808,7 +1481,7 @@ def execute_with_llm_orchestration(
         preview.setdefault("action", "list_all_filters_and_labels")
         preview.setdefault("_fast_path", "mailbox_cleanup_preview")
         preview["message"] = _format_mailbox_preview(preview)
-        return preview
+        return _return_fast_path_result(preview)
 
     if is_mailbox_cleanup:
         cleanup_scope = _mailbox_cleanup_scope(normalized_query)
@@ -852,7 +1525,35 @@ def execute_with_llm_orchestration(
         result.setdefault("action", cleanup_action)
         result.setdefault("_fast_path", "mailbox_cleanup")
         result["preview"] = preview
-        return result
+        return _return_fast_path_result(result)
+
+    attachment_delivery = _try_context_file_attachment_delivery(
+        fast_path_query,
+        normalized_query,
+        all_tools,
+    )
+    if attachment_delivery is not None:
+        return _return_fast_path_result(attachment_delivery)
+
+    relative_day_email_result = _try_relative_day_email_list_or_count(
+        fast_path_query,
+        normalized_query,
+        all_tools,
+    )
+    if relative_day_email_result is not None:
+        return _return_fast_path_result(relative_day_email_result)
+
+    selected_email_summary = _try_selected_email_summary_followup(
+        fast_path_query,
+        normalized_query,
+        all_tools,
+    )
+    if selected_email_summary is not None:
+        return _return_fast_path_result(selected_email_summary)
+
+    listed_email_display = _try_listed_email_display_followup(normalized_query, all_tools)
+    if listed_email_display is not None:
+        return _return_fast_path_result(listed_email_display)
 
     skill_context = _load_skill_context()
     dag_tool_docs = _get_tool_docs_for_dag()
@@ -875,6 +1576,7 @@ def execute_with_llm_orchestration(
         _logging.getLogger("email.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
         )
+        log_fallback_to_react("email", "email_orchestrator_exception")
     try:
         return run_skill_react(
             skill_name="email",

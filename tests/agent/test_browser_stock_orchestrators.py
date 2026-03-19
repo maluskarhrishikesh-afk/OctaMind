@@ -77,6 +77,34 @@ def test_browser_agent_ignores_injected_session_state_for_price_queries(monkeypa
     assert "Ubuy India" in result["message"]
 
 
+def test_browser_fast_path_logs_telemetry_for_price_comparison(monkeypatch):
+    browser_orchestrator = importlib.import_module("src.agent.ui.browser_agent.orchestrator")
+    from src.browser import browser_service
+
+    telemetry_calls = []
+
+    monkeypatch.setattr(
+        browser_orchestrator,
+        "log_fast_path_hit",
+        lambda agent, fast_path: telemetry_calls.append((agent, fast_path)),
+    )
+    monkeypatch.setattr(
+        browser_service,
+        "browse_url",
+        lambda url, max_chars=3000: {
+            "status": "success",
+            "content": "Apple iPhone 17 Pro (256GB) ₹ 1,39,900.00 C Croma Apple iPhone 17 Pro (256GB) ₹ 1,29,900.00 U Ubuy India",
+        },
+    )
+
+    result = browser_orchestrator.execute_with_llm_orchestration(
+        "Can you compare the latest price of Apple iPhone 17 Pro on various websites and tell me where it is the cheapest?"
+    )
+
+    assert result["status"] == "success"
+    assert telemetry_calls == [("browser", "price_comparison")]
+
+
 def test_stock_tool_docs_load_from_markdown():
     stock_orchestrator = importlib.import_module("src.agent.ui.stock_agent.orchestrator")
 

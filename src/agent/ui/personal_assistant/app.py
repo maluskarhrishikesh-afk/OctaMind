@@ -753,14 +753,19 @@ def _load_dashboard_chat(pa_id: str) -> list[dict]:
     telegram_chat_ids = _load_pa_telegram_chat_ids(pa_id)
     sessions = data.get("sessions") or {}
     restored: list[dict] = []
+    dashboard_session = sessions.get(session_id) or {}
+    has_dashboard_history = bool(dashboard_session.get("messages") or [])
 
     for current_session_id, session in sessions.items():
         session = session or {}
         session_source = str(session.get("source") or "dashboard")
         session_agent_id = str(session.get("agent_id") or "").strip()
-        include_session = current_session_id == session_id or session_agent_id == pa_id
+        include_session = current_session_id == session_id
 
-        if not include_session and session_source == "telegram" and current_session_id.startswith("telegram_"):
+        if not include_session and not has_dashboard_history and session_agent_id == pa_id:
+            include_session = True
+
+        if not include_session and not has_dashboard_history and session_source == "telegram" and current_session_id.startswith("telegram_"):
             chat_id = current_session_id.removeprefix("telegram_")
             include_session = chat_id in telegram_chat_ids
 

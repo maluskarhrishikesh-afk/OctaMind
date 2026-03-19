@@ -89,3 +89,35 @@ def test_calendar_orchestrator_handles_this_month_count_without_llm(monkeypatch)
     assert "March 2026" in result["message"]
     assert "1. **Event 1**" in result["message"]
     assert "2 more event(s) are scheduled later in the month." in result["message"]
+
+
+def test_calendar_month_overview_logs_fast_path_telemetry(monkeypatch):
+    orchestrator = importlib.import_module("src.agent.ui.calendar_agent.orchestrator")
+    calendar_service = importlib.import_module("src.calendar.calendar_service")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    telemetry_calls = []
+    monkeypatch.setattr(
+        orchestrator,
+        "log_fast_path_hit",
+        lambda agent, fast_path: telemetry_calls.append((agent, fast_path)),
+    )
+    monkeypatch.setattr(
+        calendar_service,
+        "get_events_for_month",
+        lambda year, month, max_results=200, calendar_id="primary": {
+            "status": "success",
+            "events": [],
+            "results": [],
+            "count": 0,
+            "message": "Found 0 event(s).",
+        },
+    )
+    monkeypatch.setattr(context_manifest, "auto_save_calendar_context", lambda result, *args, **kwargs: result)
+
+    result = orchestrator.execute_with_llm_orchestration(
+        "How many meetings do I have this month?\n\n## Session State\n{\"current_date\": \"2026-03-14\"}"
+    )
+
+    assert result["status"] == "success"
+    assert telemetry_calls == [("calendar", "month_overview")]

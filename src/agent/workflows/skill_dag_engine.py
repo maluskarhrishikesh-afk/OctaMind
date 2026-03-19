@@ -460,6 +460,12 @@ def run_skill_dag(
         logger.warning(
             "│  ⚠ [%s] DAG planning failed — falling back to ReAct", skill_name
         )
+        try:
+            from src.agent.telemetry import log_fallback_to_react  # noqa: PLC0415
+
+            log_fallback_to_react(skill_name, "skill_dag_planning")
+        except Exception:
+            pass
         _react_map  = react_tool_map  if react_tool_map  is not None else tool_map
         _react_docs = react_tool_docs if react_tool_docs is not None else tool_docs
         if react_tool_map is not None:
@@ -678,7 +684,7 @@ def _plan_steps(
 
     Returns (plan_list, llm_call_count).  plan_list is None on failure.
     """
-    from src.agent.llm.llm_parser import get_llm_client
+    from src.agent.llm.llm_parser import get_llm_client, request_completion
 
     llm = get_llm_client()
 
@@ -766,11 +772,14 @@ Authenticated user email:
     ]
 
     try:
-        response = llm.client.chat.completions.create(
-            model=llm.model,
+        response = request_completion(
+            llm=llm,
             messages=messages,
             temperature=0.0,
             max_tokens=800,
+            timeout=40,
+            purpose="skill_dag_planning",
+            allow_local_fallback=True,
         )
         raw = _strip_fences(response.choices[0].message.content.strip())
     except (AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError) as exc:

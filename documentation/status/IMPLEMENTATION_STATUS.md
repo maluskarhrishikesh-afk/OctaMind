@@ -2,6 +2,7 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
+Last updated: 2026-03-19 (Session 10 - staged routing pipeline, local planner fallback, telemetry counters, deterministic email fast paths, dashboard history restore hardening)
 Last updated: 2026-03-17 (Session 9 - security control plane, active manifest registry, per-PA Telegram runtime hardening, dashboard operations panels)
 Last updated: 2026-03-08 (Session 7 — repo hygiene cleanup, persistent JSON error registry, runtime clutter policy)  
 Last updated: 2026-03-12 (Session 8 — dashboard-embedded PA workspace, unified Telegram/dashboard history, embedded chat-shell layout fix)  
@@ -12,6 +13,67 @@ Previous: 2026-03-02 (Session 3 — New Files tools: search_file_all_drives, del
 Previous: 2026-03-02 (Bug fixes: calendar date-context loss, ReAct observation truncation, Telegram Markdown entity crash, DAG JSON fence parsing verified; added human-friendly per-request workflow summary log; DAG algorithm walkthrough document added)  
 Previous: 2026-03-02 (Telegram UX overhaul: typing indicators, real-time progress editing, /reset & /agents commands, long-message splitting, file-artifact delivery; Dashboard download button for file artifacts; HubProcessor scheduling-context enrichment propagated to Telegram channel; `send_document_file` multipart upload added to telegram_service)  
 Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine causing cascading `unknown action ''` failures; fixed tilde path expansion in dag_planner instruction resolver; added total LLM call count to workflow completion log; fixed website unicode emoji rendering; updated quickstart to remove internal Python snippet)
+
+---
+
+## ✅ 2026-03-19 Session 10 — Routing Pipeline + Planner Fallback + Telemetry
+
+### 1. Routing is now a staged pipeline
+
+**What changed:**
+- `run_routing_pipeline()` now separates classification, context resolution, and agent planning
+- the hub logs each routing stage independently instead of one flattened intent line
+- high-confidence single-agent and multi-agent routes short-circuit obvious cases before the full planning path
+- mailbox-style date queries and filename-based local file searches now resolve more deterministically
+
+**Behavioral impact:**
+- follow-up requests bind back to the active context agent more reliably
+- mailbox queries like "show spam emails from last week" collapse to the email agent only
+- local file search plus explicit email delivery can resolve directly to `files` + `email`
+
+### 2. Planner-only local fallback is implemented
+
+**What changed:**
+- `config/providers.json` now supports `planner_fallback_enabled` and `planner_fallback_model`
+- transient routing/planning failures such as provider rate limits and timeouts can retry on a local provider
+- fallback token budgets are capped per planning purpose so local retries stay bounded
+
+**Behavioral impact:**
+- planning remains resilient when the primary remote provider is temporarily unavailable
+- the primary conversational model does not have to change just to keep routing/planning alive
+
+### 3. Telemetry counters and log analysis are first-class runtime features
+
+**What changed:**
+- added `src/agent/telemetry.py` for structured counters like fast-path hits, context saves, fallback-to-ReAct events, and context-followup resolution
+- browser, calendar, drive, files, email, stock, skill DAG, master workflow, and the hub now emit telemetry counters
+- the dashboard log viewer can parse telemetry counters and render summary chips plus turn-level trends
+
+**Behavioral impact:**
+- fast deterministic paths are visible in logs without reading raw reasoning traces
+- fallback frequency is easier to measure and tune
+
+### 4. Email deterministic fast paths expanded materially
+
+**What changed:**
+- relative-day inbox list/count flows for queries like "emails received today" and "how many emails yesterday"
+- summary follow-ups for selected emails from current context, including multi-selection
+- deterministic listing of a saved email subset from current context
+- context-based attachment delivery when the current files context already points at a file to email
+
+**Behavioral impact:**
+- common mailbox tasks avoid unnecessary DAG/ReAct planning
+- "send it to me" stays in-channel unless the user explicitly asks for email delivery
+
+### 5. Telegram duplicate-reply suppression and dashboard chat restore hardening
+
+**What changed:**
+- Telegram auto-replies now use per-message claim files under `your_data/runtime_state/telegram_reply_claims/`
+- dashboard chat restore now prefers the dashboard session when it already has history and only falls back to linked Telegram history when needed
+
+**Behavioral impact:**
+- one inbound Telegram update should only trigger one auto-reply path
+- reopening a PA is less likely to duplicate linked Telegram history into the embedded dashboard transcript
 
 ---
 

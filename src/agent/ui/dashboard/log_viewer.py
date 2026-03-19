@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import streamlit as st
 
@@ -38,6 +38,9 @@ _LOG_RE = re.compile(
 _TURN_START_RE    = re.compile(r"║\s+TURN START\s+corr=(\S+)\s+src=(\S+)")
 _TURN_MSG_RE      = re.compile(r"║\s+MSG:\s+(.*)")
 _TURN_END_LLM_RE  = re.compile(r"Turn END.*llm_calls=(\d+)")
+_TURN_BOX_LLM_RE  = re.compile(r"║\s+LLM Calls:\s+(\d+)\s+total")
+_COUNTER_RE       = re.compile(r"\[counter\]\s+event=(?P<event>[a-z_]+)\s+count=(?P<count>\d+)(?P<rest>.*)")
+_COUNTER_FIELD_RE = re.compile(r"\b(?P<key>[a-z_]+)=(?P<value>[^\s]+)")
 _TRACE_RE = re.compile(
     r"^\[(?P<ts>\d{2}:\d{2}:\d{2})\]\s+"
     r"(?P<level>\w+)\s+"
@@ -121,6 +124,25 @@ class TraceEntry:
     category: str = "Other"
 
 
+@dataclass
+class CounterEntry:
+    event: str
+    count: int
+    agent: str = ""
+    fields: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class CounterTrend:
+    corr: str
+    source: str
+    message: str
+    start_ts: str
+    llm_calls: int
+    by_event: Dict[str, int] = field(default_factory=dict)
+    by_agent: Dict[str, Dict[str, int]] = field(default_factory=dict)
+
+
 # ---------------------------------------------------------------------------
 # Parsing helpers
 # ---------------------------------------------------------------------------
@@ -163,6 +185,7 @@ def group_by_turns(entries: List[LogEntry]) -> List[Turn]:
     pending_corr: Optional[str] = None
     pending_src: str = "?"
     pending_msg: str = ""
+    current_turn: Optional[Turn] = None
 
     for entry in entries:
         raw = entry.raw
@@ -185,7 +208,7 @@ def group_by_turns(entries: List[LogEntry]) -> List[Turn]:
             continue
 
         # Assign entry to its turn
-        corr = entry.corr if entry.parsed else (pending_corr or "__orphan__")
+        corr = entry.corr if entry.parsed else (pending_corr or (current_turn.corr if current_turn else "__orphan__"))
 
         if corr not in turns:
             if corr == "__orphan__":
@@ -201,6 +224,7 @@ def group_by_turns(entries: List[LogEntry]) -> List[Turn]:
             turn = turns[corr]
 
         turn.entries.append(entry)
+        current_turn = turn
         if entry.level in ("ERROR", "CRITICAL"):
             turn.has_error = True
         if entry.level == "WARNING":
@@ -210,6 +234,9 @@ def group_by_turns(entries: List[LogEntry]) -> List[Turn]:
         m_llm = _TURN_END_LLM_RE.search(entry.message)
         if m_llm:
             turn.llm_calls = max(turn.llm_calls, int(m_llm.group(1)))
+        m_box_llm = _TURN_BOX_LLM_RE.search(raw)
+        if m_box_llm:
+            turn.llm_calls = max(turn.llm_calls, int(m_box_llm.group(1)))
         if entry.ts:
             if turn.start_ts is None:
                 turn.start_ts = entry.ts
@@ -278,6 +305,155 @@ def load_trace_file(path: Path, max_lines: int = 3000) -> List[TraceEntry]:
         return [_parse_trace_line(line, idx + 1) for idx, line in enumerate(lines)]
     except Exception:
         return []
+
+
+def _parse_counter_entry(entry: LogEntry) -> Optional[CounterEntry]:
+    if not entry.parsed:
+        return None
+    if entry.logger != "agent.telemetry":
+        return None
+    match = _COUNTER_RE.search(entry.message)
+    if not match:
+        return None
+
+    fields: Dict[str, str] = {}
+    for field_match in _COUNTER_FIELD_RE.finditer(match.group("rest") or ""):
+        fields[field_match.group("key")] = field_match.group("value")
+
+    return CounterEntry(
+        event=match.group("event"),
+        count=int(match.group("count")),
+        agent=fields.get("agent", ""),
+        fields=fields,
+    )
+
+
+def _collect_counter_summary(entries: List[LogEntry]) -> Dict[str, Any]:
+    by_event: Dict[str, int] = {}
+    by_agent: Dict[str, Dict[str, int]] = {}
+
+    for entry in entries:
+        counter = _parse_counter_entry(entry)
+        if counter is None:
+            continue
+        by_event[counter.event] = by_event.get(counter.event, 0) + counter.count
+        if counter.agent:
+            agent_bucket = by_agent.setdefault(counter.agent, {})
+            agent_bucket[counter.event] = agent_bucket.get(counter.event, 0) + counter.count
+
+    return {
+        "by_event": dict(sorted(by_event.items())),
+        "by_agent": {agent: dict(sorted(events.items())) for agent, events in sorted(by_agent.items())},
+    }
+
+
+def _render_counter_summary(entries: List[LogEntry]) -> None:
+    summary = _collect_counter_summary(entries)
+    by_event = summary["by_event"]
+    by_agent = summary["by_agent"]
+    if not by_event:
+        return
+
+    event_html = "".join(
+        f'<span class="stat-chip" style="background:rgba(99,102,241,0.14);color:#c7d2fe;">{event}: {count}</span>'
+        for event, count in by_event.items()
+    )
+    st.markdown(
+        f'<div style="padding:10px 0 4px 0;">'
+        f'<div style="color:#94a3b8;font-size:0.82rem;font-weight:700;margin-bottom:6px;">Telemetry counters</div>'
+        f'<div>{event_html}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    if by_agent:
+        rows: List[str] = []
+        for agent, event_counts in by_agent.items():
+            cells = "  ·  ".join(f"{event}: {count}" for event, count in event_counts.items())
+            rows.append(
+                f'<tr>'
+                f'<td style="padding:6px 10px;color:#cbd5e1;font-weight:700;border-bottom:1px solid rgba(255,255,255,0.06);">{agent}</td>'
+                f'<td style="padding:6px 10px;color:#94a3b8;border-bottom:1px solid rgba(255,255,255,0.06);">{cells}</td>'
+                f'</tr>'
+            )
+        table_html = (
+            '<table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;">'
+            '<thead><tr>'
+            '<th style="text-align:left;padding:8px 10px;color:#64748b;font-size:0.72rem;text-transform:uppercase;">Agent</th>'
+            '<th style="text-align:left;padding:8px 10px;color:#64748b;font-size:0.72rem;text-transform:uppercase;">Events</th>'
+            '</tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table>'
+        )
+        with st.expander("Telemetry by agent", expanded=False):
+            st.markdown(table_html, unsafe_allow_html=True)
+
+
+def _collect_counter_trends(turns: List[Turn]) -> List[CounterTrend]:
+    trends: List[CounterTrend] = []
+    for turn in turns:
+        by_event: Dict[str, int] = {}
+        by_agent: Dict[str, Dict[str, int]] = {}
+        for entry in turn.entries:
+            counter = _parse_counter_entry(entry)
+            if counter is None:
+                continue
+            by_event[counter.event] = by_event.get(counter.event, 0) + counter.count
+            if counter.agent:
+                bucket = by_agent.setdefault(counter.agent, {})
+                bucket[counter.event] = bucket.get(counter.event, 0) + counter.count
+        if not by_event:
+            continue
+        trends.append(
+            CounterTrend(
+                corr=turn.corr,
+                source=turn.source,
+                message=turn.message,
+                start_ts=turn.start_ts or "",
+                llm_calls=turn.llm_calls,
+                by_event=dict(sorted(by_event.items())),
+                by_agent={agent: dict(sorted(events.items())) for agent, events in sorted(by_agent.items())},
+            )
+        )
+    return trends
+
+
+def _render_counter_trends(turns: List[Turn]) -> None:
+    trends = _collect_counter_trends(turns)
+    if not trends:
+        return
+
+    rows: List[str] = []
+    for trend in trends[-12:]:
+        events_text = "  ·  ".join(f"{event}: {count}" for event, count in trend.by_event.items())
+        agent_text = "  ·  ".join(
+            f"{agent} ({', '.join(f'{event}: {count}' for event, count in event_counts.items())})"
+            for agent, event_counts in trend.by_agent.items()
+        ) or "-"
+        rows.append(
+            f'<tr>'
+            f'<td style="padding:6px 10px;color:#cbd5e1;border-bottom:1px solid rgba(255,255,255,0.06);">{trend.start_ts or "-"}</td>'
+            f'<td style="padding:6px 10px;color:#94a3b8;border-bottom:1px solid rgba(255,255,255,0.06);">{trend.source}</td>'
+            f'<td style="padding:6px 10px;color:#cbd5e1;border-bottom:1px solid rgba(255,255,255,0.06);">{trend.llm_calls}</td>'
+            f'<td style="padding:6px 10px;color:#93c5fd;border-bottom:1px solid rgba(255,255,255,0.06);">{events_text}</td>'
+            f'<td style="padding:6px 10px;color:#94a3b8;border-bottom:1px solid rgba(255,255,255,0.06);">{agent_text}</td>'
+            f'<td style="padding:6px 10px;color:#64748b;border-bottom:1px solid rgba(255,255,255,0.06);max-width:320px;">{trend.message or "-"}</td>'
+            f'</tr>'
+        )
+
+    table_html = (
+        '<table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;">'
+        '<thead><tr>'
+        '<th style="text-align:left;padding:8px 10px;color:#64748b;font-size:0.72rem;text-transform:uppercase;">Turn</th>'
+        '<th style="text-align:left;padding:8px 10px;color:#64748b;font-size:0.72rem;text-transform:uppercase;">Source</th>'
+        '<th style="text-align:left;padding:8px 10px;color:#64748b;font-size:0.72rem;text-transform:uppercase;">LLM</th>'
+        '<th style="text-align:left;padding:8px 10px;color:#64748b;font-size:0.72rem;text-transform:uppercase;">Events</th>'
+        '<th style="text-align:left;padding:8px 10px;color:#64748b;font-size:0.72rem;text-transform:uppercase;">Agents</th>'
+        '<th style="text-align:left;padding:8px 10px;color:#64748b;font-size:0.72rem;text-transform:uppercase;">Message</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>'
+    )
+    with st.expander("Telemetry trends by turn", expanded=False):
+        st.markdown(table_html, unsafe_allow_html=True)
 
 
 def _safe_log_filename(pa_name: str) -> str:
@@ -784,6 +960,8 @@ def show_log_viewer() -> None:
 
             turns = group_by_turns(all_entries)
             _stats_bar(all_entries, turns)
+            _render_counter_summary(all_entries)
+            _render_counter_trends(turns)
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
             llm_entries = [entry for entry in all_entries if entry.parsed and entry.logger in ("llm.call", "llm.response")]

@@ -7,6 +7,7 @@ import json
 import re
 from typing import Any, Dict, Optional
 
+from src.agent.telemetry import log_fallback_to_react, log_fast_path_hit
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 
@@ -36,6 +37,12 @@ _OVERVIEW_NOISE_TOKENS = {
     "next", "last", "previous",
     *_MONTH_NAMES.keys(),
 }
+
+
+def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    fast_path = str(result.get("_fast_path", "") or result.get("action", "unknown"))
+    log_fast_path_hit("calendar", fast_path)
+    return result
 
 
 def _load_skill_context() -> str:
@@ -498,10 +505,10 @@ def execute_with_llm_orchestration(
     all_tools = _build_all_tools(user_query)
     ordinal_delete_result = _handle_ordinal_event_delete_query(user_query, all_tools)
     if ordinal_delete_result is not None:
-        return ordinal_delete_result
+        return _return_fast_path_result(ordinal_delete_result)
     fast_path_result = _handle_month_overview_query(user_query, all_tools)
     if fast_path_result is not None:
-        return fast_path_result
+        return _return_fast_path_result(fast_path_result)
     skill_context = _load_skill_context()
     dag_tool_docs = _get_tool_docs_for_dag()
     react_tool_docs = _get_tool_docs_for_react(user_query)
@@ -521,6 +528,7 @@ def execute_with_llm_orchestration(
         _logging.getLogger("calendar.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
         )
+        log_fallback_to_react("calendar", "calendar_orchestrator_exception")
     try:
         return run_skill_react(
             skill_name="calendar",

@@ -258,6 +258,12 @@ def write_context(
             "[context-manifest] wrote  agent=%s  topic=%s  awaiting=%s  keys=%s",
             agent, topic, awaiting, list(resolved_entities.keys()),
         )
+        try:
+            from src.agent.telemetry import log_context_saved  # noqa: PLC0415
+
+            log_context_saved(agent, topic, awaiting or "")
+        except Exception:
+            pass
 
         # ── Audit history: append a compact single-line record ─────────────
         try:
@@ -832,11 +838,14 @@ def auto_save_email_context(result: Any, query: str = "") -> Any:
     try:
         if isinstance(result, list):
             msgs = result
+            total_count = len(msgs)
         elif isinstance(result, dict):
             msgs = result.get("results") or result.get("emails") or result.get("messages") or []
+            total_count = int(result.get("total_count", result.get("count", len(msgs))) or len(msgs))
         else:
             msgs = []
-        if not msgs:
+            total_count = 0
+        if not msgs and total_count <= 0:
             return result
         listed = [
             {
@@ -849,6 +858,8 @@ def auto_save_email_context(result: Any, query: str = "") -> Any:
             for m in msgs[:20]
         ]
         entities: Dict[str, Any] = {"listed_emails": listed}
+        if total_count > 0:
+            entities["total_count"] = total_count
         if query:
             entities["query"] = query
         write_context(

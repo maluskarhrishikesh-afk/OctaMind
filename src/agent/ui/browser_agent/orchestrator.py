@@ -6,6 +6,7 @@ import re
 import urllib.parse
 from typing import Any, Dict, Optional
 
+from src.agent.telemetry import log_fallback_to_react, log_fast_path_hit
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 from src.agent.workflows.skill_react_engine import run_skill_react
 
@@ -18,6 +19,12 @@ _PRICE_SITE_CANDIDATES = (
     {"name": "Target", "domain": "target.com"},
     {"name": "eBay", "domain": "ebay.com"},
 )
+
+
+def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    fast_path = str(result.get("_fast_path", "") or result.get("action", "unknown"))
+    log_fast_path_hit("browser", fast_path)
+    return result
 
 
 def _strip_injected_context_blocks(user_query: str) -> str:
@@ -228,6 +235,7 @@ def _handle_price_comparison_query(user_query: str) -> Dict[str, Any]:
             "status": "success",
             "message": message,
             "action": "react_response",
+            "_fast_path": "price_comparison",
             "tool_used": "browse_url",
             "raw": {
                 "product": product,
@@ -270,6 +278,7 @@ def _handle_price_comparison_query(user_query: str) -> Dict[str, Any]:
         "status": "success" if comparisons else "error",
         "message": message,
         "action": "react_response",
+        "_fast_path": "price_comparison",
         "tool_used": "search_web",
         "raw": {
             "product": product,
@@ -364,7 +373,7 @@ def execute_with_llm_orchestration(
     del agent_id
     sanitized_query = _strip_injected_context_blocks(user_query)
     if _is_price_comparison_query(sanitized_query):
-        return _handle_price_comparison_query(sanitized_query)
+        return _return_fast_path_result(_handle_price_comparison_query(sanitized_query))
 
     all_tools = _build_all_tools()
     skill_context = _load_skill_context()
@@ -384,6 +393,7 @@ def execute_with_llm_orchestration(
         )
     except Exception as dag_exc:
         logger.warning("DAG path raised %s — falling back to ReAct", dag_exc)
+        log_fallback_to_react("browser", "browser_orchestrator_exception")
 
     try:
         return run_skill_react(

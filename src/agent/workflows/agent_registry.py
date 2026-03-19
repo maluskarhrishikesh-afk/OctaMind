@@ -59,7 +59,7 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
         "trigger_keywords": [
             "email", "mail", "gmail", "inbox", "outbox", "attachment",
             "reply", "forward", "draft", "compose", "unread", "newsletter",
-            "sender", "recipient", "cc", "bcc", "subject",
+            "sender", "recipient", "cc", "bcc", "subject", "spam", "junk",
         ],
         "module": "src.agent.ui.email_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
@@ -118,7 +118,6 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
         "trigger_keywords": [
             "calendar", "event", "events", "meeting", "appointment",
             "reminder", "agenda", "schedule", "invite", "recurring",
-            "today", "tomorrow", "this week", "next week",
         ],
         "module": "src.agent.ui.calendar_agent.orchestrator",
         "function": "execute_with_llm_orchestration",

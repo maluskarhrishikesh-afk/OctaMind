@@ -399,8 +399,10 @@ def plan_nl_workflow(command: str) -> Optional[NLWorkflowPlan]:
     logger.info("NL planning workflow for: %s", command)
 
     try:
-        response = llm.client.chat.completions.create(
-            model=llm.model,
+        from src.agent.llm.llm_parser import request_completion
+
+        response = request_completion(
+            llm=llm,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"User command: {command}"},
@@ -408,6 +410,8 @@ def plan_nl_workflow(command: str) -> Optional[NLWorkflowPlan]:
             temperature=0.2,
             max_tokens=1500,
             timeout=40,
+            purpose="nl_workflow_planning",
+            allow_local_fallback=True,
         )
         raw = _strip_code_fences(response.choices[0].message.content.strip())
         steps_data: List[Dict[str, Any]] = json.loads(raw)
@@ -543,6 +547,12 @@ def run_workflow(
         logger.warning(
             "run_workflow: DAG planning failed — falling back to ReAct loop"
         )
+        try:
+            from src.agent.telemetry import log_fallback_to_react  # noqa: PLC0415
+
+            log_fallback_to_react("master_workflow", "master_dag_planning")
+        except Exception:
+            pass
         steps_results, final_answer_text = react_workflow(command, agent_ids, ctx, confirmed_action_keys=confirmed_action_keys)
         execution_mode = "react_fallback"
         plan = None

@@ -7,11 +7,15 @@ OctaMind is a multi-agent personal assistant platform that lets you operate Gmai
 - Agent Hub dashboard for creating, configuring, and launching Personal Assistants
 - Embedded Personal Assistant workspace inside the dashboard
 - Security Dashboard for inbound guardrails, rate-limit state, pending destructive confirmations, and live tool-risk inspection
+- Telemetry-backed Log Analyser for per-turn LLM counts, fast-path counters, fallback counters, and agent event summaries
 - Manifest Inspector for the active file manifest and recent historical manifests
 - Skill routing across email, drive, files, calendar, scheduler, file organizer, habit tracking, browser, stock market, LinkedIn, WhatsApp, and Telegram
+- Staged routing pipeline with classification, context resolution, and agent planning, plus optional local planner fallback for retryable routing/planning failures
 - Persistent assistant memory plus cross-channel history merging for dashboard and Telegram
 - Per-assistant Telegram bots with dedicated pollers, per-PA message stores, and direct Telegram runtime controls from each assistant card
+- Duplicate Telegram inbound auto replies are suppressed before dispatch so one inbound update is claimed once
 - Active file-manifest registry plus current-channel file delivery for follow-up requests like "send it to me" or "share it here"
+- Deterministic email fast paths for relative-day inbox queries, selected-email summaries, and attachment delivery from files context
 - Local runtime state and generated artifacts under `your_data/`
 - Public research artifacts in `research/`
 
@@ -40,7 +44,9 @@ OctaMind is a multi-agent personal assistant platform that lets you operate Gmai
 - Memory consolidation runs as a background process on startup and continues on an 8-hour loop
 - Telegram pollers are managed per Personal Assistant from the dashboard, not directly by `start.py`
 - Each Telegram-connected Personal Assistant keeps its own poller process, message store, and structured log file
+- The dashboard Log Analyser reads structured PA logs and telemetry counters instead of relying on stderr output
 - Destructive tools now use a shared confirmation flow with Telegram inline buttons and persisted pending-confirmation state
+- Routing and planning retries can fall back to a configured local model through `config/providers.json`
 - Runtime outputs, operational state, archives, reports, and generated artifacts are stored under `your_data/`
 
 ## Quick Start

@@ -32,6 +32,11 @@ Telegram bot tokens are now typically saved per Personal Assistant from the dash
 
 OctaMind defaults to GitHub Models, but the active provider is selected through `config/providers.json`. Credentials are loaded from `config/settings.json` first and can fall back to environment variables.
 
+`config/providers.json` can also define a planner-only local fallback model for retryable routing and planning failures. The current optional keys are:
+
+- `planner_fallback_enabled`
+- `planner_fallback_model`
+
 Minimal GitHub Models example:
 
 ```json
@@ -50,6 +55,16 @@ Minimal GitHub Models example:
 4. Put the token under `llm_api_keys.GITHUB_TOKEN`.
 
 If you switch providers later, keep `config/providers.json` and `config/settings.json` in sync.
+
+Example provider additions:
+
+```json
+{
+  "active": "github_models",
+  "planner_fallback_enabled": true,
+  "planner_fallback_model": "gemma3_local"
+}
+```
 
 ## 3. Configure Google OAuth
 

@@ -267,8 +267,12 @@ class _LocalHFCompletions:
             # assistant turns are context — skip for single-turn inference
 
         raw = generate_response(
-            self._model, self._processor, self._loaded_device,
-            user_text, max_tokens=max_tok,
+            self._model,
+            self._processor,
+            self._loaded_device,
+            user_text,
+            max_tokens=max_tok,
+            temperature=float(temperature),
         )
 
         class _Choice:
@@ -423,5 +427,6 @@ def set_active_provider(name: str) -> None:
     try:
         import src.agent.llm.llm_parser as _lp
         _lp._llm_client = None
+        _lp._provider_clients = {}
     except Exception:
         pass

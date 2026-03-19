@@ -258,6 +258,52 @@ def test_email_orchestrator_creates_sender_rule_without_llm(monkeypatch) -> None
     assert "Hrishikesh Zoho" in result["message"]
 
 
+def test_email_orchestrator_sends_context_file_attachment_without_llm(tmp_path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+
+    archive_path = tmp_path / "payslips_last_3_months.zip"
+    archive_path.write_text("zip", encoding="utf-8")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "send_email_with_attachment": lambda to, subject, message, attachment_path: {
+                "status": "success",
+                "to": to,
+                "subject": subject,
+                "message": message,
+                "attachment_path": attachment_path,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for context attachment delivery")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for context attachment delivery")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_files_context_entities",
+        lambda: {
+            "selected_paths": [str(archive_path)],
+            "listed_files": [{"path": str(archive_path), "name": archive_path.name, "type": "file"}],
+        },
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("Can you mail that to me?")
+
+    assert result["status"] == "success"
+    assert result["action"] == "send_email_with_attachment"
+    assert result["_fast_path"] == "context_file_attachment_delivery"
+    assert result["attachment_path"] == str(archive_path)
+
+
 def test_email_orchestrator_lists_rules_for_are_there_any_query(monkeypatch) -> None:
     orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
 
@@ -290,6 +336,324 @@ def test_email_orchestrator_lists_rules_for_are_there_any_query(monkeypatch) -> 
     assert result["status"] == "success"
     assert result["action"] == "list_all_filters_and_labels"
     assert result["_fast_path"] == "mailbox_cleanup_preview"
+
+
+def test_email_orchestrator_routes_todays_emails_through_dag(monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "count_matching_emails": lambda query="": {"status": "success", "total_count": 2, "query": query},
+            "list_emails": lambda query="", max_results=10: {
+                "status": "success",
+                "results": [
+                    {"id": "msg-1", "subject": "Standup", "sender": "team@example.com", "date": "2026-03-18", "snippet": "Daily sync"},
+                    {"id": "msg-2", "subject": "Invoice", "sender": "finance@example.com", "date": "2026-03-18", "snippet": "Attached invoice"},
+                ][:max_results],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for relative-day email list fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for relative-day email list fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_relative_day_email_query",
+        lambda normalized_query, now=None: {
+            "relative_day": "today",
+            "query": "after:100 before:200 in:inbox",
+            "label": "March 18, 2026",
+        },
+    )
+
+    result = orchestrator.execute_with_llm_orchestration(
+        "List all the email that I received today?"
+    )
+
+    assert result["status"] == "success"
+    assert result["action"] == "list_emails"
+    assert result["_fast_path"] == "relative_day_email_list"
+    assert "Here are 2 of 2 emails received today" in result["message"]
+
+
+def test_email_orchestrator_counts_yesterdays_emails_without_dag(monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "count_matching_emails": lambda query="": {"status": "success", "total_count": 201, "query": query},
+            "list_emails": lambda query="", max_results=10: (_ for _ in ()).throw(AssertionError("List should not run for pure count fast path")),
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for relative-day email count fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for relative-day email count fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_relative_day_email_query",
+        lambda normalized_query, now=None: {
+            "relative_day": "yesterday",
+            "query": "after:300 before:400 in:inbox",
+            "label": "March 17, 2026",
+        },
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("Did I receive only 1 email yesterday")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "relative_day_email_count"
+    assert result["total_count"] == 201
+    assert "201 emails yesterday" in result["message"]
+
+
+def test_email_orchestrator_summarizes_selected_email_from_context_without_unwanted_email(monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+
+    calls = {"summarize": [], "send": []}
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "summarize_email": lambda message_id: calls["summarize"].append(message_id) or {
+                "status": "success",
+                "subject": "Is a heart attack a painful death?",
+                "sender": "Quora Digest <digest@quora.com>",
+                "date": "Tue, 17 Mar 2026 16:34:04 +0000",
+                "summary": "This email contains a Quora digest article preview.",
+                "key_points": ["Digest-style content", "Health-related topic"],
+                "action_items": [],
+            },
+            "send_email": lambda to, subject, message: calls["send"].append((to, subject, message)) or {
+                "status": "success",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_email_from_context",
+        lambda raw_query, normalized_query: {
+            "id": "msg-3",
+            "subject": "Is a heart attack a painful death?",
+            "sender": "Quora Digest <digest@quora.com>",
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for selected email summary fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for selected email summary fast path")),
+    )
+
+    result = orchestrator.execute_with_llm_orchestration(
+        "Can you summarize the 3rd email and send it to me?"
+    )
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "selected_email_summary"
+    assert calls["summarize"] == ["msg-3"]
+    assert calls["send"] == []
+    assert "Is a heart attack a painful death?" in result["message"]
+
+
+def test_email_orchestrator_lists_saved_emails_deterministically(monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "list_emails": lambda query="", max_results=10: {
+                "status": "success",
+                "results": [
+                    {
+                        "id": f"msg-{index}",
+                        "subject": f"Email {index}",
+                        "sender": f"sender{index}@example.com",
+                        "date": "2026-03-17",
+                        "snippet": f"Snippet {index}",
+                    }
+                    for index in range(1, max_results + 1)
+                ],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_email_context_entities",
+        lambda: {
+            "query": "after:300 before:400 in:inbox",
+            "total_count": 201,
+            "listed_emails": [
+                {
+                    "id": "msg-1",
+                    "subject": "Quarterly review",
+                    "sender": "Boss <boss@example.com>",
+                    "date": "2026-03-17",
+                    "snippet": "Please review the attached numbers before noon.",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_listed_emails_from_context",
+        lambda: [
+            {
+                "id": "msg-1",
+                "subject": "Quarterly review",
+                "sender": "Boss <boss@example.com>",
+                "date": "2026-03-17",
+                "snippet": "Please review the attached numbers before noon.",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for listed email display fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for listed email display fast path")),
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("Can you list 10 emails out of them?")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "listed_email_display"
+    assert "1. Subject: Email 1" in result["message"]
+    assert "10. Subject: Email 10" in result["message"]
+    assert "Showing 10 of 201 emails from the current list." in result["message"]
+    assert result["count"] == 10
+
+
+def test_email_orchestrator_emails_selected_email_summary_only_when_explicit(monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+
+    calls = {"summarize": [], "send": []}
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "summarize_email": lambda message_id: calls["summarize"].append(message_id) or {
+                "status": "success",
+                "subject": "Quarterly update",
+                "sender": "finance@example.com",
+                "date": "Tue, 17 Mar 2026 09:00:00 +0000",
+                "summary": "Finance update summary.",
+                "key_points": [],
+                "action_items": [],
+            },
+            "send_email": lambda to, subject, message: calls["send"].append((to, subject, message)) or {
+                "status": "success",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_email_from_context",
+        lambda raw_query, normalized_query: {"id": "msg-2", "subject": "Quarterly update", "sender": "finance@example.com"},
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for selected email summary fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for selected email summary fast path")),
+    )
+
+    result = orchestrator.execute_with_llm_orchestration(
+        "Summarize the second email and email it to me"
+    )
+
+    assert result["status"] == "success"
+    assert calls["summarize"] == ["msg-2"]
+    assert calls["send"]
+    assert calls["send"][0][0] == "me"
+
+
+def test_email_orchestrator_summarizes_multiple_selected_emails_from_context(monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+
+    calls = {"summarize": [], "send": []}
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "summarize_email": lambda message_id: calls["summarize"].append(message_id) or {
+                "status": "success",
+                "subject": f"Subject {message_id}",
+                "sender": f"sender-{message_id}@example.com",
+                "date": "Tue, 17 Mar 2026 09:00:00 +0000",
+                "summary": f"Summary for {message_id}",
+                "key_points": [],
+                "action_items": [],
+            },
+            "send_email": lambda to, subject, message: calls["send"].append((to, subject, message)) or {
+                "status": "success",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_listed_emails_from_context",
+        lambda: [
+            {"id": "msg-1", "subject": "Email 1", "sender": "one@example.com"},
+            {"id": "msg-2", "subject": "Email 2", "sender": "two@example.com"},
+            {"id": "msg-3", "subject": "Email 3", "sender": "three@example.com"},
+            {"id": "msg-4", "subject": "Email 4", "sender": "four@example.com"},
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for multi-email summary fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for multi-email summary fast path")),
+    )
+
+    result = orchestrator.execute_with_llm_orchestration(
+        "Can you summarize 1, 2 and 4 emails and send it to me?"
+    )
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "selected_email_summary"
+    assert calls["summarize"] == ["msg-1", "msg-2", "msg-4"]
+    assert calls["send"] == []
+    assert "Email 1" in result["message"]
+    assert "Summary for msg-4" in result["message"]
 
 
 def test_email_orchestrator_executes_pending_cleanup_on_yes_delete_them(monkeypatch, tmp_path) -> None:

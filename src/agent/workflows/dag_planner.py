@@ -301,15 +301,15 @@ def plan_dag_workflow(command: str) -> Optional[DAGPlan]:
     None
         On any failure — caller should fall back to ``react_workflow()``.
     """
-    from src.agent.llm.llm_parser import get_llm_client
+    from src.agent.llm.llm_parser import get_llm_client, request_completion
 
     llm = get_llm_client()
     t0 = time.time()
     logger.info("DAG planner: planning command=%.140s", command)
 
     try:
-        response = llm.client.chat.completions.create(
-            model=llm.model,
+        response = request_completion(
+            llm=llm,
             messages=[
                 {"role": "system", "content": _build_dag_planning_prompt()},
                 {"role": "user",   "content": f"User command: {command}"},
@@ -317,6 +317,8 @@ def plan_dag_workflow(command: str) -> Optional[DAGPlan]:
             temperature=0.1,
             max_tokens=2000,
             timeout=40,
+            purpose="dag_planning",
+            allow_local_fallback=True,
         )
         raw = _strip_code_fences(response.choices[0].message.content.strip())
 

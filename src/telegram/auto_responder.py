@@ -29,7 +29,10 @@ import logging
 import os
 import re
 import threading
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+from src.agent.runtime_paths import get_runtime_state_dir
 
 logger = logging.getLogger("telegram_agent")
 
@@ -42,6 +45,7 @@ _TG_MAX_LEN = 4000  # slightly below the hard 4096 limit for safety
 # Characters that can break Telegram Markdown v1 entity parsing
 _MD_STRIP_TABLE = str.maketrans("", "", "*_`[]\\\u200B")
 _GOOGLE_AUTH_COMPLETE_RE = re.compile(r"(?:https?://localhost[^\s]+|\bcode=[^\s]+.*\bstate=[^\s]+)", re.IGNORECASE)
+_REPLY_CLAIMS_DIR = get_runtime_state_dir("telegram_reply_claims", create=True)
 
 
 def _plain_text(text: str) -> str:
@@ -71,6 +75,27 @@ def _get_persona() -> str:
     return "You are a friendly, helpful AI assistant. Keep replies concise and conversational."
 
 
+def _reply_claim_path(chat_id: Any, message_id: Any) -> Path:
+    safe_chat = str(chat_id).replace(os.sep, "_")
+    safe_message = str(message_id).replace(os.sep, "_")
+    return _REPLY_CLAIMS_DIR / f"{safe_chat}_{safe_message}.claim"
+
+
+def _claim_inbound_reply(chat_id: Any, message_id: Any) -> bool:
+    if not chat_id or not message_id:
+        return True
+    try:
+        _REPLY_CLAIMS_DIR.mkdir(parents=True, exist_ok=True)
+        claim_path = _reply_claim_path(chat_id, message_id)
+        fd = os.open(str(claim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("claimed")
+        return True
+    except FileExistsError:
+        logger.info("[AutoReply] Duplicate inbound reply suppressed for chat=%s message_id=%s", chat_id, message_id)
+        return False
+
+
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 def maybe_auto_reply(stored_message: Dict[str, Any]) -> None:
@@ -86,10 +111,13 @@ def maybe_auto_reply(stored_message: Dict[str, Any]) -> None:
 
     text = stored_message.get("text") or stored_message.get("caption", "")
     chat_id = stored_message.get("chat_id")
+    message_id = stored_message.get("message_id")
     direction = stored_message.get("direction", "inbound")
 
     # Only reply to real inbound text messages
     if direction != "inbound" or not text or not chat_id:
+        return
+    if not _claim_inbound_reply(chat_id, message_id):
         return
 
     cmd = text.strip()

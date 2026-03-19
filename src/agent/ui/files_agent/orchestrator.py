@@ -1242,6 +1242,7 @@ def _save_single_file_context(path_str: str, query: str) -> None:
     auto_save_files_context(
         {
             "status": "success",
+            "path": str(file_path),
             "results": [
                 {
                     "path": str(file_path),

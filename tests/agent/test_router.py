@@ -1,22 +1,20 @@
 """
-Unit tests for src/agent/workflows/router.py — keyword maps and trigger_keywords.
+Unit tests for src/agent/workflows/router.py — deterministic routing built from
+curated trigger keywords and agent-name tokens.
 
 Covers:
-  - Every agent in AGENT_REGISTRY has a non-empty "trigger_keywords" list
-  - _build_keyword_map() merges description-derived words WITH trigger_keywords
-  - _build_distinctive_keyword_map() always includes trigger_keywords regardless of IDF
-  - Specific domain words that could be IDF-pruned are kept via trigger_keywords
-    (e.g. "payslip" → files, "email" → email, "whatsapp" → whatsapp)
-  - Agent name-derived tokens are always in the distinctive map
+    - Every agent in AGENT_REGISTRY has a non-empty "trigger_keywords" list
+    - _build_keyword_map() uses trigger_keywords plus agent-name tokens
+    - _build_distinctive_keyword_map() preserves strong domain signals
+    - Specific domain words that could be IDF-pruned are kept via trigger_keywords
+        (e.g. "payslip" → files, "email" → email, "whatsapp" → whatsapp)
+    - Mailbox-style date/range/spam queries collapse to the email agent only
 
 These are pure Python unit tests — no LLM required.
 """
 from __future__ import annotations
 
 import re
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -90,12 +88,18 @@ class TestKeywordMap:
             "'payslip' should be in the files keyword map via trigger_keywords"
         )
 
-    def test_description_words_also_present_in_keyword_map(self):
-        """Words extracted from the agent description are still in the map alongside triggers."""
+    def test_agent_name_tokens_present_in_keyword_map(self):
+        """Agent-name tokens stay routable even if not repeated in trigger phrases."""
         from src.agent.workflows.router import _build_keyword_map
         km = _build_keyword_map()
-        # "gmail" appears in email description AND trigger_keywords
-        assert "gmail" in km.get("email", frozenset())
+        assert "market" in km.get("stock_market", frozenset())
+
+    def test_description_noise_does_not_leak_into_keyword_map(self):
+        """Description-only words like 'list' or 'show' should not create fallback matches."""
+        from src.agent.workflows.router import _build_keyword_map
+        km = _build_keyword_map()
+        assert "list" not in km.get("drive", frozenset())
+        assert "show" not in km.get("whatsapp", frozenset())
 
     def test_email_trigger_keywords_in_map(self):
         from src.agent.workflows.router import _build_keyword_map
@@ -243,26 +247,148 @@ def test_normalize_followup_agents_preserves_email_when_explicit() -> None:
 
     assert normalized == ["files", "email"]
 
-    def test_payslip_routes_to_files(self):
-        agents = self._route_via_keywords("find my payslip")
-        assert "files" in agents
 
-    def test_whatsapp_routes_to_whatsapp(self):
-        agents = self._route_via_keywords("send a whatsapp to Alice")
-        assert "whatsapp" in agents
+def test_classify_and_route_filename_search_uses_files_only() -> None:
+    from src.agent.workflows.router import classify_and_route
 
-    def test_gmail_routes_to_email(self):
-        agents = self._route_via_keywords("check my gmail inbox")
-        assert "email" in agents
+    result = classify_and_route(
+        "Is there any image file on my computer which contains octa in its filename?"
+    )
 
-    def test_ticker_routes_to_stock_market(self):
-        agents = self._route_via_keywords("analyse the ticker TSLA")
-        assert "stock_market" in agents
+    assert result.category == "fresh_task"
+    assert result.agents == ["files"]
 
-    def test_linkedin_post_routes_to_linkedin(self):
-        agents = self._route_via_keywords("publish a linkedin post")
-        assert "linkedin" in agents
 
-    def test_habit_streak_routes_to_habit_tracker(self):
-        agents = self._route_via_keywords("show my habit streak for gym")
-        assert "habit_tracker" in agents
+def test_classify_and_route_todays_email_query_uses_email_only() -> None:
+    from src.agent.workflows.router import classify_and_route
+
+    result = classify_and_route("List all the email that I received today?")
+
+    assert result.category == "fresh_task"
+    assert result.agents == ["email"]
+
+
+def test_classify_and_route_yesterdays_email_query_uses_email_only() -> None:
+    from src.agent.workflows.router import classify_and_route
+
+    result = classify_and_route("Show me yesterday's emails")
+
+    assert result.category == "fresh_task"
+    assert result.agents == ["email"]
+
+
+def test_classify_and_route_date_range_email_query_uses_email_only() -> None:
+    from src.agent.workflows.router import classify_and_route
+
+    result = classify_and_route("List emails between 2026-03-01 and 2026-03-10")
+
+    assert result.category == "fresh_task"
+    assert result.agents == ["email"]
+
+
+def test_classify_and_route_spam_email_query_uses_email_only() -> None:
+    from src.agent.workflows.router import classify_and_route
+
+    result = classify_and_route("Show spam emails from last week")
+
+    assert result.category == "fresh_task"
+    assert result.agents == ["email"]
+
+
+def test_classify_message_marks_pronoun_request_as_context_followup() -> None:
+    from src.agent.workflows.router import _classify_message
+    from src.agent.workflows.agent_registry import registered_agents
+
+    result = _classify_message(
+        "Can you send it to me?",
+        active_context={"agent": "files", "topic": "auto_search_result", "awaiting": "file_action"},
+        session_state=None,
+        valid=set(registered_agents()),
+    )
+
+    assert result.category == "context_followup"
+    assert result.source == "pronoun_followup"
+
+
+def test_resolve_context_stage_binds_default_agent_from_active_context() -> None:
+    from src.agent.workflows.router import ClassificationStageResult, _resolve_context_stage
+    from src.agent.workflows.agent_registry import registered_agents
+
+    resolved = _resolve_context_stage(
+        "Can you send it to me?",
+        ClassificationStageResult(category="context_followup", reason="pronoun", source="test"),
+        active_context={"agent": "files", "topic": "auto_search_result", "awaiting": "file_action"},
+        session_state=None,
+        valid=set(registered_agents()),
+    )
+
+    assert resolved.category == "context_followup"
+    assert resolved.context_agent == "files"
+    assert resolved.default_agents == ["files"]
+
+
+def test_run_routing_pipeline_uses_context_agent_when_planning_falls_back(monkeypatch) -> None:
+    from src.agent.workflows.router import run_routing_pipeline
+
+    def raise_get_llm_client():
+        raise RuntimeError("llm unavailable")
+
+    monkeypatch.setattr("src.agent.llm.llm_parser.get_llm_client", raise_get_llm_client)
+
+    pipeline = run_routing_pipeline(
+        "Can you send it to me?",
+        active_context={
+            "agent": "files",
+            "topic": "auto_search_result",
+            "awaiting": "file_action",
+            "resolved_entities": {"found_count": 1},
+        },
+    )
+
+    assert pipeline.classification.category == "context_followup"
+    assert pipeline.context_resolution.default_agents == ["files"]
+    assert pipeline.planning.source == "keyword_fallback"
+    assert pipeline.intent.category == "context_followup"
+    assert pipeline.intent.agents == ["files"]
+
+
+def test_keyword_fallback_payslip_routes_to_files() -> None:
+    test_case = TestKeywordFallbackRouting()
+    test_case.setup_method()
+    agents = test_case._route_via_keywords("find my payslip")
+    assert "files" in agents
+
+
+def test_keyword_fallback_whatsapp_routes_to_whatsapp() -> None:
+    test_case = TestKeywordFallbackRouting()
+    test_case.setup_method()
+    agents = test_case._route_via_keywords("send a whatsapp to Alice")
+    assert "whatsapp" in agents
+
+
+def test_keyword_fallback_gmail_routes_to_email() -> None:
+    test_case = TestKeywordFallbackRouting()
+    test_case.setup_method()
+    agents = test_case._route_via_keywords("check my gmail inbox")
+    assert "email" in agents
+
+
+def test_keyword_fallback_ticker_routes_to_stock_market() -> None:
+    test_case = TestKeywordFallbackRouting()
+    test_case.setup_method()
+    agents = test_case._route_via_keywords("analyse the ticker TSLA")
+    assert "stock_market" in agents
+
+
+def test_keyword_fallback_linkedin_post_routes_to_linkedin() -> None:
+    test_case = TestKeywordFallbackRouting()
+    test_case.setup_method()
+    agents = test_case._route_via_keywords("publish a linkedin post")
+    assert "linkedin" in agents
+
+
+def test_keyword_fallback_habit_streak_routes_to_habit_tracker() -> None:
+    test_case = TestKeywordFallbackRouting()
+    test_case.setup_method()
+    agents = test_case._route_via_keywords("show my habit streak for gym")
+    assert "habit_tracker" in agents

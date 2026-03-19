@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.agent.telemetry import log_fallback_to_react
 from src.agent.runtime_paths import get_your_data_dir
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 from src.agent.workflows.skill_react_engine import run_skill_react
@@ -1266,6 +1267,7 @@ def execute_with_llm_orchestration(
         )
     except Exception as dag_exc:
         logger.warning("DAG path raised %s — falling back to ReAct", dag_exc)
+        log_fallback_to_react("stock", "stock_orchestrator_exception")
 
     try:
         return run_skill_react(

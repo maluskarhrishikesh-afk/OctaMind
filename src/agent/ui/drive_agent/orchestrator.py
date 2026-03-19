@@ -3,10 +3,15 @@ Google Drive skill orchestrator.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
 
+from src.agent.telemetry import log_fallback_to_react
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
+
+
+logger = logging.getLogger("drive.orchestrator")
 
 
 
@@ -151,10 +156,8 @@ def execute_with_llm_orchestration(
             react_tool_docs=react_tool_docs,
         )
     except Exception as dag_exc:
-        import logging as _logging
-        _logging.getLogger("drive.orchestrator").warning(
-            "DAG path raised %s — falling back to ReAct", dag_exc
-        )
+        logger.warning("DAG path raised %s — falling back to ReAct", dag_exc)
+        log_fallback_to_react("drive", "drive_orchestrator_exception")
     try:
         return run_skill_react(
             skill_name="drive",

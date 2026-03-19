@@ -2,7 +2,8 @@
 
 > **Purpose:** This document explains how LLM calls happen in the new architecture that uses a single planning call, DAG-based execution, topological sort, and deterministic tool execution — with an optional fallback to ReAct only when required.
 
-Last updated: 2026-03-15 (added sub-agent DAG planning — `skill_dag_engine.py`; email/files/drive now use 2 LLM calls per sub-agent instead of 4–10; updated all scenario counts and optimisation table)
+Last updated: 2026-03-19 (added staged routing pipeline and planner-only local fallback retries for transient routing/planning failures)
+Previous: 2026-03-15 (added sub-agent DAG planning — `skill_dag_engine.py`; email/files/drive now use 2 LLM calls per sub-agent instead of 4–10; updated all scenario counts and optimisation table)
 
 ---
 
@@ -19,6 +20,8 @@ Last updated: 2026-03-15 (added sub-agent DAG planning — `skill_dag_engine.py`
 > **Sub-agents** (drive, email, files) now use the **sub-agent DAG engine** (`skill_dag_engine.py`): exactly **2 LLM calls per sub-agent** (1 plan + 1 synthesis), regardless of how many tool steps the task requires.  The master orchestrator still sees a single task — the sub-agent internally expands it into a deterministic tool schedule.
 
 > Fallback to `run_skill_react()` is automatic when DAG planning returns an invalid plan.
+
+> Routing itself is now staged through `run_routing_pipeline()`: classification, context resolution, and agent planning are logged independently. Routing/planning calls can retry on a planner-only local model when the primary provider returns retryable failures such as 429s or timeouts.
 
 ---
 
@@ -59,9 +62,9 @@ Deterministic Execution Engine (0 orchestration LLM calls)
 
 ---
 
-## Step 1 � Keyword Pre-Filter (0 LLM Calls)
+## Step 1 � Keyword Pre-Filter And High-Confidence Routes (0 LLM Calls)
 
-Before any LLM call is made, a fast regex/keyword scan checks whether the command references no agents at all. This eliminates the old `detect_agents_needed()` LLM classification call for clear cases.
+Before any LLM call is made, a fast regex/keyword scan checks whether the command references no agents at all. The router also has high-confidence single-agent and multi-agent routes for obvious cases such as mailbox-style email queries, filename searches, and local-file-search-plus-email-delivery.
 
 ```
 # router.py � keyword pre-filter runs before LLM routing
@@ -70,7 +73,20 @@ if keyword_pre_filter(command) == "no_agents":
 ```
 
 - **Zero-keyword-match commands ? 0 LLM router calls** (then 1 call for the chat reply)
-- Ambiguous commands ? LLM routing fires as before
+- **High-confidence routes ? 0 classification/planning calls** for the routing decision itself
+- Ambiguous commands ? staged LLM routing fires as before
+
+---
+
+## Step 1.5 � Planner-Only Local Fallback
+
+Routing/planning calls that use `request_completion(..., allow_local_fallback=True)` can retry on a configured local provider when the primary provider fails with retryable transient errors.
+
+- configured in `config/providers.json`
+- used for routing, intent classification, agent planning, DAG planning, sub-agent DAG planning, and NL workflow planning
+- capped by purpose-specific token budgets so fallback retries stay small and deterministic
+
+This fallback does not replace the primary conversational model. It exists to keep routing/planning available during rate limits and timeouts.
 
 ---
 

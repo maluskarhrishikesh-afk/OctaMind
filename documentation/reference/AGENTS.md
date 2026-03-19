@@ -39,6 +39,8 @@ Use Telegram when you want:
 - poll management
 - dashboard and Telegram conversation history merged back into the Personal Assistant workspace
 
+Telegram auto-replies also use per-message claim files so the same inbound update is not processed twice.
+
 Setup guide: [../setup/TELEGRAM_SETUP.md](../setup/TELEGRAM_SETUP.md)
 
 ### WhatsApp
@@ -53,6 +55,14 @@ The Personal Assistant layer is responsible for:
 - loading and merging context from dashboard and Telegram sessions
 - selecting the right skills for a request
 - coordinating multi-step workflows such as finding files and emailing them, or generating a report and sending it onward
+
+Routing is now staged rather than one opaque decision:
+
+- classification decides `chat` vs `fresh_task` vs `context_followup`
+- context resolution binds live follow-up context back to the active agent when needed
+- agent planning chooses the minimum routed skill set required for execution
+
+Routing and planning retries can use a configured local planner fallback without changing the primary conversational model.
 
 Primary UI module: `src/agent/ui/personal_assistant/app.py`
 
