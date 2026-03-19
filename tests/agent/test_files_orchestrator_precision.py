@@ -1337,6 +1337,154 @@ def test_specific_computer_folder_count_query_builds_recursive_report(monkeypatc
     assert Path(artifacts_out["file_path"]).exists()
 
 
+def test_specific_computer_folder_count_query_accepts_absolute_path(tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    neo_folder = tmp_path / "neo-123"
+    neo_folder.mkdir()
+    (neo_folder / "one.txt").write_text("1", encoding="utf-8")
+    nested = neo_folder / "Payslips"
+    nested.mkdir()
+
+    result = getattr(orchestrator, "_try_specific_computer_folder_count_query")(
+        f"How many files and folders are there in {neo_folder}?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert "Total Files: 1" in result["message"]
+    assert "Total Folders: 1" in result["message"]
+
+
+def test_specific_computer_folder_count_query_prefers_context_after_rename(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    neo_folder = tmp_path / "Neo"
+    neo_folder.mkdir()
+    (neo_folder / "one.jpg").write_text("1", encoding="utf-8")
+    nested = neo_folder / "Photos"
+    nested.mkdir()
+    (nested / "two.jpg").write_text("2", encoding="utf-8")
+
+    monkeypatch.setattr(orchestrator, "_resolve_folder_path_from_files_context", lambda: neo_folder)
+    monkeypatch.setattr(orchestrator, "_scan_named_path_all_drives", lambda item_name, item_type="folder", limit=10: [])
+
+    result = getattr(orchestrator, "_try_specific_computer_folder_count_query")(
+        "How many files and folders are there in Neo?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert "Total Files: 2" in result["message"]
+    assert "Total Folders: 1" in result["message"]
+
+
+def test_try_report_from_files_context_creates_csv_report(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    image_one = tmp_path / "one.png"
+    image_two = tmp_path / "two.jpg"
+    image_one.write_text("1", encoding="utf-8")
+    image_two.write_text("2", encoding="utf-8")
+    manifest = tmp_path / "images_manifest.txt"
+    manifest.write_text(f"{image_one}\n{image_two}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        context_manifest,
+        "read_context",
+        lambda agent="": {
+            "resolved_entities": {
+                "file_manifest": str(manifest),
+                "listed_files": [
+                    {"path": str(image_one), "name": image_one.name, "type": "file"},
+                    {"path": str(image_two), "name": image_two.name, "type": "file"},
+                ],
+            }
+        },
+    )
+
+    result = getattr(orchestrator, "_try_report_from_files_context")(
+        "Can you create a list of all image files and email it to me? It should contain the image file name, path and type.",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert result["file_path"].endswith(".csv")
+    report_text = Path(result["file_path"]).read_text(encoding="utf-8")
+    assert "summary_metric,summary_value" in report_text
+    assert "group,label,count" in report_text
+    assert "selected_columns,\"name, path, type\"" in report_text
+    assert "name,path,type" in report_text
+    assert "type,file,2" in report_text
+    assert "extension,.jpg,1" in report_text
+    assert "extension,.png,1" in report_text
+    assert image_one.name in report_text
+    assert str(image_two) in report_text
+
+
+def test_try_full_computer_inventory_report_creates_report_file(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    rows = [
+        {"name": "one.png", "path": str(tmp_path / "one.png"), "type": "file", "extension": ".png", "size_bytes": 1024, "size": "1.0 KB", "modified": "2026-03-19T10:00:00", "created": "2026-03-19T10:00:00"},
+        {"name": "two.jpg", "path": str(tmp_path / "two.jpg"), "type": "file", "extension": ".jpg", "size_bytes": 2048, "size": "2.0 KB", "modified": "2026-03-19T10:00:00", "created": "2026-03-19T10:00:00"},
+    ]
+
+    monkeypatch.setattr(
+        "src.files.features.search.search_file_all_drives",
+        lambda query="", extensions=None, limit=0, include_folders=False: {
+            "status": "success",
+            "count": len(rows),
+            "results": rows,
+            "file_path": rows[0]["path"],
+        },
+    )
+    monkeypatch.setattr(orchestrator, "_save_precise_search_context", lambda result, query: None)
+
+    result = getattr(orchestrator, "_try_full_computer_inventory_report")(
+        "Can you create a list of all image files and email it to me? It should contain the image file name, path and type.",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert result["file_path"].endswith(".csv")
+    report_text = Path(result["file_path"]).read_text(encoding="utf-8")
+    assert "summary_metric,summary_value" in report_text
+    assert "total_size_bytes,3072" in report_text
+    assert "selected_columns,\"name, path, type\"" in report_text
+    assert "name,path,type" in report_text
+    assert "one.png" in report_text
+
+
+def test_infer_report_fields_defaults_to_professional_schema() -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    fields = getattr(orchestrator, "_infer_report_fields")("Create a report of all python files")
+
+    assert fields == ["name", "path", "type", "extension", "size", "modified", "created"]
+
+
+def test_infer_report_fields_keeps_requested_columns_and_adds_extension_when_requested() -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    fields = getattr(orchestrator, "_infer_report_fields")(
+        "Create a report with the file name, path, type, and size for image files"
+    )
+
+    assert fields == ["name", "path", "type", "size"]
+
+    fields_with_extension = getattr(orchestrator, "_infer_report_fields")(
+        "Create a report with the file name, path, type, extension, and size for image files"
+    )
+
+    assert fields_with_extension == ["name", "path", "type", "extension", "size"]
+
+
 def test_try_reuse_existing_archive_from_context_returns_current_zip(monkeypatch, tmp_path: Path) -> None:
     orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
 

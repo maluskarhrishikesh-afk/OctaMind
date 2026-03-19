@@ -304,6 +304,24 @@ def test_email_orchestrator_sends_context_file_attachment_without_llm(tmp_path, 
     assert result["attachment_path"] == str(archive_path)
 
 
+def test_email_orchestrator_skips_raw_attachment_fast_path_for_report_request(tmp_path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+
+    image_path = tmp_path / "sample.png"
+    image_path.write_text("png", encoding="utf-8")
+
+    monkeypatch.setattr(orchestrator, "_resolve_file_attachment_from_context", lambda: str(image_path))
+    result = orchestrator._try_context_file_attachment_delivery(
+        "Can you create a list of all image files and email it to me? It should contain the image file name, path and type.",
+        "can you create a list of all image files and email it to me? it should contain the image file name, path and type.",
+        {
+            "send_email_with_attachment": lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("raw attachment fast path should not run for generated reports")),
+        },
+    )
+
+    assert result is None
+
+
 def test_email_orchestrator_lists_rules_for_are_there_any_query(monkeypatch) -> None:
     orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
 

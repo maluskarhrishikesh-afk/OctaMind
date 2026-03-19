@@ -55,6 +55,10 @@ _CURRENT_CHANNEL_DELIVERY_RE = re.compile(
     r"\b(send|share|show|tell)\b.{0,24}\b(it|this|that|me|here)\b",
     re.IGNORECASE | re.DOTALL,
 )
+_GENERATED_REPORT_REQUEST_RE = re.compile(
+    r"\b(list|report|table|csv|excel|spreadsheet|sheet)\b",
+    re.IGNORECASE,
+)
 _EMAIL_REFERENCE_STOP_WORDS = frozenset(
     {
         "the",
@@ -663,6 +667,8 @@ def _try_context_file_attachment_delivery(
     if _EMAIL_SUMMARY_INTENT_RE.search(normalized_query):
         return None
     if not any(token in normalized_query for token in ("mail", "email", "forward", "send")):
+        return None
+    if _GENERATED_REPORT_REQUEST_RE.search(raw_query):
         return None
 
     attachment_path = _resolve_file_attachment_from_context()

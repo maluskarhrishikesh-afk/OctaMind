@@ -12,6 +12,7 @@ Key corrections vs. older version:
 """
 from __future__ import annotations
 
+import csv
 import json
 import os
 import re
@@ -370,6 +371,324 @@ def _parse_direct_folder_count_query(user_query: str) -> Optional[str]:
     return folder_name or None
 
 
+def _looks_like_report_request(user_query: str) -> bool:
+    return bool(_REPORT_REQUEST_RE.search(str(user_query or "")))
+
+
+def _infer_report_fields(user_query: str) -> List[str]:
+    raw_query = str(user_query or "")
+    selected = [field for field, pattern in _REPORT_FIELD_PATTERNS.items() if pattern.search(raw_query)]
+    if selected:
+        if "type" in selected and "extension" not in selected and re.search(r"\b(file\s+type|format|formats|extension|extensions)\b", raw_query, re.IGNORECASE):
+            selected.append("extension")
+        return selected
+    return list(_DEFAULT_REPORT_FIELDS)
+
+
+def _format_size_bytes(size_bytes: int) -> str:
+    value = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024:
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} PB"
+
+
+def _report_field_value(item: Dict[str, Any], field: str) -> str:
+    if field == "name":
+        return str(item.get("name", "") or "")
+    if field == "path":
+        return str(item.get("path", "") or "")
+    if field == "type":
+        return str(item.get("type", "") or "").strip().lower()
+    if field == "extension":
+        return str(item.get("extension", "") or "").strip().lower()
+    if field == "size":
+        return str(item.get("size", "") or "")
+    if field == "size_bytes":
+        value = item.get("size_bytes", "")
+        return str(value if value is not None else "")
+    if field == "modified":
+        return str(item.get("modified", "") or "")
+    if field == "created":
+        return str(item.get("created", "") or "")
+    return ""
+
+
+def _build_report_rows_from_paths(paths: List[str]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_path in paths:
+        path_str = str(raw_path or "").strip()
+        if not path_str:
+            continue
+        path_key = path_str.casefold()
+        if path_key in seen:
+            continue
+        seen.add(path_key)
+        candidate = Path(path_str)
+        try:
+            if not candidate.exists():
+                continue
+            stat_result = candidate.stat()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        is_dir = candidate.is_dir()
+        rows.append(
+            {
+                "name": candidate.name,
+                "path": str(candidate),
+                "type": "folder" if is_dir else "file",
+                "extension": "" if is_dir else candidate.suffix.lower(),
+                "size_bytes": 0 if is_dir else int(stat_result.st_size or 0),
+                "size": "" if is_dir else _format_size_bytes(int(stat_result.st_size or 0)),
+                "modified": datetime.fromtimestamp(stat_result.st_mtime).isoformat(timespec="seconds"),
+                "created": datetime.fromtimestamp(stat_result.st_ctime).isoformat(timespec="seconds"),
+            }
+        )
+    return rows
+
+
+def _summarize_report_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    total_items = len(rows)
+    total_files = sum(1 for row in rows if str(row.get("type", "") or "") == "file")
+    total_folders = sum(1 for row in rows if str(row.get("type", "") or "") == "folder")
+    total_size_bytes = sum(int(row.get("size_bytes", 0) or 0) for row in rows)
+
+    by_type: Dict[str, int] = {}
+    by_extension: Dict[str, int] = {}
+    by_directory: Dict[str, int] = {}
+    for row in rows:
+        row_type = str(row.get("type", "") or "unknown") or "unknown"
+        by_type[row_type] = by_type.get(row_type, 0) + 1
+
+        extension = str(row.get("extension", "") or "").strip().lower()
+        if extension:
+            by_extension[extension] = by_extension.get(extension, 0) + 1
+
+        parent_name = Path(str(row.get("path", "") or "")).parent.name or "."
+        by_directory[parent_name] = by_directory.get(parent_name, 0) + 1
+
+    return {
+        "total_items": total_items,
+        "total_files": total_files,
+        "total_folders": total_folders,
+        "total_size_bytes": total_size_bytes,
+        "total_size_human": _format_size_bytes(total_size_bytes),
+        "by_type": dict(sorted(by_type.items())),
+        "top_extensions": sorted(by_extension.items(), key=lambda item: (-item[1], item[0]))[:10],
+        "top_directories": sorted(by_directory.items(), key=lambda item: (-item[1], item[0]))[:10],
+    }
+
+
+def _write_inventory_report(
+    *,
+    label: str,
+    rows: List[Dict[str, Any]],
+    fields: List[str],
+    source_query: str,
+) -> Path:
+    report_dir = get_your_data_dir("reports", "files", create=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_label = re.sub(r"[^A-Za-z0-9._-]+", "_", str(label or "file_inventory")).strip("._") or "file_inventory"
+    report_path = report_dir / f"{safe_label}_{timestamp}.csv"
+    summary = _summarize_report_rows(rows)
+    with report_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["report_title", label])
+        writer.writerow(["generated_at", datetime.now().isoformat(timespec="seconds")])
+        writer.writerow(["source_query", str(source_query or "").strip()])
+        writer.writerow(["selected_columns", ", ".join(fields)])
+        writer.writerow([])
+        writer.writerow(["summary_metric", "summary_value"])
+        writer.writerow(["total_items", summary["total_items"]])
+        writer.writerow(["total_files", summary["total_files"]])
+        writer.writerow(["total_folders", summary["total_folders"]])
+        writer.writerow(["total_size_bytes", summary["total_size_bytes"]])
+        writer.writerow(["total_size_human", summary["total_size_human"]])
+        writer.writerow([])
+        writer.writerow(["group", "label", "count"])
+        for item_type, count in summary["by_type"].items():
+            writer.writerow(["type", item_type, count])
+        for extension, count in summary["top_extensions"]:
+            writer.writerow(["extension", extension, count])
+        for directory_name, count in summary["top_directories"]:
+            writer.writerow(["directory", directory_name, count])
+        writer.writerow([])
+        writer.writerow(fields)
+        for row in rows:
+            writer.writerow([_report_field_value(row, field) for field in fields])
+    return report_path
+
+
+def _build_report_response(
+    *,
+    label: str,
+    rows: List[Dict[str, Any]],
+    fields: List[str],
+    source_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    report_path = _write_inventory_report(label=label, rows=rows, fields=fields, source_query=source_query)
+    summary = _summarize_report_rows(rows)
+    _save_single_file_context(str(report_path), source_query)
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = str(report_path)
+        artifacts_out["found_paths"] = [str(report_path)]
+    field_list = ", ".join(fields)
+    return {
+        "status": "success",
+        "message": (
+            f"I created a professional report for {len(rows)} item(s) with these columns: {field_list}.\n"
+            f"Totals: {summary['total_files']} file(s), {summary['total_folders']} folder(s), {summary['total_size_human']} overall.\n"
+            f"Report path: {report_path}"
+        ),
+        "action": "react_response",
+        "file_path": str(report_path),
+        "raw": {"rows": rows, "fields": fields, "report_path": str(report_path), "summary": summary},
+    }
+
+
+def _load_paths_from_files_context() -> List[str]:
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+    if not isinstance(entities, dict):
+        return []
+
+    manifest_path = str(entities.get("file_manifest", "") or "").strip()
+    if manifest_path:
+        candidate_manifest = Path(manifest_path)
+        try:
+            if candidate_manifest.exists():
+                return [line.strip() for line in candidate_manifest.read_text(encoding="utf-8").splitlines() if line.strip()]
+        except (OSError, RuntimeError, ValueError):
+            pass
+
+    selected_paths = entities.get("selected_paths", [])
+    if isinstance(selected_paths, list) and selected_paths:
+        return [str(path).strip() for path in selected_paths if str(path).strip()]
+
+    listed_files = entities.get("listed_files", [])
+    if isinstance(listed_files, list) and listed_files:
+        return [
+            str(item.get("path", "") or "").strip()
+            for item in listed_files
+            if isinstance(item, dict) and str(item.get("path", "") or "").strip()
+        ]
+    return []
+
+
+def _try_report_from_files_context(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if _FRESH_SEARCH_RE.search(raw_query):
+        return None
+    if not _looks_like_report_request(raw_query):
+        return None
+
+    rows = _build_report_rows_from_paths(_load_paths_from_files_context())
+    if not rows:
+        return None
+
+    label_match = _REPORT_TYPE_TOKENS_RE.search(raw_query)
+    label = re.sub(r"\s+", "_", str(label_match.group(1) or "files_report").strip().lower()) if label_match else "files_report"
+    return _build_report_response(
+        label=label,
+        rows=rows,
+        fields=_infer_report_fields(raw_query),
+        source_query=raw_query,
+        artifacts_out=artifacts_out,
+    )
+
+
+def _try_full_computer_inventory_report(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if not _looks_like_report_request(raw_query):
+        return None
+
+    extensions = _infer_extension_filter(raw_query)
+    if not extensions:
+        explicit_ext_match = re.search(r"\b([a-z0-9]{2,8})\s+files?\b", raw_query, re.IGNORECASE)
+        if explicit_ext_match:
+            token = str(explicit_ext_match.group(1) or "").strip().lower()
+            if token not in {"all", "any", "file", "files"}:
+                extensions = [token]
+    if not extensions:
+        return None
+
+    from src.files.features.search import search_file_all_drives  # noqa: PLC0415
+
+    result = search_file_all_drives(query="", extensions=extensions, limit=0, include_folders=False)
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Search failed."),
+            "action": "react_response",
+        }
+
+    result = _filter_precise_search_results(raw_query, result)
+    rows = [item for item in result.get("results", []) if isinstance(item, dict)]
+    if not rows:
+        return {
+            "status": "success",
+            "message": "I couldn't find any matching files to include in a report.",
+            "action": "react_response",
+        }
+
+    _save_precise_search_context(result, raw_query)
+    label_match = _REPORT_TYPE_TOKENS_RE.search(raw_query)
+    label = re.sub(r"\s+", "_", str(label_match.group(1) or "file_inventory").strip().lower()) if label_match else "file_inventory"
+    return _build_report_response(
+        label=label,
+        rows=rows,
+        fields=_infer_report_fields(raw_query),
+        source_query=raw_query,
+        artifacts_out=artifacts_out,
+    )
+
+
+def _looks_like_absolute_path(value: str) -> bool:
+    return bool(_ABSOLUTE_PATH_RE.match(str(value or "").strip()))
+
+
+def _resolve_explicit_folder_target(folder_target: str, *, prefer_context: bool = False) -> Optional[Path]:
+    raw_target = str(folder_target or "").strip().strip("\"'").strip()
+    if not raw_target:
+        return None
+
+    if prefer_context:
+        contextual_path = _resolve_folder_path_from_files_context()
+        if contextual_path is not None and contextual_path.name.casefold() == raw_target.casefold():
+            return contextual_path
+
+    if _looks_like_absolute_path(raw_target):
+        candidate = Path(raw_target)
+        try:
+            if candidate.exists() and candidate.is_dir():
+                return candidate
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+    if not prefer_context:
+        matches = _scan_named_path_all_drives(raw_target, item_type="folder", limit=10)
+        if matches:
+            return matches[0]
+
+    named_candidate = _resolve_named_folder_path(raw_target)
+    if named_candidate is not None:
+        return named_candidate
+
+    matches = _scan_named_path_all_drives(raw_target, item_type="folder", limit=10)
+    return matches[0] if matches else None
+
+
 def _parse_scoped_named_search(user_query: str) -> Optional[Dict[str, Any]]:
     raw_query = str(user_query or "")
     match = _SCOPED_SYSTEM_FOLDER_RE.search(raw_query)
@@ -537,15 +856,40 @@ _LIST_NAMES_RE = re.compile(
     r'|\btype the file names here\b',
     re.IGNORECASE | re.DOTALL,
 )
+_REPORT_REQUEST_RE = re.compile(
+    r'\b(create|make|generate|write|export|prepare|build)\b.{0,40}\b(list|report|table|sheet|spreadsheet|csv|excel)\b'
+    r'|\b(list|report|table|sheet|spreadsheet|csv|excel)\b.{0,40}\b(of|for)\b',
+    re.IGNORECASE | re.DOTALL,
+)
+_REPORT_FIELD_PATTERNS = {
+    "name": re.compile(r"\b(file\s+name|folder\s+name|name|names)\b", re.IGNORECASE),
+    "path": re.compile(r"\b(path|paths|location|locations)\b", re.IGNORECASE),
+    "type": re.compile(r"\b(type|types|kind|kinds|extension|extensions)\b", re.IGNORECASE),
+    "extension": re.compile(r"\b(extension|extensions|suffix|suffixes|format|formats)\b", re.IGNORECASE),
+    "size": re.compile(r"\b(size|sizes|file\s+size|file\s+sizes)\b", re.IGNORECASE),
+    "modified": re.compile(r"\b(modified|updated|last\s+modified)\b", re.IGNORECASE),
+    "created": re.compile(r"\b(created|creation\s+date)\b", re.IGNORECASE),
+}
+_DEFAULT_REPORT_FIELDS = ["name", "path", "type", "extension", "size", "modified", "created"]
 _DIRECTORY_FILE_COUNT_RE = re.compile(
     r'\bhow many\s+files\b'
     r'|\bfile\s+count\b'
     r'|\bnumber\s+of\s+files\b',
     re.IGNORECASE,
 )
+_DIRECT_FOLDER_COUNT_RE = re.compile(
+    r'\bhow\s+many\s+(?:files?\s+and\s+folders?|folders?\s+and\s+files?)\s+are\s+there\s+in\s+(.+?)'
+    r'(?:\s+folder)?(?:\s+(?:on|in)\s+(?:my|this)\s+(?:computer|laptop|pc|machine))?\s*[?!.]?$',
+    re.IGNORECASE | re.DOTALL,
+)
 _FOLLOW_UP_RENAME_RE = re.compile(
     r'\brename\b.*?\bto\b\s+["\']?([^"\'\n]+?)["\']?\s*[?!.]?$',
     re.IGNORECASE | re.DOTALL,
+)
+_ABSOLUTE_PATH_RE = re.compile(r'^(?:[A-Za-z]:[\\/]|\\\\)')
+_REPORT_TYPE_TOKENS_RE = re.compile(
+    r'\b(image file|image files|images|photos|pictures|video files|videos|pdf files|pdfs|documents|document files)\b',
+    re.IGNORECASE,
 )
 
 
@@ -907,15 +1251,18 @@ def _try_specific_computer_folder_count_query(
     user_query: str,
     artifacts_out: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    folder_name = _parse_direct_folder_count_query(user_query)
-    if not folder_name:
+    folder_target = _parse_direct_folder_count_query(user_query)
+    if not folder_target:
         return None
 
-    matches = _scan_named_path_all_drives(folder_name, item_type="folder", limit=10)
-    if not matches:
+    target_path = _resolve_explicit_folder_target(
+        folder_target,
+        prefer_context=not bool(_COMPUTER_SCOPE_RE.search(str(user_query or ""))),
+    )
+    if target_path is None:
         return None
 
-    return _build_recursive_folder_count_response(matches[0], folder_name, artifacts_out)
+    return _build_recursive_folder_count_response(target_path, folder_target, artifacts_out)
 
 
 def _resolve_folder_path_from_files_context() -> Optional[Path]:
@@ -1043,12 +1390,15 @@ def _scan_named_path_all_drives(item_name: str, *, item_type: str = "folder", li
                         entry_is_dir = entry.is_dir(follow_symlinks=False)
                         entry_is_file = entry.is_file(follow_symlinks=False)
                         if entry_name.lower() == normalized:
+                            candidate_path = Path(entry.path)
+                            if _is_temp_or_test_artifact(candidate_path) or _is_generated_runtime_artifact(candidate_path):
+                                continue
                             if item_type == "folder" and entry_is_dir:
-                                matches.append(Path(entry.path))
+                                matches.append(candidate_path)
                             elif item_type == "file" and entry_is_file:
-                                matches.append(Path(entry.path))
+                                matches.append(candidate_path)
                             elif item_type == "any":
-                                matches.append(Path(entry.path))
+                                matches.append(candidate_path)
                             if len(matches) >= limit:
                                 break
                         if entry_is_dir and entry_name not in _SKIP_RESULT_PARTS:
@@ -2560,6 +2910,10 @@ def execute_with_llm_orchestration(
     if direct is not None:
         return _return_fast_path_result(direct)
 
+    report_from_context = _try_report_from_files_context(user_query, artifacts_out)
+    if report_from_context is not None:
+        return _return_fast_path_result(report_from_context)
+
     list_names = _try_list_names_from_files_context(user_query)
     if list_names is not None:
         return _return_fast_path_result(list_names)
@@ -2619,6 +2973,10 @@ def execute_with_llm_orchestration(
     filename_contains = _try_filename_contains_search(user_query, artifacts_out)
     if filename_contains is not None:
         return _return_fast_path_result(filename_contains)
+
+    full_inventory_report = _try_full_computer_inventory_report(user_query, artifacts_out)
+    if full_inventory_report is not None:
+        return _return_fast_path_result(full_inventory_report)
 
     # ── Pre-flight: deterministic targeted full-computer search ───────────
     precise = _try_precise_full_computer_search(user_query, artifacts_out)
