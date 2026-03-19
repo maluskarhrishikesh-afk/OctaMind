@@ -1438,6 +1438,53 @@ class GmailServiceClient:
         except Exception as exc:
             return {'status': 'error', 'message': f"Error archiving emails: {exc}"}
 
+    def archive_all_matching_emails(self, query: str, batch_size: int = 200, max_total: int = 0) -> Dict:
+        """Archive all matching inbox emails in batches until the query is exhausted."""
+        try:
+            archived = 0
+            batches = 0
+            seen_ids = set()
+            effective_batch_size = max(int(batch_size or 200), 1)
+            effective_max_total = max(int(max_total or 0), 0)
+
+            while True:
+                current_batch_size = effective_batch_size
+                if effective_max_total:
+                    remaining = effective_max_total - archived
+                    if remaining <= 0:
+                        break
+                    current_batch_size = min(current_batch_size, remaining)
+
+                response = self.gmail_service.users().messages().list(
+                    userId=self.user_id,
+                    q=query,
+                    maxResults=current_batch_size,
+                ).execute()
+                messages = response.get('messages', [])
+                if not messages:
+                    break
+
+                ids = [m['id'] for m in messages if m.get('id') and m['id'] not in seen_ids]
+                if not ids:
+                    break
+
+                self.gmail_service.users().messages().batchModify(
+                    userId=self.user_id,
+                    body={'ids': ids, 'removeLabelIds': ['INBOX']},
+                ).execute()
+                seen_ids.update(ids)
+                archived += len(ids)
+                batches += 1
+
+            return {
+                'status': 'success',
+                'archived_count': archived,
+                'batches_processed': batches,
+                'message': f"Archived {archived} email(s) across {batches} batch(es). They remain in All Mail.",
+            }
+        except Exception as exc:
+            return {'status': 'error', 'message': f"Error archiving emails in batches: {exc}"}
+
     def thread_mute(self, thread_id: str) -> Dict:
         """Mute a Gmail thread — future replies skip the Inbox."""
         try:
@@ -2510,6 +2557,10 @@ def unsubscribe_email(message_id: str) -> Dict:
 
 def archive_emails(query: str, max_results: int = 50) -> Dict:
     return _get_client().archive_emails(query, max_results)
+
+
+def archive_all_matching_emails(query: str, batch_size: int = 200, max_total: int = 0) -> Dict:
+    return _get_client().archive_all_matching_emails(query, batch_size, max_total)
 
 
 def thread_mute(thread_id: str) -> Dict:

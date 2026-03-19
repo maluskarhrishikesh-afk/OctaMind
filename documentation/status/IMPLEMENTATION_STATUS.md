@@ -3,6 +3,7 @@
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
 Last updated: 2026-03-19 (Session 10 - staged routing pipeline, local planner fallback, telemetry counters, deterministic email fast paths, dashboard history restore hardening)
+Last updated: 2026-03-19 (Session 11 - files-agent follow-up grounding/disambiguation, mailbox preferences, mailbox review scheduling, continuous cleanup, full-batch Gmail archive pagination)
 Last updated: 2026-03-17 (Session 9 - security control plane, active manifest registry, per-PA Telegram runtime hardening, dashboard operations panels)
 Last updated: 2026-03-08 (Session 7 — repo hygiene cleanup, persistent JSON error registry, runtime clutter policy)  
 Last updated: 2026-03-12 (Session 8 — dashboard-embedded PA workspace, unified Telegram/dashboard history, embedded chat-shell layout fix)  
@@ -13,6 +14,22 @@ Previous: 2026-03-02 (Session 3 — New Files tools: search_file_all_drives, del
 Previous: 2026-03-02 (Bug fixes: calendar date-context loss, ReAct observation truncation, Telegram Markdown entity crash, DAG JSON fence parsing verified; added human-friendly per-request workflow summary log; DAG algorithm walkthrough document added)  
 Previous: 2026-03-02 (Telegram UX overhaul: typing indicators, real-time progress editing, /reset & /agents commands, long-message splitting, file-artifact delivery; Dashboard download button for file artifacts; HubProcessor scheduling-context enrichment propagated to Telegram channel; `send_document_file` multipart upload added to telegram_service)  
 Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine causing cascading `unknown action ''` failures; fixed tilde path expansion in dag_planner instruction resolver; added total LLM call count to workflow completion log; fixed website unicode emoji rendering; updated quickstart to remove internal Python snippet)
+
+---
+
+## ✅ 2026-03-19 Session 11 — Files Grounding + Mailbox Automation
+
+Detailed session log:
+
+- [documentation/status/SESSION_11_FILES_AND_MAILBOX_IMPLEMENTATION_LOG.md](documentation/status/SESSION_11_FILES_AND_MAILBOX_IMPLEMENTATION_LOG.md)
+
+Highlights:
+
+- files-agent follow-ups now handle explicit path copy, `the one in ...` disambiguation, multi-item Downloads lookup, numbered clarification, and numeric follow-up replay
+- mailbox organization now has durable markdown preferences, guided setup, direct edits, review digest, label-rule save/apply flow, and hub/router hardening
+- mailbox preferences now support scheduled daily/weekly review and continuous safe cleanup synced into automation config
+- Gmail mailbox apply now supports full-batch pagination so runs do not stop at the first 200 matching emails
+- focused regression coverage for files-agent precision, mailbox routing, mailbox automation wrappers, and paginated Gmail archive behavior is in place
 
 ---
 

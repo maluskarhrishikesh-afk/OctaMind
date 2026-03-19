@@ -554,6 +554,18 @@ _MAILBOX_TIME_RE = re.compile(
     r"|\b\d{1,2}/\d{1,2}/\d{2,4}\b",
     re.IGNORECASE,
 )
+_MAILBOX_ORGANIZATION_RE = re.compile(
+    r"\b(organi[sz]e|clean\s*up|declutter|de-clutter|tidy)\b.*\b(mailbox|inbox|gmail|email)\b"
+    r"|\b(mailbox|inbox|gmail|email)\b.*\b(organi[sz]e|clean\s*up|declutter|de-clutter|tidy)\b",
+    re.IGNORECASE,
+)
+_NUMERIC_SELECTION_ONLY_RE = re.compile(r"^\s*(?:option\s+)?\d{1,2}\s*[?.!]*\s*$", re.IGNORECASE)
+_MAILBOX_PREFERENCE_EDIT_RE = re.compile(
+    r"\b(change|set|turn\s+off|turn\s+on|disable|enable|edit|update)\b.*\b(newsletters?|promotions?|draft\s+suggestions?|draft\s+repl(?:y|ies)|mailbox\s+mode|mailbox\s+preferences|inbox\s+preferences)\b"
+    r"|\balways\s+(label|move)\b.*\b(mail|emails?)\b"
+    r"|\b(review|digest|recap)\b.*\b(mailbox|inbox|email)\b",
+    re.IGNORECASE,
+)
 _FILENAME_SEARCH_RE = re.compile(
     r"\b(filename|file\s*name)\b.*\bcontain(?:s|ing)?\b"
     r"|\bcontain(?:s|ing)?\b.*\b(filename|file\s*name)\b",
@@ -567,9 +579,11 @@ _FOLLOWUP_NOISY_TOKENS: FrozenSet[str] = frozenset(
 def _looks_like_mailbox_query(command: str) -> bool:
     lower = str(command or "").lower().strip()
     if not lower or not _MAILBOX_DOMAIN_RE.search(lower):
-        return False
+        return bool(_MAILBOX_PREFERENCE_EDIT_RE.search(lower))
     if re.search(r"\b(calendar|meeting|meetings|event|events|schedule|scheduler|drive|file|files|folder|folders|linkedin|whatsapp|telegram)\b", lower):
         return False
+    if _MAILBOX_ORGANIZATION_RE.search(lower):
+        return True
     if _MAILBOX_TIME_RE.search(lower):
         return True
     if re.search(r"\b(list|show|find|search|count|what|which|latest|recent|unread|received)\b", lower):
@@ -831,6 +845,15 @@ def _classify_message(
     session_state: Optional[dict],
     valid: set[str],
 ) -> ClassificationStageResult:
+    if active_context and _NUMERIC_SELECTION_ONLY_RE.match(str(command or "")):
+        pending_selection = active_context.get("pending_selection") if isinstance(active_context, dict) else None
+        if isinstance(pending_selection, dict):
+            return ClassificationStageResult(
+                category="context_followup",
+                reason="heuristic: numeric reply for active pending selection",
+                source="pending_selection",
+            )
+
     fast_multi_route = _route_high_confidence_multi_agent(command, valid)
     if fast_multi_route:
         return ClassificationStageResult(

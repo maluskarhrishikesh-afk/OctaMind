@@ -269,6 +269,26 @@ class TestListAllFiltersAndLabels:
         assert result["system_labels"][0]["name"] == "INBOX"
 
 
+class TestArchiveAllMatchingEmails:
+    def test_archives_all_batches_until_query_is_exhausted(self):
+        client, service = _make_client()
+        service.users.return_value.messages.return_value.list.return_value.execute.side_effect = [
+            {"messages": [{"id": "m1"}, {"id": "m2"}]},
+            {"messages": [{"id": "m3"}]},
+            {"messages": []},
+        ]
+
+        result = client.archive_all_matching_emails("category:promotions in:inbox", batch_size=2)
+
+        assert result["status"] == "success"
+        assert result["archived_count"] == 3
+        assert result["batches_processed"] == 2
+        batch_modify_calls = service.users.return_value.messages.return_value.batchModify.call_args_list
+        assert len(batch_modify_calls) == 2
+        assert batch_modify_calls[0].kwargs["body"]["ids"] == ["m1", "m2"]
+        assert batch_modify_calls[1].kwargs["body"]["ids"] == ["m3"]
+
+
 class TestDeleteAllFilters:
     def test_deletes_all_filters_and_preserves_labels(self):
         client, service = _make_client()

@@ -53,6 +53,10 @@ _SCOPED_SYSTEM_FOLDER_CONTAINS_RE = re.compile(
     r"\b(?:is\s+there|do\s+i\s+have|find|search\s+for|look\s+for|locate|check\s+if)\b.*?\b(?:(file|folder)\s+)?(?:containing|contains|with)\s+(?:the\s+)?name\s+[\"']?([^\"'?.\n]+?)[\"']?\s+in\s+(downloads?|desktop|documents?|pictures?|videos?|music)\b",
     re.IGNORECASE | re.DOTALL,
 )
+_SCOPED_MULTI_NAMED_RE = re.compile(
+    r"\b(?:is\s+there|are\s+there|do\s+i\s+have|find|search\s+for|look\s+for|locate|check\s+if)\b.*?\b(?:(zip\s+files?|files?|folders?)\s+)?(?:named|called)\s+(.+?)\s+in\s+(downloads?|desktop|documents?|pictures?|videos?|music)\b",
+    re.IGNORECASE | re.DOTALL,
+)
 _FILENAME_CONTAINS_RE = re.compile(
     r"\b(?:containing|contains|with)\s+[\"']?([^\"'?.\n]+?)[\"']?\s+in\s+(?:its|the)\s+file\s*name\b",
     re.IGNORECASE,
@@ -83,7 +87,7 @@ _SPECIFIC_COMPUTER_ITEM_LOOKUP_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _CONTEXTUAL_FOLDER_COUNT_RE = re.compile(
-    r"\bhow\s+many\s+(?:files?\s+and\s+folders?|folders?\s+and\s+files?)\b.*?\b(?:inside|in)\s+(?:it|that|this|the\s+folder|the\s+directory)\b",
+    r"\bhow\s+many\s+(?:files?\s+and\s+folders?|folders?\s+and\s+files?)\b.*?\b(?:inside|in)\s+(?:it|that|this|the\s+folder|the\s+directory|the\s+one(?:\s+inside\s+[^?.!\n]+)?)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _DIRECT_FOLDER_COUNT_RE = re.compile(
@@ -128,6 +132,10 @@ _COUNT_WORD_MAP = {
     "nine": 9,
     "ten": 10,
 }
+_PENDING_SELECTION_REPLY_RE = re.compile(
+    r"^\s*(?:option\s+)?(\d{1,2})(?:\s*(?:please|pls|ok|okay|thanks)\s*)?[?.!]*\s*$",
+    re.IGNORECASE,
+)
 
 
 def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -360,6 +368,50 @@ def _parse_specific_computer_item_query(user_query: str) -> Optional[Dict[str, s
     return {
         "item_type": item_type,
         "item_name": item_name,
+    }
+
+
+def _split_named_terms(raw_terms: str) -> List[str]:
+    value = str(raw_terms or "").strip()
+    if not value:
+        return []
+    value = re.sub(r"\b(?:and|or)\b", ",", value, flags=re.IGNORECASE)
+    terms = []
+    seen: set[str] = set()
+    for chunk in value.split(","):
+        term = str(chunk or "").strip().strip("\"'").rstrip("?.!,")
+        term = re.sub(r"\b(?:zip\s+files?|files?|folders?)\b", "", term, flags=re.IGNORECASE).strip()
+        if not term:
+            continue
+        key = term.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(term)
+    return terms
+
+
+def _parse_scoped_multi_named_search(user_query: str) -> Optional[Dict[str, Any]]:
+    raw_query = str(user_query or "")
+    match = _SCOPED_MULTI_NAMED_RE.search(raw_query)
+    if not match:
+        return None
+
+    item_phrase = str(match.group(1) or "").strip().lower()
+    names = _split_named_terms(str(match.group(2) or ""))
+    folder_keyword = str(match.group(3) or "").strip().lower()
+    scope_path = _system_folder_path(folder_keyword)
+    if len(names) < 2 or scope_path is None:
+        return None
+
+    extensions = ["zip"] if "zip" in item_phrase else []
+    item_type = "folder" if "folder" in item_phrase else "file"
+    return {
+        "terms": names,
+        "item_type": item_type,
+        "extensions": extensions,
+        "scope_label": scope_path.name,
+        "directory": str(scope_path),
     }
 
 
@@ -845,7 +897,7 @@ def _filter_precise_search_results(user_query: str, result: Dict[str, Any]) -> D
 
 
 _FOLLOW_UP_ZIP_RE = re.compile(
-    r'\bzip\b.{0,80}\b(them|those|it|files?|results?|found|searched|previous search)\b'
+    r'\bzip\b.{0,80}\b(them|those|it|this|that|the\s+one|one|the\s+folder|folder|files?|results?|found|searched|previous search)\b'
     r'|\b(previous search|searched|found)\b.{0,80}\bzip\b'
     r'|\bzip searched\b',
     re.IGNORECASE | re.DOTALL,
@@ -1292,6 +1344,161 @@ def _resolve_folder_path_from_files_context() -> Optional[Path]:
     return None
 
 
+def _load_path_candidates_from_files_context(*, directories_only: bool = False) -> List[Path]:
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+    candidates: List[Path] = []
+    seen: set[str] = set()
+
+    def _append_candidate(path_value: str) -> None:
+        candidate = Path(str(path_value or "").strip())
+        candidate_key = str(candidate).casefold()
+        if not candidate_key or candidate_key in seen:
+            return
+        try:
+            if candidate.exists() and (not directories_only or candidate.is_dir()):
+                seen.add(candidate_key)
+                candidates.append(candidate)
+        except (OSError, RuntimeError, ValueError):
+            return
+
+    directory_value = str(entities.get("directory_path", "") or "").strip()
+    if directory_value:
+        _append_candidate(directory_value)
+
+    selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+    if isinstance(selected_paths, list):
+        for raw_path in selected_paths:
+            _append_candidate(str(raw_path or ""))
+
+    listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+    if isinstance(listed_files, list):
+        for item in listed_files:
+            if not isinstance(item, dict):
+                continue
+            if directories_only and str(item.get("type", "") or "").strip().lower() != "folder":
+                continue
+            _append_candidate(str(item.get("path", "") or ""))
+
+    return candidates
+
+
+def _extract_context_location_hint(user_query: str) -> str:
+    raw_query = _strip_injected_blocks(user_query)
+    patterns = (
+        r"\bthe\s+one\s+inside\s+(.+?)(?=\s+\b(?:to|into|from|on)\b|[?.!,]|$)",
+        r"\bthe\s+one\s+in\s+(.+?)(?=\s+\b(?:to|into|from|on)\b|[?.!,]|$)",
+        r"\binside\s+(.+?)(?=\s+\b(?:to|into|from|on)\b|[?.!,]|$)",
+        r"\bin\s+(.+?)(?=\s+\b(?:to|into|from|on)\b|[?.!,]|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, raw_query, re.IGNORECASE)
+        if not match:
+            continue
+        value = str(match.group(1) or "").strip().rstrip("?.!,")
+        lowered = value.casefold()
+        if lowered in {"it", "that", "this", "the folder", "the directory"}:
+            continue
+        return value
+    return ""
+
+
+def _resolve_contextual_path_from_hint(user_query: str, *, directories_only: bool = False) -> Optional[Path]:
+    candidates = _load_path_candidates_from_files_context(directories_only=directories_only)
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    hint = _extract_context_location_hint(user_query)
+    if not hint:
+        return None
+
+    hint_parts = [part.casefold() for part in re.split(r"[\\/]+", hint) if part.strip()]
+    if not hint_parts:
+        hint_parts = [hint.casefold()]
+
+    for candidate in candidates:
+        candidate_parts = [part.casefold() for part in candidate.parts]
+        if all(part in candidate_parts for part in hint_parts):
+            return candidate
+
+    hint_token = hint.casefold()
+    for candidate in candidates:
+        if hint_token in str(candidate).casefold():
+            return candidate
+
+    return None
+
+
+def _resolve_contextual_folder_from_hint(user_query: str) -> Optional[Path]:
+    return _resolve_contextual_path_from_hint(user_query, directories_only=True)
+
+
+def _build_contextual_disambiguation_response(
+    user_query: str,
+    *,
+    action_label: str,
+    directories_only: bool = False,
+) -> Optional[Dict[str, Any]]:
+    plural_reference_re = re.compile(r'\b(them|those|both|all|these|results?|files?|folders?|items?)\b', re.IGNORECASE)
+    singular_reference_re = re.compile(r'\b(it|this|that|the\s+one|one|the\s+folder|the\s+directory)\b', re.IGNORECASE)
+    if plural_reference_re.search(user_query) and not singular_reference_re.search(user_query):
+        return None
+
+    candidates = _load_path_candidates_from_files_context(directories_only=directories_only)
+    if len(candidates) <= 1:
+        return None
+
+    resolved = _resolve_contextual_path_from_hint(user_query, directories_only=directories_only)
+    if resolved is not None:
+        return None
+
+    preview = candidates[:3]
+    try:
+        from src.agent.manifest.context_manifest import read_context, write_context  # noqa: PLC0415
+
+        ctx = read_context(agent="files") or {}
+        entities = dict(ctx.get("resolved_entities", {}) or {}) if isinstance(ctx, dict) else {}
+        write_context(
+            agent="files",
+            topic=str(ctx.get("topic", "file_search") or "file_search") if isinstance(ctx, dict) else "file_search",
+            resolved_entities=entities,
+            awaiting=str(ctx.get("awaiting", "file_action") or "file_action") if isinstance(ctx, dict) else "file_action",
+            pending_selection={
+                "kind": "contextual_path_choice",
+                "action_label": action_label,
+                "original_query": user_query,
+                "candidate_paths": [str(path) for path in preview],
+                "rephrase_index": len(preview) + 1,
+            },
+            scope=ctx.get("scope") if isinstance(ctx, dict) else None,
+        )
+    except _FILES_ORCHESTRATOR_ERRORS:
+        pass
+
+    lines = [
+        f"I found multiple possible matches for this {action_label} request and I don't want to guess.",
+        "Reply with 1, 2, or 3, or rephrase the request.",
+        "",
+    ]
+    for index, path in enumerate(preview, start=1):
+        lines.append(f"{index}. {path}")
+    if len(candidates) > len(preview):
+        lines.append(f"{len(preview) + 1}. None of these - rephrase the request")
+    else:
+        lines.append(f"{len(preview) + 1}. Rephrase the request")
+
+    return {
+        "status": "success",
+        "message": "\n".join(lines),
+        "action": "react_response",
+        "raw": {"candidates": [str(path) for path in candidates], "clarification_needed": True},
+    }
+
+
 def _try_contextual_folder_count_query(
     user_query: str,
     artifacts_out: Optional[Dict[str, Any]],
@@ -1300,7 +1507,9 @@ def _try_contextual_folder_count_query(
     if not _CONTEXTUAL_FOLDER_COUNT_RE.search(raw_query):
         return None
 
-    target_path = _resolve_folder_path_from_files_context()
+    target_path = _resolve_contextual_folder_from_hint(raw_query)
+    if target_path is None:
+        target_path = _resolve_folder_path_from_files_context()
     if target_path is None:
         return None
 
@@ -1432,7 +1641,30 @@ def _try_specific_computer_item_query(
         }
 
     target_path = matches[0]
-    _save_single_file_context(str(target_path), user_query)
+    if len(matches) == 1:
+        _save_single_file_context(str(target_path), user_query)
+    else:
+        try:
+            from src.agent.manifest.context_manifest import auto_save_files_context  # noqa: PLC0415
+
+            auto_save_files_context(
+                {
+                    "status": "success",
+                    "results": [
+                        {
+                            "path": str(path),
+                            "name": path.name,
+                            "type": parsed["item_type"],
+                        }
+                        for path in matches
+                    ],
+                    "count": len(matches),
+                    "file_path": str(target_path),
+                },
+                user_query,
+            )
+        except _FILES_ORCHESTRATOR_ERRORS:
+            _save_single_file_context(str(target_path), user_query)
     if artifacts_out is not None:
         artifacts_out["file_path"] = str(target_path)
 
@@ -1607,6 +1839,92 @@ def _save_single_file_context(path_str: str, query: str) -> None:
     )
 
 
+def _try_resolve_pending_contextual_selection(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    selection_match = _PENDING_SELECTION_REPLY_RE.match(raw_query)
+    if not selection_match:
+        return None
+
+    from src.agent.manifest.context_manifest import read_context, write_context  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    if not isinstance(ctx, dict):
+        return None
+
+    pending = ctx.get("pending_selection")
+    if not isinstance(pending, dict) or str(pending.get("kind", "") or "") != "contextual_path_choice":
+        return None
+
+    choice = int(selection_match.group(1))
+    candidate_paths = [
+        str(path).strip()
+        for path in pending.get("candidate_paths", [])
+        if str(path).strip()
+    ]
+    if not candidate_paths:
+        return None
+
+    rephrase_index = int(pending.get("rephrase_index", len(candidate_paths) + 1) or (len(candidate_paths) + 1))
+    entities = dict(ctx.get("resolved_entities", {}) or {})
+    topic = str(ctx.get("topic", "file_search") or "file_search")
+    awaiting = str(ctx.get("awaiting", "file_action") or "file_action")
+    scope = ctx.get("scope")
+
+    if choice == rephrase_index:
+        try:
+            write_context(
+                agent="files",
+                topic=topic,
+                resolved_entities=entities,
+                awaiting=awaiting,
+                scope=scope,
+            )
+        except _FILES_ORCHESTRATOR_ERRORS:
+            pass
+        return {
+            "status": "success",
+            "message": "Rephrase the file request with the exact item you want me to use.",
+            "action": "react_response",
+        }
+
+    if choice < 1 or choice > len(candidate_paths):
+        return {
+            "status": "success",
+            "message": f"That option isn't valid. Reply with a number from 1 to {rephrase_index}.",
+            "action": "react_response",
+        }
+
+    selected_path = Path(candidate_paths[choice - 1])
+    if not selected_path.exists():
+        return {
+            "status": "error",
+            "message": f"I couldn't find the selected item anymore: {selected_path}",
+            "action": "react_response",
+        }
+
+    original_query = str(pending.get("original_query", "") or "").strip()
+    action_label = str(pending.get("action_label", "") or "").strip().lower()
+    if not original_query or not action_label:
+        return None
+
+    _save_single_file_context(str(selected_path), original_query)
+
+    action_handlers = {
+        "copy": _try_direct_copy_from_manifest,
+        "move": _try_direct_move_from_context,
+        "delete": _try_direct_delete_from_context,
+        "rename": _try_direct_rename_from_files_context,
+        "zip": _try_direct_zip_from_files_context,
+    }
+    handler = action_handlers.get(action_label)
+    if handler is None:
+        return None
+    return handler(original_query, artifacts_out)
+
+
 def _try_list_names_from_files_context(user_query: str) -> Optional[Dict[str, Any]]:
     raw_query = _strip_injected_blocks(user_query)
     if _FRESH_SEARCH_RE.search(raw_query):
@@ -1667,32 +1985,16 @@ def _try_direct_rename_from_files_context(
     if not rename_match:
         return None
 
+    clarification = _build_contextual_disambiguation_response(raw_query, action_label="rename", directories_only=False)
+    if clarification is not None:
+        return clarification
+
     candidate_name = str(rename_match.group(1) or "").strip().rstrip("?.!,")
     if not candidate_name:
         return None
 
-    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
     from src.files.features.file_ops import rename_file  # noqa: PLC0415
-
-    ctx = read_context(agent="files") or {}
-    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
-
-    target_path: Optional[Path] = None
-    directory_path = Path(str(entities.get("directory_path", "") or "").strip())
-    if directory_path.exists():
-        target_path = directory_path
-    else:
-        selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
-        if isinstance(selected_paths, list) and len(selected_paths) == 1:
-            selected_path = Path(str(selected_paths[0] or "").strip())
-            if selected_path.exists():
-                target_path = selected_path
-        elif isinstance(entities.get("listed_files", []), list) and len(entities.get("listed_files", [])) == 1:
-            listed_entry = entities["listed_files"][0]
-            if isinstance(listed_entry, dict):
-                listed_path = Path(str(listed_entry.get("path", "") or "").strip())
-                if listed_path.exists():
-                    target_path = listed_path
+    target_path = _resolve_contextual_action_target(raw_query)
 
     if target_path is None:
         return None
@@ -1781,6 +2083,10 @@ def _try_direct_zip_from_files_context(
     if not _FOLLOW_UP_ZIP_RE.search(raw_query) and "zip that" not in raw_query.lower():
         return None
 
+    clarification = _build_contextual_disambiguation_response(raw_query, action_label="zip", directories_only=True)
+    if clarification is not None:
+        return clarification
+
     from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
     from src.files.features.archives import zip_folder  # noqa: PLC0415
     from src.files.features.file_ops import zip_files_from_manifest  # noqa: PLC0415
@@ -1795,20 +2101,9 @@ def _try_direct_zip_from_files_context(
         result = zip_folder(str(bundle_dir), str(archive_path))
     else:
         directory_path = Path(str(entities.get("directory_path", "") or "").strip())
-        selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
-        listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
-        folder_target: Optional[Path] = None
-
-        if directory_path.exists() and directory_path.is_dir():
-            folder_target = directory_path
-        elif isinstance(selected_paths, list) and len(selected_paths) == 1:
-            selected_path = Path(str(selected_paths[0] or "").strip())
-            if selected_path.exists() and selected_path.is_dir():
-                folder_target = selected_path
-        elif isinstance(listed_files, list) and len(listed_files) == 1 and isinstance(listed_files[0], dict):
-            single_path = Path(str(listed_files[0].get("path", "") or "").strip())
-            if single_path.exists() and single_path.is_dir():
-                folder_target = single_path
+        folder_target = _resolve_contextual_path_from_hint(raw_query, directories_only=True)
+        if folder_target is None:
+            folder_target = _resolve_folder_path_from_files_context()
 
         if folder_target is not None:
             archive_path = _build_archive_output_path(folder_target.name)
@@ -1978,6 +2273,98 @@ def _try_scoped_named_search(
     user_query: str,
     artifacts_out: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
+    multi_parsed = _parse_scoped_multi_named_search(user_query)
+    if multi_parsed:
+        from src.agent.manifest.context_manifest import auto_save_files_context  # noqa: PLC0415
+        from src.files.features.file_ops import list_directory  # noqa: PLC0415
+
+        directory_result = list_directory(multi_parsed["directory"], limit=500)
+        if directory_result.get("status") != "success":
+            return {
+                "status": directory_result.get("status", "error"),
+                "message": directory_result.get("message", "Search failed."),
+                "action": "react_response",
+            }
+
+        entries = directory_result.get("entries", []) if isinstance(directory_result, dict) else []
+        matches: List[Dict[str, Any]] = []
+        missing_terms: List[str] = []
+        for term in multi_parsed["terms"]:
+            normalized_term = term.casefold()
+            matched_entry: Optional[Dict[str, Any]] = None
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                entry_type = str(entry.get("type", "") or "").strip().lower()
+                if entry_type != multi_parsed["item_type"]:
+                    continue
+                entry_name = str(entry.get("name", "") or "").strip()
+                stem = Path(entry_name).stem.casefold()
+                suffix = Path(entry_name).suffix.casefold().lstrip(".")
+                if multi_parsed["extensions"] and suffix not in multi_parsed["extensions"]:
+                    continue
+                if stem == normalized_term or entry_name.casefold() == normalized_term:
+                    matched_entry = {
+                        "path": str(Path(multi_parsed["directory"]) / entry_name),
+                        "name": entry_name,
+                        "type": entry_type,
+                    }
+                    break
+            if matched_entry is not None:
+                matches.append(matched_entry)
+            else:
+                missing_terms.append(term)
+
+        if matches:
+            context_payload = {
+                "status": "success",
+                "results": matches,
+                "count": len(matches),
+                "file_path": str(matches[0].get("path", "") or ""),
+            }
+            auto_save_files_context(context_payload, user_query)
+            if artifacts_out is not None:
+                artifacts_out["file_path"] = str(matches[0].get("path", "") or "")
+                artifacts_out["found_paths"] = [str(item.get("path", "") or "") for item in matches]
+
+            lines = [
+                f"Sure! Here are the {multi_parsed['item_type']}s I found in {multi_parsed['scope_label']}:",
+                "",
+            ]
+            for item in matches:
+                item_path = str(item.get("path", "") or "")
+                item_name = str(item.get("name", "") or "")
+                lines.extend([
+                    item_name,
+                    "",
+                    f"Path: {item_path}",
+                ])
+                try:
+                    candidate = Path(item_path)
+                    if candidate.exists() and candidate.is_file():
+                        size_bytes = int(candidate.stat().st_size or 0)
+                        modified = datetime.fromtimestamp(candidate.stat().st_mtime).strftime("%B %d, %Y")
+                        lines.append(f"Size: {_format_size_bytes(size_bytes)}")
+                        lines.append(f"Modified: {modified}")
+                except (OSError, RuntimeError, ValueError):
+                    pass
+                lines.append("")
+            if missing_terms:
+                lines.append(f"I couldn't find: {', '.join(missing_terms)}")
+
+            return {
+                "status": "success",
+                "message": "\n".join(line for line in lines).strip(),
+                "action": "react_response",
+                "raw": {"results": matches, "missing_terms": missing_terms},
+            }
+
+        return {
+            "status": "success",
+            "message": f"I couldn't find any matching {multi_parsed['item_type']}s in {multi_parsed['scope_label']}.",
+            "action": "react_response",
+        }
+
     parsed = _parse_scoped_named_search(user_query)
     if not parsed:
         return None
@@ -2373,9 +2760,70 @@ _FOLLOW_UP_COPY_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+_FOLLOW_UP_MOVE_RE = re.compile(
+    r'\b(move|relocate|transfer)\b.{0,100}\b(them|those|it|this|that|one|files?|folders?|items?|results?)\b'
+    r'|\b(move|relocate|transfer)\s+(them|those|it|this|that)\b'
+    r'|\bcan\s+you\s+move\b',
+    re.IGNORECASE | re.DOTALL,
+)
+
+_FOLLOW_UP_DELETE_RE = re.compile(
+    r'\b(delete|remove|trash)\b.{0,100}\b(them|those|it|this|that|one|files?|folders?|items?|results?)\b'
+    r'|\b(delete|remove|trash)\s+(them|those|it|this|that)\b'
+    r'|\bcan\s+you\s+(?:delete|remove|trash)\b',
+    re.IGNORECASE | re.DOTALL,
+)
+
 def _is_follow_up_copy(query: str) -> bool:
     """Return True when the query looks like 'copy them / put those / collect the files'."""
     return bool(_FOLLOW_UP_COPY_RE.search(query))
+
+
+def _resolve_explicit_copy_source_from_query(user_query: str) -> Optional[Path]:
+    raw_query = str(user_query or "").strip()
+    if not raw_query:
+        return None
+
+    match = re.search(
+        r'\b(?:copy|move|put|collect|gather|transfer)\b\s+(.+?)\s+\bto\b',
+        raw_query,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not match:
+        return None
+
+    source_text = str(match.group(1) or "").strip().strip("\"'")
+    source_text = re.sub(r'^me\s+', "", source_text, flags=re.IGNORECASE)
+    source_text = re.sub(r'\s+(?:folder|directory|file)\s*$', "", source_text, flags=re.IGNORECASE)
+    source_text = source_text.rstrip("?.!,")
+    if not source_text:
+        return None
+
+    if _looks_like_absolute_path(source_text):
+        candidate = Path(source_text)
+        try:
+            if candidate.exists():
+                return candidate
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+    contextual_source = _resolve_contextual_path_from_hint(raw_query)
+    if contextual_source is not None:
+        return contextual_source
+
+    return None
+
+
+def _resolve_contextual_action_target(user_query: str) -> Optional[Path]:
+    explicit_source = _resolve_explicit_copy_source_from_query(user_query)
+    if explicit_source is not None:
+        return explicit_source
+
+    contextual_path = _resolve_contextual_path_from_hint(user_query)
+    if contextual_path is not None:
+        return contextual_path
+
+    return _resolve_single_copy_source_from_files_context()
 
 def _resolve_destination_from_query(user_query: str) -> str:
     """
@@ -2454,7 +2902,22 @@ def _resolve_destination_from_query(user_query: str) -> str:
         base = _KW.get(in_sub_m.group(1).lower().rstrip("s"), _KW.get(in_sub_m.group(1).lower(), downloads))
         return str(base / in_sub_m.group(2))
 
-    # 6. "to X" or "into X" where X is a simple identifier at/near end of query
+    # 6. Generic request for a fresh destination folder.
+    generic_new_folder_m = re.search(
+        r'\b(?:to|into|in)\s+(?:a\s+)?(?:brand\s+new\s+|new\s+)?folder\b',
+        user_query,
+        re.IGNORECASE,
+    )
+    if generic_new_folder_m:
+        base_name = "Collected Files"
+        candidate = downloads / base_name
+        counter = 2
+        while candidate.exists():
+            candidate = downloads / f"{base_name} ({counter})"
+            counter += 1
+        return str(candidate)
+
+    # 7. "to X" or "into X" where X is a simple identifier at/near end of query
     simple_m = re.search(
         r'\b(?:to|into)\s+(?:a\s+)?(?:new\s+)?(?:folder\s+)?(?:named\s+|called\s+)?([A-Za-z]\w*)\s*[?!.]?\s*$',
         user_query.strip(), re.IGNORECASE,
@@ -2464,7 +2927,7 @@ def _resolve_destination_from_query(user_query: str) -> str:
         if name.lower() not in _STOP:
             return str(downloads / name)
 
-    # 7. "put/place them in X" where X is a simple name at end
+    # 8. "put/place them in X" where X is a simple name at end
     in_m = re.search(
         r'\b(?:put|place|store|save)\b.{0,40}\bin\s+(?:a\s+)?(?:new\s+)?(?:folder\s+)?(?:named\s+|called\s+)?([A-Za-z]\w*)\s*[?!.]?\s*$',
         user_query.strip(), re.IGNORECASE,
@@ -2474,7 +2937,7 @@ def _resolve_destination_from_query(user_query: str) -> str:
         if name.lower() not in _STOP:
             return str(downloads / name)
 
-    # 8. "to this folder - X" / "folder - X" — dash used as a name separator
+    # 9. "to this folder - X" / "folder - X" — dash used as a name separator
     #    e.g. "copy them to this folder - payslips_01"
     folder_dash_m = re.search(
         r'\bfolder\s*[-–]\s*([A-Za-z]\w*)',
@@ -2520,14 +2983,19 @@ def _try_direct_copy_from_manifest(
     if not _is_follow_up_copy(_raw):
         return None
 
+    clarification = _build_contextual_disambiguation_response(_raw, action_label="copy", directories_only=False)
+    if clarification is not None:
+        return clarification
+
     from src.files.features.file_ops import (
+        collect_files_to_folder,
         collect_files_from_manifest,  # noqa: PLC0415
         copy_file,
         _DEFAULT_MANIFEST,
         _DEFAULT_OCTAMIND_DIR,
     )
 
-    source_path = _resolve_single_copy_source_from_files_context()
+    source_path = _resolve_contextual_action_target(_raw)
     destination = _resolve_destination_from_query(_raw)
 
     if source_path is not None:
@@ -2553,6 +3021,27 @@ def _try_direct_copy_from_manifest(
                 "message": f"❌ Copy failed: {result.get('message', 'unknown error')}",
                 "action": "react_response",
             }
+
+    context_paths = _read_active_context_paths()
+    if destination and len(context_paths) > 1:
+        result = collect_files_to_folder(context_paths, destination)
+
+        if artifacts_out is not None:
+            artifacts_out["file_path"] = result.get("destination", "")
+
+        count = result.get("copied_count", 0)
+        dest = result.get("destination", destination)
+        skipped = result.get("skipped", [])
+        skipped_note = f"  ({len(skipped)} file(s) skipped — not found on disk)" if skipped else ""
+
+        return {
+            "status": result.get("status", "error"),
+            "message": (
+                f"✅ Copied **{count}** file(s) from the previous search into:\n"
+                f"`{dest}`{skipped_note}"
+            ) if result.get("status") == "success" else f"❌ Copy failed: {result.get('message', 'unknown error')}",
+            "action": "react_response",
+        }
 
     if not _DEFAULT_MANIFEST.exists():
         import logging as _lg
@@ -2608,6 +3097,93 @@ def _try_direct_copy_from_manifest(
         "status":  result.get("status", "error"),
         "message": message,
         "action":  "react_response",
+    }
+
+
+def _try_direct_move_from_context(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if _FRESH_SEARCH_RE.search(raw_query):
+        return None
+    if not _FOLLOW_UP_MOVE_RE.search(raw_query):
+        return None
+
+    clarification = _build_contextual_disambiguation_response(raw_query, action_label="move", directories_only=False)
+    if clarification is not None:
+        return clarification
+
+    from src.files.features.file_ops import move_file  # noqa: PLC0415
+
+    source_path = _resolve_contextual_action_target(raw_query)
+    if source_path is None:
+        return None
+
+    destination = _resolve_destination_from_query(raw_query)
+    if not destination:
+        return None
+
+    result = move_file(str(source_path), destination)
+    moved_path = str(result.get("destination", "") or "").strip()
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Move failed."),
+            "action": "react_response",
+        }
+
+    if artifacts_out is not None and moved_path:
+        artifacts_out["file_path"] = moved_path
+    if moved_path:
+        try:
+            _save_single_file_context(moved_path, raw_query)
+        except _FILES_ORCHESTRATOR_ERRORS:
+            pass
+
+    return {
+        "status": "success",
+        "message": result.get("message", f"Moved to {moved_path}"),
+        "action": "react_response",
+        "file_path": moved_path,
+    }
+
+
+def _try_direct_delete_from_context(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if _FRESH_SEARCH_RE.search(raw_query):
+        return None
+    if not _FOLLOW_UP_DELETE_RE.search(raw_query):
+        return None
+
+    clarification = _build_contextual_disambiguation_response(raw_query, action_label="delete", directories_only=False)
+    if clarification is not None:
+        return clarification
+
+    from src.files.features.file_ops import delete_file  # noqa: PLC0415
+
+    target_path = _resolve_contextual_action_target(raw_query)
+    if target_path is None:
+        return None
+
+    result = delete_file(str(target_path), permanent=False)
+    if result.get("status") != "success":
+        return {
+            "status": result.get("status", "error"),
+            "message": result.get("message", "Delete failed."),
+            "action": "react_response",
+        }
+
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = str(target_path)
+
+    return {
+        "status": "success",
+        "message": result.get("message", f"Moved to Recycle Bin: {target_path}"),
+        "action": "react_response",
     }
 
 # ---------------------------------------------------------------------------
@@ -2905,10 +3481,22 @@ def execute_with_llm_orchestration(
     Fallback:      ReAct loop (1 LLM call per step, up to 6 iterations).
     """
     del agent_id
+    pending_selection = _try_resolve_pending_contextual_selection(user_query, artifacts_out)
+    if pending_selection is not None:
+        return _return_fast_path_result(pending_selection)
+
     # ── Pre-flight: copy-from-manifest bypass (no LLM needed) ────────────
     direct = _try_direct_copy_from_manifest(user_query, artifacts_out)
     if direct is not None:
         return _return_fast_path_result(direct)
+
+    direct_move = _try_direct_move_from_context(user_query, artifacts_out)
+    if direct_move is not None:
+        return _return_fast_path_result(direct_move)
+
+    direct_delete = _try_direct_delete_from_context(user_query, artifacts_out)
+    if direct_delete is not None:
+        return _return_fast_path_result(direct_delete)
 
     report_from_context = _try_report_from_files_context(user_query, artifacts_out)
     if report_from_context is not None:

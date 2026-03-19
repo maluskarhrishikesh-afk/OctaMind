@@ -121,6 +121,27 @@ GMAIL_AUTOMATIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
+    "mailbox_daily_review": {
+        "label": "📬 Daily mailbox review",
+        "description": "Record a daily mailbox review snapshot using mailbox preferences",
+        "interval_minutes": 1440,
+        "default_params": {},
+        "param_schema": {},
+    },
+    "mailbox_weekly_review": {
+        "label": "🗓 Weekly mailbox review",
+        "description": "Record a weekly mailbox review snapshot using mailbox preferences",
+        "interval_minutes": 10080,
+        "default_params": {},
+        "param_schema": {},
+    },
+    "mailbox_continuous_cleanup": {
+        "label": "🤖 Continuous safe mailbox cleanup",
+        "description": "Continuously archive promotions and newsletters when safe autopilot is enabled",
+        "interval_minutes": 30,
+        "default_params": {},
+        "param_schema": {},
+    },
 }
 
 

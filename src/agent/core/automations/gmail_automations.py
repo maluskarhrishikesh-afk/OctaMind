@@ -299,6 +299,45 @@ def archive_old_read(agent_id: str, params: Dict[str, Any]) -> str:
         return f"Error: {exc}"
 
 
+def mailbox_daily_review(agent_id: str, params: Dict[str, Any]) -> str:
+    """Record a daily mailbox review snapshot driven by mailbox preferences."""
+    del params
+    try:
+        from src.email.features.mailbox_automation import run_scheduled_mailbox_review
+
+        result = run_scheduled_mailbox_review("mailbox_daily_review")
+        return str(result.get("message", "Daily mailbox review recorded."))
+    except Exception as exc:
+        logger.error("[%s] mailbox_daily_review: %s", agent_id, exc)
+        return f"Error: {exc}"
+
+
+def mailbox_weekly_review(agent_id: str, params: Dict[str, Any]) -> str:
+    """Record a weekly mailbox review snapshot driven by mailbox preferences."""
+    del params
+    try:
+        from src.email.features.mailbox_automation import run_scheduled_mailbox_review
+
+        result = run_scheduled_mailbox_review("mailbox_weekly_review")
+        return str(result.get("message", "Weekly mailbox review recorded."))
+    except Exception as exc:
+        logger.error("[%s] mailbox_weekly_review: %s", agent_id, exc)
+        return f"Error: {exc}"
+
+
+def mailbox_continuous_cleanup(agent_id: str, params: Dict[str, Any]) -> str:
+    """Apply continuous safe mailbox cleanup using saved mailbox preferences."""
+    del params
+    try:
+        from src.email.features.mailbox_automation import run_continuous_mailbox_cleanup
+
+        result = run_continuous_mailbox_cleanup()
+        return str(result.get("message", "Continuous mailbox cleanup finished."))
+    except Exception as exc:
+        logger.error("[%s] mailbox_continuous_cleanup: %s", agent_id, exc)
+        return f"Error: {exc}"
+
+
 # ── Handler registry ──────────────────────────────────────────────────────────
 
 HANDLER_MAP: Dict[str, Any] = {
@@ -312,4 +351,7 @@ HANDLER_MAP: Dict[str, Any] = {
     "auto_unsubscribe": auto_unsubscribe,
     "out_of_office": out_of_office,
     "archive_old_read": archive_old_read,
+    "mailbox_daily_review": mailbox_daily_review,
+    "mailbox_weekly_review": mailbox_weekly_review,
+    "mailbox_continuous_cleanup": mailbox_continuous_cleanup,
 }

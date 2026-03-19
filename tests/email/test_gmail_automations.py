@@ -402,3 +402,19 @@ class TestArchiveOldRead:
         modify_call_body = svc.users.return_value.messages.return_value.modify.call_args.kwargs[
             "body"]
         assert "INBOX" in modify_call_body.get("removeLabelIds", [])
+
+
+class TestMailboxAutomationWrappers:
+    def test_mailbox_daily_review_uses_mailbox_automation_helper(self):
+        with patch("src.email.features.mailbox_automation.run_scheduled_mailbox_review", return_value={"message": "daily review recorded"}) as helper:
+            result = gm.mailbox_daily_review("agent1", {})
+
+        helper.assert_called_once_with("mailbox_daily_review")
+        assert result == "daily review recorded"
+
+    def test_mailbox_continuous_cleanup_uses_mailbox_automation_helper(self):
+        with patch("src.email.features.mailbox_automation.run_continuous_mailbox_cleanup", return_value={"message": "cleanup complete"}) as helper:
+            result = gm.mailbox_continuous_cleanup("agent1", {})
+
+        helper.assert_called_once_with()
+        assert result == "cleanup complete"

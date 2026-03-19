@@ -362,6 +362,271 @@ def test_direct_copy_from_files_context_can_make_adjacent_copy(tmp_path: Path, m
     assert copied_folder.exists()
 
 
+def test_direct_copy_from_manifest_accepts_explicit_absolute_source_path(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    source_folder = tmp_path / "Neo"
+    source_folder.mkdir()
+    (source_folder / "note.txt").write_text("neo", encoding="utf-8")
+    destination_root = tmp_path / "Downloads"
+    destination_root.mkdir()
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {"agent": "files", "resolved_entities": {}},
+    )
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    artifacts_out: dict[str, str] = {}
+    result = orchestrator._try_direct_copy_from_manifest(
+        f"Can you copy {source_folder} folder to {destination_root}?",
+        artifacts_out,
+    )
+
+    copied_folder = destination_root / "Neo"
+    assert result is not None
+    assert result["status"] == "success"
+    assert copied_folder.exists()
+    assert artifacts_out["file_path"] == str(copied_folder)
+
+
+def test_direct_copy_from_manifest_copies_multiple_selected_items_to_new_folder(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    file_ops = importlib.import_module("src.files.features.file_ops")
+
+    first_zip = tmp_path / "Neo.zip"
+    second_zip = tmp_path / "Text.zip"
+    first_zip.write_text("zip", encoding="utf-8")
+    second_zip.write_text("zip", encoding="utf-8")
+    manifest_path = tmp_path / "active_manifest.txt"
+    manifest_path.write_text(f"{first_zip}\n{second_zip}\n", encoding="utf-8")
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {
+            "agent": "files",
+            "resolved_entities": {
+                "selected_paths": [str(first_zip), str(second_zip)],
+                "listed_files": [
+                    {"path": str(first_zip), "name": first_zip.name, "type": "file"},
+                    {"path": str(second_zip), "name": second_zip.name, "type": "file"},
+                ],
+            },
+        },
+    )
+    monkeypatch.setattr(file_ops, "_DEFAULT_MANIFEST", manifest_path)
+    def _fake_collect_files_to_folder(file_paths, destination):
+        captured["paths"] = list(file_paths)
+        captured["destination"] = destination
+        return {
+            "status": "success",
+            "copied_count": len(file_paths),
+            "destination": destination,
+            "skipped": [],
+        }
+
+    monkeypatch.setattr(
+        file_ops,
+        "collect_files_to_folder",
+        _fake_collect_files_to_folder,
+    )
+
+    result = orchestrator._try_direct_copy_from_manifest(
+        "Can copy both of them to a new folder?",
+        {},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert captured["destination"]
+    assert captured["paths"] == [str(first_zip), str(second_zip)]
+    assert Path(captured["destination"]).name.startswith("Collected Files")
+
+
+def test_direct_copy_from_manifest_uses_selected_paths_when_manifest_is_missing(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    file_ops = importlib.import_module("src.files.features.file_ops")
+
+    first_zip = tmp_path / "Neo.zip"
+    second_zip = tmp_path / "Text.zip"
+    first_zip.write_text("zip", encoding="utf-8")
+    second_zip.write_text("zip", encoding="utf-8")
+    missing_manifest = tmp_path / "missing_manifest.txt"
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {
+            "agent": "files",
+            "resolved_entities": {
+                "selected_paths": [str(first_zip), str(second_zip)],
+                "listed_files": [
+                    {"path": str(first_zip), "name": first_zip.name, "type": "file"},
+                    {"path": str(second_zip), "name": second_zip.name, "type": "file"},
+                ],
+            },
+        },
+    )
+    monkeypatch.setattr(file_ops, "_DEFAULT_MANIFEST", missing_manifest)
+
+    def _fake_collect_files_to_folder(file_paths, destination):
+        captured["paths"] = list(file_paths)
+        captured["destination"] = destination
+        return {
+            "status": "success",
+            "copied_count": len(file_paths),
+            "destination": destination,
+            "skipped": [],
+        }
+
+    monkeypatch.setattr(file_ops, "collect_files_to_folder", _fake_collect_files_to_folder)
+
+    result = orchestrator._try_direct_copy_from_manifest(
+        "Can copy both of them to a new folder?",
+        {},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert captured["paths"] == [str(first_zip), str(second_zip)]
+    assert Path(str(captured["destination"])).name.startswith("Collected Files")
+
+
+def test_direct_copy_from_manifest_resolves_the_one_in_parent_hint(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    hrishikesh_folder = tmp_path / "Hrishikesh" / "Neo"
+    hrishikesh_folder.mkdir(parents=True)
+    (hrishikesh_folder / "one.txt").write_text("1", encoding="utf-8")
+
+    other_folder = tmp_path / "Program Files" / "McAfee" / "neo"
+    other_folder.mkdir(parents=True)
+
+    destination_root = tmp_path / "Downloads"
+    destination_root.mkdir()
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {
+            "agent": "files",
+            "resolved_entities": {
+                "listed_files": [
+                    {"path": str(hrishikesh_folder), "name": hrishikesh_folder.name, "type": "folder"},
+                    {"path": str(other_folder), "name": other_folder.name, "type": "folder"},
+                ],
+                "selected_paths": [str(hrishikesh_folder), str(other_folder)],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    result = orchestrator._try_direct_copy_from_manifest(
+        f"Can you copy the one in Hrishikesh to {destination_root}?",
+        {},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert (destination_root / "Neo").exists()
+
+
+def test_direct_move_from_context_resolves_the_one_in_parent_hint(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    hrishikesh_folder = tmp_path / "Hrishikesh" / "Neo"
+    hrishikesh_folder.mkdir(parents=True)
+    (hrishikesh_folder / "one.txt").write_text("1", encoding="utf-8")
+
+    other_folder = tmp_path / "Program Files" / "McAfee" / "neo"
+    other_folder.mkdir(parents=True)
+
+    destination_root = tmp_path / "Downloads"
+    destination_root.mkdir()
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {
+            "agent": "files",
+            "resolved_entities": {
+                "listed_files": [
+                    {"path": str(hrishikesh_folder), "name": hrishikesh_folder.name, "type": "folder"},
+                    {"path": str(other_folder), "name": other_folder.name, "type": "folder"},
+                ],
+                "selected_paths": [str(hrishikesh_folder), str(other_folder)],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    result = orchestrator._try_direct_move_from_context(
+        f"Can you move the one in Hrishikesh to {destination_root}?",
+        {},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert not hrishikesh_folder.exists()
+    assert (destination_root / "Neo").exists()
+
+
+def test_direct_delete_from_context_resolves_the_one_in_parent_hint(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    hrishikesh_folder = tmp_path / "Hrishikesh" / "Neo"
+    hrishikesh_folder.mkdir(parents=True)
+    (hrishikesh_folder / "one.txt").write_text("1", encoding="utf-8")
+
+    other_folder = tmp_path / "Program Files" / "McAfee" / "neo"
+    other_folder.mkdir(parents=True)
+
+    deleted: dict[str, object] = {}
+
+    def _fake_delete_file(path: str, permanent: bool = False):
+        deleted["path"] = path
+        deleted["permanent"] = permanent
+        return {
+            "status": "success",
+            "message": f"Moved to Recycle Bin: {path}",
+        }
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {
+            "agent": "files",
+            "resolved_entities": {
+                "listed_files": [
+                    {"path": str(hrishikesh_folder), "name": hrishikesh_folder.name, "type": "folder"},
+                    {"path": str(other_folder), "name": other_folder.name, "type": "folder"},
+                ],
+                "selected_paths": [str(hrishikesh_folder), str(other_folder)],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.files.features.file_ops.delete_file",
+        _fake_delete_file,
+    )
+
+    result = orchestrator._try_direct_delete_from_context(
+        "Can you delete the one in Hrishikesh?",
+        {},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert deleted["path"] == str(hrishikesh_folder)
+
+
 def test_parse_precise_named_image_search() -> None:
     orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
 
@@ -442,6 +707,69 @@ def test_parse_scoped_named_search_for_contains_name_query() -> None:
     assert parsed["term"] == "Text"
     assert parsed["match_mode"] == "contains"
     assert parsed["item_type"] == "folder"
+
+
+def test_parse_scoped_multi_named_search_for_downloads_zip_files() -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    parsed = getattr(orchestrator, "_parse_scoped_multi_named_search")(
+        "Are there zip files named Neo and Text in Downloads?"
+    )
+
+    assert parsed is not None
+    assert parsed["terms"] == ["Neo", "Text"]
+    assert parsed["item_type"] == "file"
+    assert parsed["extensions"] == ["zip"]
+    assert parsed["scope_label"] == "Downloads"
+
+
+def test_try_scoped_named_search_handles_multi_named_downloads_lookup(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    file_ops = importlib.import_module("src.files.features.file_ops")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    neo_zip = downloads / "Neo.zip"
+    text_zip = downloads / "Text.zip"
+    neo_zip.write_text("neo", encoding="utf-8")
+    text_zip.write_text("text", encoding="utf-8")
+
+    monkeypatch.setattr(orchestrator, "_system_folder_path", lambda keyword: downloads)
+    monkeypatch.setattr(
+        file_ops,
+        "list_directory",
+        lambda path, limit=500: {
+            "status": "success",
+            "path": str(downloads),
+            "entries": [
+                {"name": "Neo.zip", "type": "file"},
+                {"name": "Text.zip", "type": "file"},
+                {"name": "Other.zip", "type": "file"},
+            ],
+        },
+    )
+
+    saved = {}
+
+    def _fake_auto_save(result, query=""):
+        saved["result"] = result
+        saved["query"] = query
+        return result
+
+    monkeypatch.setattr(context_manifest, "auto_save_files_context", _fake_auto_save)
+
+    result = getattr(orchestrator, "_try_scoped_named_search")(
+        "Are there zip files named Neo and Text in Downloads?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert "Neo.zip" in result["message"]
+    assert "Text.zip" in result["message"]
+    assert saved["result"]["count"] == 2
+    assert len(saved["result"]["results"]) == 2
 
 
 def test_scoped_folder_count_query_lists_directory_and_saves_context(monkeypatch, tmp_path: Path) -> None:
@@ -745,6 +1073,218 @@ def test_try_direct_zip_from_search_bundle_uses_saved_folder(
     assert result is not None
     assert result["status"] == "success"
     assert artifacts_out["file_path"].endswith(f"{bundle_dir.name}.zip")
+
+
+def test_try_direct_zip_from_files_context_resolves_the_one_in_parent_hint(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    archives = importlib.import_module("src.files.features.archives")
+
+    hrishikesh_folder = tmp_path / "Hrishikesh" / "Neo"
+    hrishikesh_folder.mkdir(parents=True)
+    other_folder = tmp_path / "Program Files" / "McAfee" / "neo"
+    other_folder.mkdir(parents=True)
+    zip_output = tmp_path / "Neo.zip"
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent="": {
+            "resolved_entities": {
+                "listed_files": [
+                    {"path": str(hrishikesh_folder), "name": hrishikesh_folder.name, "type": "folder"},
+                    {"path": str(other_folder), "name": other_folder.name, "type": "folder"},
+                ],
+                "selected_paths": [str(hrishikesh_folder), str(other_folder)],
+            }
+        },
+    )
+    monkeypatch.setattr(orchestrator, "_build_archive_output_path", lambda folder_name: zip_output)
+    monkeypatch.setattr(archives, "zip_folder", lambda folder_path, output_path: {"status": "success", "file_path": output_path})
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    result = getattr(orchestrator, "_try_direct_zip_from_files_context")(
+        "Can you zip the one in Hrishikesh?",
+        {},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert result["file_path"] == str(zip_output)
+
+
+def test_try_direct_rename_from_files_context_resolves_the_one_in_parent_hint(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    file_ops = importlib.import_module("src.files.features.file_ops")
+
+    hrishikesh_folder = tmp_path / "Hrishikesh" / "Neo"
+    hrishikesh_folder.mkdir(parents=True)
+    other_folder = tmp_path / "Program Files" / "McAfee" / "neo"
+    other_folder.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent="": {
+            "resolved_entities": {
+                "listed_files": [
+                    {"path": str(hrishikesh_folder), "name": hrishikesh_folder.name, "type": "folder"},
+                    {"path": str(other_folder), "name": other_folder.name, "type": "folder"},
+                ],
+                "selected_paths": [str(hrishikesh_folder), str(other_folder)],
+            }
+        },
+    )
+    monkeypatch.setattr(
+        file_ops,
+        "rename_file",
+        lambda path, new_name: {"status": "success", "message": "Rename successful.", "new_path": str(Path(path).with_name(new_name))},
+    )
+
+    result = getattr(orchestrator, "_try_direct_rename_from_files_context")(
+        "Can you rename the one in Hrishikesh to Neo-123?",
+        {},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert result["file_path"].endswith("Neo-123")
+
+
+def test_ambiguous_copy_followup_returns_numbered_clarification(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    first = tmp_path / "Hrishikesh" / "Neo"
+    first.mkdir(parents=True)
+    second = tmp_path / "Program Files" / "McAfee" / "neo"
+    second.mkdir(parents=True)
+    captured_write: dict[str, object] = {}
+
+    def _fake_write_context(**kwargs):
+        captured_write.update(kwargs)
+        return {"status": "success"}
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent="": {
+            "topic": "file_search",
+            "awaiting": "file_action",
+            "resolved_entities": {
+                "listed_files": [
+                    {"path": str(first), "name": first.name, "type": "folder"},
+                    {"path": str(second), "name": second.name, "type": "folder"},
+                ],
+                "selected_paths": [str(first), str(second)],
+            }
+        },
+    )
+    monkeypatch.setattr("src.agent.manifest.context_manifest.write_context", _fake_write_context)
+
+    result = getattr(orchestrator, "_try_direct_copy_from_manifest")(
+        "Can you copy that to Downloads?",
+        {},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert "Reply with 1, 2, or 3" in result["message"]
+    assert str(first) in result["message"]
+    assert captured_write["pending_selection"] == {
+        "kind": "contextual_path_choice",
+        "action_label": "copy",
+        "original_query": "Can you copy that to Downloads?",
+        "candidate_paths": [str(first), str(second)],
+        "rephrase_index": 3,
+    }
+
+
+def test_numeric_selection_replays_pending_copy_request(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    file_ops = importlib.import_module("src.files.features.file_ops")
+
+    first = tmp_path / "Hrishikesh" / "Neo.zip"
+    first.parent.mkdir(parents=True)
+    first.write_text("neo", encoding="utf-8")
+
+    second = tmp_path / "Program Files" / "McAfee" / "neo.zip"
+    second.parent.mkdir(parents=True)
+    second.write_text("neo-2", encoding="utf-8")
+
+    destination = tmp_path / "Downloads"
+    destination.mkdir()
+
+    state = {
+        "topic": "file_search",
+        "awaiting": "file_action",
+        "resolved_entities": {
+            "listed_files": [
+                {"path": str(first), "name": first.name, "type": "file"},
+                {"path": str(second), "name": second.name, "type": "file"},
+            ],
+            "selected_paths": [str(first), str(second)],
+        },
+        "pending_selection": {
+            "kind": "contextual_path_choice",
+            "action_label": "copy",
+            "original_query": f"Can you copy that to {destination}?",
+            "candidate_paths": [str(first), str(second)],
+            "rephrase_index": 3,
+        },
+    }
+
+    def _fake_read_context(agent=""):
+        return state
+
+    def _fake_write_context(**kwargs):
+        state.clear()
+        state.update({
+            "topic": kwargs["topic"],
+            "awaiting": kwargs.get("awaiting"),
+            "resolved_entities": kwargs["resolved_entities"],
+        })
+        pending = kwargs.get("pending_selection")
+        if pending:
+            state["pending_selection"] = pending
+        return {"status": "success"}
+
+    def _fake_auto_save_files_context(result, query):
+        file_path = Path(str(result.get("file_path", "") or "").strip())
+        state.clear()
+        state.update({
+            "topic": "file_search",
+            "awaiting": "file_action",
+            "resolved_entities": {
+                "listed_files": [
+                    {"path": str(file_path), "name": file_path.name, "type": "file"},
+                ],
+                "selected_paths": [str(file_path)],
+                "file_path": str(file_path),
+            },
+        })
+        return result
+
+    monkeypatch.setattr("src.agent.manifest.context_manifest.read_context", _fake_read_context)
+    monkeypatch.setattr("src.agent.manifest.context_manifest.write_context", _fake_write_context)
+    monkeypatch.setattr("src.agent.manifest.context_manifest.auto_save_files_context", _fake_auto_save_files_context)
+    def _fake_copy_file(source, dest):
+        copied_path = Path(dest) / Path(source).name
+        copied_path.parent.mkdir(parents=True, exist_ok=True)
+        copied_path.write_text(Path(source).read_text(encoding="utf-8"), encoding="utf-8")
+        return {
+            "status": "success",
+            "destination": str(copied_path),
+        }
+
+    monkeypatch.setattr(file_ops, "copy_file", _fake_copy_file)
+
+    artifacts: dict[str, str] = {}
+    result = orchestrator.execute_with_llm_orchestration("1", artifacts_out=artifacts)
+
+    assert result["status"] == "success"
+    assert str(destination / first.name) in result["message"]
+    assert artifacts["file_path"] == str(destination / first.name)
+    assert state["resolved_entities"]["selected_paths"] == [str(destination / first.name)]
+    assert "pending_selection" not in state
 
 
 def test_conversation_state_uses_compact_files_context_not_last_found_paths(monkeypatch) -> None:
@@ -1269,6 +1809,49 @@ def test_try_contextual_folder_count_query_uses_saved_folder(monkeypatch, tmp_pa
 
     result = getattr(orchestrator, "_try_contextual_folder_count_query")(
         "How many files and folders are there inside it?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert "Total Files: 2" in result["message"]
+    assert "Total Folders: 1" in result["message"]
+
+
+def test_try_contextual_folder_count_query_resolves_one_inside_parent_hint(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    hrishikesh_folder = tmp_path / "Hrishikesh" / "Neo"
+    hrishikesh_folder.mkdir(parents=True)
+    (hrishikesh_folder / "one.txt").write_text("1", encoding="utf-8")
+    nested = hrishikesh_folder / "sub"
+    nested.mkdir()
+    (nested / "two.txt").write_text("2", encoding="utf-8")
+
+    other_folder = tmp_path / "Program Files" / "McAfee" / "neo"
+    other_folder.mkdir(parents=True)
+    (other_folder / "three.txt").write_text("3", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {
+            "agent": "files",
+            "resolved_entities": {
+                "listed_files": [
+                    {"path": str(hrishikesh_folder), "name": hrishikesh_folder.name, "type": "folder"},
+                    {"path": str(other_folder), "name": other_folder.name, "type": "folder"},
+                ],
+                "selected_paths": [str(hrishikesh_folder), str(other_folder)],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    result = getattr(orchestrator, "_try_contextual_folder_count_query")(
+        "How many files and folders are there in the one inside Hrishikesh?",
         artifacts_out={},
     )
 

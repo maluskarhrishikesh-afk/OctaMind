@@ -16,11 +16,30 @@ from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 from src.agent.runtime_paths import get_runtime_state_path
 from src.agent.telemetry import log_fallback_to_react, log_fast_path_hit
+from src.email.features.mailbox_preferences import (
+    default_mailbox_preferences,
+    detect_mailbox_signals,
+    get_mailbox_preferences_path,
+    load_mailbox_preferences,
+    load_mailbox_review_history,
+    mailbox_preferences_exist,
+    record_mailbox_review_event,
+    render_mailbox_capabilities,
+    render_mailbox_preferences_summary,
+    save_mailbox_preferences,
+    upsert_mailbox_label_rule,
+)
+from src.email.features.mailbox_automation import sync_mailbox_automation_config
 
 
 _PENDING_MAILBOX_CLEANUP_PATH = get_runtime_state_path(
     "runtime_state",
     "email_mailbox_cleanup_pending.json",
+    create_parent=True,
+)
+_PENDING_MAILBOX_PREFERENCES_PATH = get_runtime_state_path(
+    "runtime_state",
+    "email_mailbox_preferences_pending.json",
     create_parent=True,
 )
 
@@ -39,6 +58,69 @@ _EMAIL_COUNT_INTENT_RE = re.compile(
     r"\b(how\s+many|count|did\s+i\s+receive\s+only|only\s+\d+\s+emails?)\b",
     re.IGNORECASE,
 )
+_MAILBOX_ORGANIZATION_INTENT_RE = re.compile(
+    r"\b(organi[sz]e|clean up|declutter|de-clutter|sort)\b.*\b(mailbox|inbox|gmail|email)\b"
+    r"|\b(mailbox|inbox|gmail)\b.*\b(organi[sz]e|clean up|declutter|de-clutter|sort)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_PREFERENCES_SHOW_RE = re.compile(
+    r"\b(show|view|list|open|read)\b.*\b(mailbox|email|inbox)\b.*\b(preferences|settings)\b"
+    r"|\b(mailbox|email|inbox)\b.*\b(preferences|settings)\b.*\b(show|view|list|open|read)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_PREFERENCES_EDIT_RE = re.compile(
+    r"\b(edit|change|update|modify|reconfigure|reset)\b.*\b(mailbox|email|inbox)\b.*\b(preferences|settings)\b"
+    r"|\b(mailbox|email|inbox)\b.*\b(preferences|settings)\b.*\b(edit|change|update|modify|reconfigure|reset)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_CAPABILITIES_RE = re.compile(
+    r"\b(what\s+can\s+you\s+do|options|capabilities|help)\b.*\b(mailbox|inbox|gmail|email)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_PREFERENCES_APPLY_RE = re.compile(
+    r"\b(apply|use|follow|run)\b.*\b(mailbox|email|inbox)\b.*\b(preferences|settings)\b"
+    r"|\b(mailbox|email|inbox)\b.*\b(preferences|settings)\b.*\b(apply|use|follow|run)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_REVIEW_RE = re.compile(
+    r"\b(review|digest|recap)\b.*\b(mailbox|inbox|email)\b"
+    r"|\b(mailbox|inbox|email)\b.*\b(review|digest|recap)\b",
+    re.IGNORECASE,
+)
+_NEWSLETTER_EDIT_RE = re.compile(
+    r"\b(newsletters?)\b.*\b(archive|keep|summari[sz]e(?:\s+then\s+archive)?)\b"
+    r"|\b(change|set|make)\b.*\b(newsletters?)\b.*\b(archive|keep|summari[sz]e(?:\s+then\s+archive)?)\b",
+    re.IGNORECASE,
+)
+_DRAFT_REPLIES_EDIT_RE = re.compile(
+    r"\b(draft\s+suggestions?|draft\s+repl(?:y|ies)|reply\s+drafts?)\b.*\b(off|disable|turn\s+off|suggest|on\s+request)\b"
+    r"|\b(turn\s+off|disable|set|change)\b.*\b(draft\s+suggestions?|draft\s+repl(?:y|ies)|reply\s+drafts?)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_MODE_EDIT_RE = re.compile(
+    r"\b(mailbox\s+mode|operating\s+mode|mode)\b.*\b(safe\s+autopilot|confirm\s+before\s+action|suggest\s+only)\b"
+    r"|\bset\b.*\bmailbox\s+mode\b.*\b(safe\s+autopilot|confirm\s+before\s+action|suggest\s+only)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_REVIEW_SCHEDULE_EDIT_RE = re.compile(
+    r"\b(mailbox\s+review|review\s+schedule|scheduled\s+review)\b.*\b(daily|weekly|off|manual|disable)\b"
+    r"|\bset\b.*\b(mailbox\s+review|review\s+schedule)\b.*\b(daily|weekly|off|manual|disable)\b",
+    re.IGNORECASE,
+)
+_CONTINUOUS_CLEANUP_EDIT_RE = re.compile(
+    r"\b(continuous\s+(?:mailbox\s+)?(?:cleanup|automation)|automatic\s+mailbox\s+cleanup|auto\s+cleanup)\b.*\b(on|off|enable|disable|turn\s+on|turn\s+off)\b"
+    r"|\b(turn\s+on|turn\s+off|enable|disable)\b.*\b(continuous\s+(?:mailbox\s+)?(?:cleanup|automation)|automatic\s+mailbox\s+cleanup|auto\s+cleanup)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_RULE_RE = re.compile(
+    r"\balways\s+(label|move)\s+(.+?)\s+(?:mail|emails?)\s+(?:as|to)\s+([A-Za-z][A-Za-z0-9 &_/-]*)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_RULE_FROM_RE = re.compile(
+    r"\balways\s+(label|move)\s+(?:emails?\s+from|mail\s+from)\s+(.+?)\s+(?:as|to)\s+([A-Za-z][A-Za-z0-9 &_/-]*)\b",
+    re.IGNORECASE,
+)
+_PENDING_NUMERIC_REPLY_RE = re.compile(r"^\s*(?:option\s+)?(\d{1,2})\s*[?.!]*\s*$", re.IGNORECASE)
 _EMAIL_RELATIVE_DAY_RE = re.compile(r"\b(today|yesterday)\b", re.IGNORECASE)
 _EXPLICIT_EMAIL_DELIVERY_PHRASES = (
     "email it to me",
@@ -103,10 +185,95 @@ _COUNT_WORD_MAP = {
     "nine": 9,
     "ten": 10,
 }
+_MAILBOX_PREFERENCE_QUESTIONS = [
+    {
+        "key": "operation_mode",
+        "title": "Mailbox control mode",
+        "prompt": "How cautious should I be when organizing your mailbox?",
+        "options": [
+            ("suggest_only", "Suggest only"),
+            ("confirm_before_action", "Confirm before action"),
+            ("safe_autopilot", "Safe autopilot"),
+        ],
+    },
+    {
+        "key": "promotions_action",
+        "title": "Promotions",
+        "prompt": "What should I do with promotions in your inbox?",
+        "options": [
+            ("keep", "Keep promotions in inbox"),
+            ("archive", "Archive promotions"),
+        ],
+    },
+    {
+        "key": "newsletters_action",
+        "title": "Newsletters",
+        "prompt": "How should I handle newsletter-style emails?",
+        "options": [
+            ("keep", "Keep newsletters in inbox"),
+            ("archive", "Archive newsletters"),
+            ("summarize_then_archive", "Summarize then archive newsletters"),
+        ],
+    },
+    {
+        "key": "task_extraction",
+        "title": "Task extraction",
+        "prompt": "Should I surface tasks and action items from emails?",
+        "options": [
+            (True, "Yes, extract tasks"),
+            (False, "No, leave task extraction off"),
+        ],
+    },
+    {
+        "key": "draft_replies",
+        "title": "Draft replies",
+        "prompt": "How should I help with replies?",
+        "options": [
+            ("suggest", "Suggest drafts"),
+            ("on_request", "Draft only when asked"),
+            ("off", "Do not suggest drafts"),
+        ],
+    },
+    {
+        "key": "review_schedule",
+        "title": "Scheduled mailbox review",
+        "prompt": "Should I record a scheduled mailbox review in the background?",
+        "options": [
+            ("manual", "Only when you ask"),
+            ("daily", "Run a daily mailbox review"),
+            ("weekly", "Run a weekly mailbox review"),
+        ],
+    },
+    {
+        "key": "continuous_cleanup",
+        "title": "Continuous safe cleanup",
+        "prompt": "Should I keep promotions and newsletters under control automatically between chats?",
+        "options": [
+            ({"enabled": False, "interval_minutes": 30}, "Keep continuous cleanup off"),
+            ({"enabled": True, "interval_minutes": 30}, "Run continuous safe cleanup every 30 minutes"),
+        ],
+    },
+]
 
 
 def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
     fast_path = str(result.get("_fast_path", "") or result.get("action", "unknown"))
+    try:
+        if fast_path in {"relative_day_email_list", "listed_email_display", "selected_email_summary"}:
+            record_mailbox_review_event({"kind": "manual_triage", "fast_path": fast_path})
+        elif fast_path == "mailbox_organization_plan":
+            record_mailbox_review_event({"kind": "mailbox_plan_preview"})
+        elif fast_path == "mailbox_preferences_apply":
+            record_mailbox_review_event(
+                {
+                    "kind": "mailbox_apply",
+                    "promotions_archived": int(result.get("promotions_archived", 0) or 0),
+                    "newsletter_archived": int(result.get("newsletter_archived", 0) or 0),
+                    "rules_applied": int(result.get("rules_applied", 0) or 0),
+                }
+            )
+    except Exception:
+        pass
     log_fast_path_hit("email", fast_path)
     return result
 _ORDINAL_INDEX_MAP = {
@@ -224,6 +391,697 @@ def _get_session_id(artifacts_out: Optional[Dict[str, Any]]) -> str:
     if not isinstance(artifacts_out, dict):
         return ""
     return str(artifacts_out.get("_session_id", "") or "").strip()
+
+
+def _mailbox_preferences_session_key(artifacts_out: Optional[Dict[str, Any]]) -> str:
+    return _get_session_id(artifacts_out) or "__default__"
+
+
+def _load_pending_mailbox_preferences() -> Dict[str, Dict[str, Any]]:
+    try:
+        if _PENDING_MAILBOX_PREFERENCES_PATH.exists():
+            payload = json.loads(_PENDING_MAILBOX_PREFERENCES_PATH.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        pass
+    return {}
+
+
+def _save_pending_mailbox_preferences(state: Dict[str, Dict[str, Any]]) -> None:
+    _PENDING_MAILBOX_PREFERENCES_PATH.write_text(
+        json.dumps(state, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _sync_mailbox_preferences_context(session_key: str, state: Optional[Dict[str, Any]]) -> None:
+    try:
+        from src.agent.manifest.context_manifest import clear_context, write_context  # noqa: PLC0415
+
+        if not state:
+            clear_context(agent="email")
+            return
+
+        resolved_entities = {
+            "session_key": session_key,
+            "preference_file": str(get_mailbox_preferences_path()),
+            "state_kind": str(state.get("kind", "") or ""),
+            "step": int(state.get("step", 0) or 0),
+        }
+        if isinstance(state.get("preferences"), dict):
+            resolved_entities["mailbox_preferences"] = state.get("preferences", {})
+        if isinstance(state.get("plan"), dict):
+            resolved_entities["mailbox_plan"] = state.get("plan", {})
+
+        write_context(
+            agent="email",
+            topic="mailbox_preferences",
+            resolved_entities=resolved_entities,
+            awaiting="email_action",
+            pending_selection={
+                "kind": "mailbox_preferences",
+                "session_key": session_key,
+                "state_kind": str(state.get("kind", "") or ""),
+                "step": int(state.get("step", 0) or 0),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _get_pending_mailbox_preferences(session_key: str) -> Dict[str, Any]:
+    return _load_pending_mailbox_preferences().get(session_key, {})
+
+
+def _set_pending_mailbox_preferences(session_key: str, state: Dict[str, Any]) -> None:
+    all_state = _load_pending_mailbox_preferences()
+    all_state[session_key] = state
+    _save_pending_mailbox_preferences(all_state)
+    _sync_mailbox_preferences_context(session_key, state)
+
+
+def _clear_pending_mailbox_preferences(session_key: str) -> None:
+    all_state = _load_pending_mailbox_preferences()
+    if session_key in all_state:
+        del all_state[session_key]
+        _save_pending_mailbox_preferences(all_state)
+    _sync_mailbox_preferences_context(session_key, None)
+
+
+def _is_mailbox_preferences_show_intent(normalized_query: str) -> bool:
+    return bool(_MAILBOX_PREFERENCES_SHOW_RE.search(normalized_query))
+
+
+def _is_mailbox_preferences_edit_intent(normalized_query: str) -> bool:
+    return bool(_MAILBOX_PREFERENCES_EDIT_RE.search(normalized_query))
+
+
+def _is_mailbox_capabilities_intent(normalized_query: str) -> bool:
+    return bool(_MAILBOX_CAPABILITIES_RE.search(normalized_query))
+
+
+def _is_mailbox_preferences_apply_intent(normalized_query: str) -> bool:
+    return bool(_MAILBOX_PREFERENCES_APPLY_RE.search(normalized_query))
+
+
+def _is_mailbox_review_intent(normalized_query: str) -> bool:
+    return bool(_MAILBOX_REVIEW_RE.search(normalized_query))
+
+
+def _is_mailbox_organization_intent(normalized_query: str) -> bool:
+    return bool(_MAILBOX_ORGANIZATION_INTENT_RE.search(normalized_query))
+
+
+def _parse_mailbox_label_rule_request(raw_query: str) -> Optional[Dict[str, Any]]:
+    match = _MAILBOX_RULE_FROM_RE.search(raw_query) or _MAILBOX_RULE_RE.search(raw_query)
+    if not match:
+        return None
+
+    action = str(match.group(1) or "label").strip().lower()
+    matcher = str(match.group(2) or "").strip().strip('"\'').strip()
+    label_name = str(match.group(3) or "").strip().strip('"\'').strip()
+    if not matcher or not label_name:
+        return None
+
+    match_type = "sender"
+    if re.search(r"@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|\.[A-Za-z]{2,}$", matcher):
+        match_type = "domain"
+    elif " " not in matcher:
+        match_type = "keyword"
+
+    return {
+        "match_type": match_type,
+        "match_value": matcher,
+        "label_name": label_name,
+        "also_archive": action == "move",
+    }
+
+
+def _apply_direct_mailbox_preference_edits(raw_query: str, agent_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    lowered = _normalize_query_text(raw_query)
+    updated = load_mailbox_preferences()
+    changes: List[str] = []
+
+    if _NEWSLETTER_EDIT_RE.search(lowered):
+        if "summarize then archive" in lowered or "summarise then archive" in lowered or "summarize" in lowered or "summarise" in lowered:
+            updated["newsletters_action"] = "summarize_then_archive"
+            changes.append("Newsletters will be summarized then archived.")
+        elif "archive" in lowered:
+            updated["newsletters_action"] = "archive"
+            changes.append("Newsletters will be archived.")
+        elif "keep" in lowered:
+            updated["newsletters_action"] = "keep"
+            changes.append("Newsletters will stay in the inbox.")
+
+    if _DRAFT_REPLIES_EDIT_RE.search(lowered):
+        if "turn off" in lowered or "disable" in lowered or re.search(r"\boff\b", lowered):
+            updated["draft_replies"] = "off"
+            changes.append("Draft suggestions are turned off.")
+        elif "on request" in lowered:
+            updated["draft_replies"] = "on_request"
+            changes.append("Drafts will only be created on request.")
+        elif "suggest" in lowered:
+            updated["draft_replies"] = "suggest"
+            changes.append("Draft suggestions are enabled.")
+
+    if _MAILBOX_MODE_EDIT_RE.search(lowered):
+        if "safe autopilot" in lowered:
+            updated["operation_mode"] = "safe_autopilot"
+            changes.append("Mailbox mode is now safe autopilot.")
+        elif "confirm before action" in lowered:
+            updated["operation_mode"] = "confirm_before_action"
+            changes.append("Mailbox mode is now confirm before action.")
+        elif "suggest only" in lowered:
+            updated["operation_mode"] = "suggest_only"
+            changes.append("Mailbox mode is now suggest only.")
+
+    if _MAILBOX_REVIEW_SCHEDULE_EDIT_RE.search(lowered):
+        if "daily" in lowered:
+            updated["review_schedule"] = "daily"
+            changes.append("Scheduled mailbox review is now daily.")
+        elif "weekly" in lowered:
+            updated["review_schedule"] = "weekly"
+            changes.append("Scheduled mailbox review is now weekly.")
+        elif any(token in lowered for token in ("off", "manual", "disable")):
+            updated["review_schedule"] = "manual"
+            changes.append("Scheduled mailbox review is turned off.")
+
+    if _CONTINUOUS_CLEANUP_EDIT_RE.search(lowered):
+        cleanup = updated.get("continuous_cleanup", {}) if isinstance(updated.get("continuous_cleanup"), dict) else {"enabled": False, "interval_minutes": 30}
+        if any(token in lowered for token in ("turn on", "enable")):
+            cleanup["enabled"] = True
+            updated["continuous_cleanup"] = cleanup
+            changes.append("Continuous mailbox cleanup is enabled.")
+        elif any(token in lowered for token in ("turn off", "disable")):
+            cleanup["enabled"] = False
+            updated["continuous_cleanup"] = cleanup
+            changes.append("Continuous mailbox cleanup is turned off.")
+
+    if not changes:
+        return None
+
+    saved = save_mailbox_preferences(updated)
+    return {
+        "status": "success",
+        "action": "mailbox_preferences_edit",
+        "_fast_path": "mailbox_preferences_edit",
+        "file_path": saved.get("file_path", ""),
+        "message": _append_mailbox_automation_sync_note(
+            "\n".join([
+                "Updated mailbox preferences:",
+                *[f"- {change}" for change in changes],
+                "",
+                render_mailbox_preferences_summary(saved.get("preferences", {})),
+            ]),
+            agent_id,
+            saved.get("preferences", {}),
+        ),
+    }
+
+
+def _apply_saved_mailbox_rule(rule: Dict[str, Any], all_tools: Dict[str, Any]) -> Dict[str, Any]:
+    creator = all_tools.get("create_smart_label_rule")
+    if creator is None:
+        return {"status": "error", "message": "Smart label rule tools are unavailable."}
+
+    match_value = str(rule.get("match_value", "") or "").strip()
+    label_name = str(rule.get("label_name", "") or "").strip()
+    return creator(
+        label_name=label_name,
+        from_email=match_value,
+        also_archive=bool(rule.get("also_archive", False)),
+    )
+
+
+def _save_and_apply_mailbox_rule(raw_query: str, all_tools: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    rule = _parse_mailbox_label_rule_request(raw_query)
+    if rule is None:
+        return None
+
+    updated = upsert_mailbox_label_rule(load_mailbox_preferences(), rule)
+    save_result = save_mailbox_preferences(updated)
+    apply_result = _apply_saved_mailbox_rule(rule, all_tools)
+    if apply_result.get("status") != "success":
+        return {
+            "status": "success",
+            "action": "mailbox_rule_saved",
+            "_fast_path": "mailbox_rule_saved",
+            "file_path": save_result.get("file_path", ""),
+            "message": (
+                f"Saved the mailbox rule for '{rule['match_value']}' -> '{rule['label_name']}', "
+                f"but I could not apply it immediately: {apply_result.get('message', 'unknown error')}"
+            ),
+        }
+
+    return {
+        "status": "success",
+        "action": "mailbox_rule_saved",
+        "_fast_path": "mailbox_rule_saved",
+        "file_path": save_result.get("file_path", ""),
+        "message": (
+            f"Saved and applied the mailbox rule: emails matching '{rule['match_value']}' will be labeled '{rule['label_name']}'"
+            f"{' and archived from Inbox' if rule.get('also_archive') else ''}."
+        ),
+    }
+
+
+def _detect_mailbox_signals(counts: Dict[str, Any], preferences: Dict[str, Any], history: List[Dict[str, Any]]) -> List[str]:
+    return detect_mailbox_signals(counts, preferences, history)
+
+
+def _extract_mailbox_unread_total(inbox_result: Dict[str, Any]) -> int:
+    return int(
+        inbox_result.get("unread_messages", inbox_result.get("count", inbox_result.get("unread_count", 0)))
+        or 0
+    )
+
+
+def _append_mailbox_automation_sync_note(message: str, agent_id: Optional[str], preferences: Dict[str, Any]) -> str:
+    sync_result = sync_mailbox_automation_config(agent_id, preferences)
+    sync_message = str(sync_result.get("message", "") or "").strip()
+    if not sync_message:
+        return message
+    return f"{message}\n\nAutomation sync: {sync_message}"
+
+
+def _build_mailbox_review_digest(all_tools: Dict[str, Any]) -> Dict[str, Any]:
+    preferences = load_mailbox_preferences()
+    plan = _build_mailbox_plan(preferences, all_tools)
+    history = load_mailbox_review_history()
+    last_apply = next(
+        (
+            item
+            for item in reversed(history)
+            if str(item.get("kind", "") or "") in {"mailbox_apply", "mailbox_continuous_cleanup"}
+        ),
+        None,
+    )
+    signals = _detect_mailbox_signals(plan.get("counts", {}), preferences, history)
+
+    lines = [
+        "Mailbox review digest:",
+        render_mailbox_preferences_summary(preferences),
+        "",
+        f"Unread inbox count: {int(plan.get('counts', {}).get('unread_total', 0) or 0)}",
+        f"Promotion emails in inbox: {int(plan.get('counts', {}).get('promotions', 0) or 0)}",
+        f"Newsletter-style emails in inbox: {int(plan.get('counts', {}).get('newsletters', 0) or 0)}",
+    ]
+
+    if last_apply:
+        lines.append("")
+        lines.append(f"Last cleanup run: {last_apply.get('recorded_at', 'unknown time')}")
+        lines.append(f"- Promotions archived then: {int(last_apply.get('promotions_archived', 0) or 0)}")
+        lines.append(f"- Newsletters archived then: {int(last_apply.get('newsletter_archived', 0) or 0)}")
+    else:
+        lines.append("")
+        lines.append("No mailbox cleanup has been recorded yet.")
+
+    lines.append("")
+    lines.append("Recommendations:")
+    if signals:
+        lines.extend(f"- {signal}" for signal in signals)
+    else:
+        lines.append("- Your current mailbox preferences look stable. No urgent changes are recommended right now.")
+
+    if not preferences.get("label_rules"):
+        lines.append("- You do not have saved label rules yet. Add rules for recurring senders or categories if the same mail keeps coming back.")
+
+    return {
+        "status": "success",
+        "action": "mailbox_review_digest",
+        "_fast_path": "mailbox_review_digest",
+        "message": "\n".join(lines),
+    }
+
+
+def _build_mailbox_setup_entry_message() -> str:
+    return "\n".join([
+        "I can organize your mailbox in a controlled way instead of guessing.",
+        "Choose one option:",
+        "1. Guided setup for mailbox preferences",
+        "2. Show what I can truly automate",
+        "3. Use safe default mailbox preferences",
+        "4. Cancel",
+    ])
+
+
+def _build_mailbox_preference_question_message(state: Dict[str, Any]) -> str:
+    step = int(state.get("step", 0) or 0)
+    preferences = state.get("preferences", {}) if isinstance(state.get("preferences"), dict) else {}
+    question = _MAILBOX_PREFERENCE_QUESTIONS[step]
+    lines = [
+        f"Mailbox setup {step + 1}/{len(_MAILBOX_PREFERENCE_QUESTIONS)}: {question['title']}",
+        question["prompt"],
+    ]
+    current_value = preferences.get(question["key"])
+    for index, (_, label) in enumerate(question["options"], start=1):
+        marker = " (current)" if question["options"][index - 1][0] == current_value else ""
+        lines.append(f"{index}. {label}{marker}")
+    return "\n".join(lines)
+
+
+def _build_mailbox_plan(preferences: Dict[str, Any], all_tools: Dict[str, Any]) -> Dict[str, Any]:
+    plan_items: List[Dict[str, Any]] = []
+    counts: Dict[str, int] = {}
+
+    def _count(query: str) -> int:
+        counter = all_tools.get("count_matching_emails")
+        if counter is None:
+            return 0
+        result = counter(query)
+        if not isinstance(result, dict) or result.get("status") != "success":
+            return 0
+        return int(result.get("total_count", result.get("count", 0)) or 0)
+
+    unread_total = 0
+    inbox_counter = all_tools.get("get_inbox_count")
+    if inbox_counter is not None:
+        inbox_result = inbox_counter()
+        if isinstance(inbox_result, dict) and inbox_result.get("status") == "success":
+            unread_total = _extract_mailbox_unread_total(inbox_result)
+    counts["unread_total"] = unread_total
+
+    promotions_count = _count("category:promotions in:inbox")
+    counts["promotions"] = promotions_count
+    if preferences.get("promotions_action") == "archive":
+        plan_items.append({
+            "id": "archive_promotions",
+            "query": "category:promotions in:inbox",
+            "description": f"Archive up to {promotions_count} promotion email(s) from Inbox.",
+            "count": promotions_count,
+            "safe_to_apply": True,
+        })
+
+    newsletters_count = _count('in:inbox (unsubscribe OR newsletter OR "mailing list") -category:promotions')
+    counts["newsletters"] = newsletters_count
+    newsletters_action = str(preferences.get("newsletters_action", "keep") or "keep")
+    if newsletters_action in {"archive", "summarize_then_archive"}:
+        plan_items.append({
+            "id": "archive_newsletters",
+            "query": 'in:inbox (unsubscribe OR newsletter OR "mailing list") -category:promotions',
+            "description": (
+                f"{'Summarize then archive' if newsletters_action == 'summarize_then_archive' else 'Archive'} "
+                f"up to {newsletters_count} newsletter-style email(s)."
+            ),
+            "count": newsletters_count,
+            "safe_to_apply": True,
+        })
+
+    if preferences.get("task_extraction"):
+        plan_items.append({
+            "id": "task_extraction",
+            "description": "Surface pending tasks from inbox emails when you ask for an email task review.",
+            "safe_to_apply": False,
+        })
+
+    if preferences.get("draft_replies") == "suggest":
+        plan_items.append({
+            "id": "draft_suggestions",
+            "description": "Suggest draft replies for important emails instead of sending automatically.",
+            "safe_to_apply": False,
+        })
+
+    for rule in preferences.get("label_rules", []):
+        if not isinstance(rule, dict):
+            continue
+        plan_items.append(
+            {
+                "id": "label_rule",
+                "description": (
+                    f"Create or refresh the rule: label emails matching '{rule.get('match_value', '')}' as '{rule.get('label_name', '')}'"
+                    f"{' and archive them from Inbox' if rule.get('also_archive') else ''}."
+                ),
+                "safe_to_apply": True,
+                "rule": rule,
+            }
+        )
+
+    history = load_mailbox_review_history()
+    signals = _detect_mailbox_signals(counts, preferences, history)
+
+    return {
+        "preferences": preferences,
+        "counts": counts,
+        "items": plan_items,
+        "signals": signals,
+    }
+
+
+def _format_mailbox_plan(plan: Dict[str, Any]) -> str:
+    preferences = plan.get("preferences", {}) if isinstance(plan.get("preferences"), dict) else {}
+    counts = plan.get("counts", {}) if isinstance(plan.get("counts"), dict) else {}
+    items = plan.get("items", []) if isinstance(plan.get("items"), list) else []
+    signals = plan.get("signals", []) if isinstance(plan.get("signals"), list) else []
+    lines = [
+        "Mailbox organization plan:",
+        render_mailbox_preferences_summary(preferences),
+        "",
+        f"Current unread inbox count: {int(counts.get('unread_total', 0) or 0)}",
+    ]
+    if items:
+        lines.append("Planned actions:")
+        for index, item in enumerate(items, start=1):
+            lines.append(f"{index}. {item.get('description', '')}")
+    else:
+        lines.append("No mailbox actions are enabled yet. Edit your mailbox preferences to turn actions on.")
+    if signals:
+        lines.append("")
+        lines.append("Why I am bringing this up now:")
+        lines.extend(f"- {signal}" for signal in signals)
+    lines.extend([
+        "",
+        "Choose one option:",
+        "1. Apply safe cleanup now",
+        "2. Show saved mailbox preferences",
+        "3. Edit mailbox preferences",
+        "4. Cancel",
+    ])
+    return "\n".join(lines)
+
+
+def _apply_mailbox_preferences_plan(plan: Dict[str, Any], all_tools: Dict[str, Any]) -> Dict[str, Any]:
+    paginated_archive_tool = all_tools.get("archive_all_matching_emails")
+    archive_tool = all_tools.get("archive_emails")
+    rule_tool = all_tools.get("create_smart_label_rule")
+    if paginated_archive_tool is None and archive_tool is None and rule_tool is None:
+        return {
+            "status": "error",
+            "message": "Mailbox cleanup tools are unavailable right now.",
+        }
+
+    results: List[str] = []
+    applied = 0
+    promotions_archived = 0
+    newsletter_archived = 0
+    rules_applied = 0
+    for item in plan.get("items", []):
+        if not isinstance(item, dict) or not item.get("safe_to_apply"):
+            continue
+        if item.get("id") == "label_rule":
+            rule = item.get("rule", {}) if isinstance(item.get("rule"), dict) else {}
+            result = _apply_saved_mailbox_rule(rule, all_tools)
+            if isinstance(result, dict) and result.get("status") == "success":
+                rules_applied += 1
+                results.append(f"- {item.get('description', '').rstrip('.')} Done.")
+            else:
+                message = result.get("message", "unknown error") if isinstance(result, dict) else "unknown error"
+                results.append(f"- {item.get('description', '').rstrip('.')} Skipped: {message}.")
+            continue
+
+        query = str(item.get("query", "") or "").strip()
+        if not query:
+            continue
+        if paginated_archive_tool is None and archive_tool is None:
+            results.append(f"- {item.get('description', '').rstrip('.')} Skipped: archive tool unavailable.")
+            continue
+        result = paginated_archive_tool(query, 200) if paginated_archive_tool is not None else archive_tool(query, 200)
+        if isinstance(result, dict) and result.get("status") == "success":
+            archived = int(result.get("archived_count", 0) or 0)
+            applied += archived
+            if item.get("id") == "archive_promotions":
+                promotions_archived += archived
+            if item.get("id") == "archive_newsletters":
+                newsletter_archived += archived
+            results.append(f"- {item.get('description', '').rstrip('.')} Done: {archived} archived.")
+        else:
+            message = result.get("message", "unknown error") if isinstance(result, dict) else "unknown error"
+            results.append(f"- {item.get('description', '').rstrip('.')} Skipped: {message}.")
+
+    if not results:
+        return {
+            "status": "success",
+            "message": "There were no safe mailbox cleanup actions to apply from the saved preferences.",
+            "applied_count": 0,
+        }
+
+    return {
+        "status": "success",
+        "message": "\n".join(["Applied mailbox preferences:", *results]),
+        "applied_count": applied,
+        "promotions_archived": promotions_archived,
+        "newsletter_archived": newsletter_archived,
+        "rules_applied": rules_applied,
+    }
+
+
+def _start_mailbox_preferences_setup(session_key: str, *, base_preferences: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = {
+        "kind": "guided_setup",
+        "step": 0,
+        "preferences": base_preferences or default_mailbox_preferences(),
+    }
+    _set_pending_mailbox_preferences(session_key, state)
+    return {
+        "status": "success",
+        "action": "mailbox_preferences_setup",
+        "_fast_path": "mailbox_preferences_question",
+        "message": _build_mailbox_preference_question_message(state),
+    }
+
+
+def _handle_pending_mailbox_preferences_reply(
+    raw_query: str,
+    normalized_query: str,
+    session_key: str,
+    all_tools: Dict[str, Any],
+    artifacts_out: Optional[Dict[str, Any]],
+    agent_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    del normalized_query, artifacts_out
+    pending = _get_pending_mailbox_preferences(session_key)
+    if not pending:
+        return None
+
+    match = _PENDING_NUMERIC_REPLY_RE.match(raw_query)
+    if not match:
+        return None
+
+    selection = int(match.group(1))
+    kind = str(pending.get("kind", "") or "")
+    if kind == "entry":
+        if selection == 1:
+            return _start_mailbox_preferences_setup(session_key)
+        if selection == 2:
+            _clear_pending_mailbox_preferences(session_key)
+            return {
+                "status": "success",
+                "action": "mailbox_capabilities",
+                "_fast_path": "mailbox_capabilities",
+                "message": render_mailbox_capabilities(),
+            }
+        if selection == 3:
+            _clear_pending_mailbox_preferences(session_key)
+            save_result = save_mailbox_preferences(default_mailbox_preferences())
+            message = (
+                f"Saved safe default mailbox preferences.\n"
+                f"{render_mailbox_preferences_summary(save_result.get('preferences', {}))}\n\n"
+                f"Preference file: {save_result.get('file_path', '')}"
+            )
+            return {
+                "status": "success",
+                "action": "mailbox_preferences_saved",
+                "_fast_path": "mailbox_preferences_saved",
+                "file_path": save_result.get("file_path", ""),
+                "message": _append_mailbox_automation_sync_note(message, agent_id, save_result.get("preferences", {})),
+            }
+        if selection == 4:
+            _clear_pending_mailbox_preferences(session_key)
+            return {
+                "status": "success",
+                "action": "mailbox_preferences_cancelled",
+                "_fast_path": "mailbox_preferences_cancelled",
+                "message": "Mailbox preference setup canceled.",
+            }
+        return {
+            "status": "success",
+            "action": "mailbox_preferences_invalid_reply",
+            "_fast_path": "mailbox_preferences_invalid_reply",
+            "message": "Reply with 1, 2, 3, or 4.",
+        }
+
+    if kind == "guided_setup":
+        step = int(pending.get("step", 0) or 0)
+        preferences = pending.get("preferences", {}) if isinstance(pending.get("preferences"), dict) else default_mailbox_preferences()
+        if step < 0 or step >= len(_MAILBOX_PREFERENCE_QUESTIONS):
+            _clear_pending_mailbox_preferences(session_key)
+            return None
+        question = _MAILBOX_PREFERENCE_QUESTIONS[step]
+        if selection < 1 or selection > len(question["options"]):
+            return {
+                "status": "success",
+                "action": "mailbox_preferences_invalid_reply",
+                "_fast_path": "mailbox_preferences_invalid_reply",
+                "message": f"Reply with a number from 1 to {len(question['options'])}.",
+            }
+
+        selected_value = question["options"][selection - 1][0]
+        preferences[question["key"]] = selected_value
+        next_step = step + 1
+        if next_step >= len(_MAILBOX_PREFERENCE_QUESTIONS):
+            _clear_pending_mailbox_preferences(session_key)
+            save_result = save_mailbox_preferences(preferences)
+            message = (
+                f"Mailbox preferences saved.\n"
+                f"{render_mailbox_preferences_summary(save_result.get('preferences', {}))}\n\n"
+                f"Preference file: {save_result.get('file_path', '')}\n"
+                f"You can now say 'organize my mailbox' for a plan or 'apply my mailbox preferences' to run the safe cleanup actions."
+            )
+            return {
+                "status": "success",
+                "action": "mailbox_preferences_saved",
+                "_fast_path": "mailbox_preferences_saved",
+                "file_path": save_result.get("file_path", ""),
+                "message": _append_mailbox_automation_sync_note(message, agent_id, save_result.get("preferences", {})),
+            }
+
+        pending["step"] = next_step
+        pending["preferences"] = preferences
+        _set_pending_mailbox_preferences(session_key, pending)
+        return {
+            "status": "success",
+            "action": "mailbox_preferences_question",
+            "_fast_path": "mailbox_preferences_question",
+            "message": _build_mailbox_preference_question_message(pending),
+        }
+
+    if kind == "plan_menu":
+        if selection == 1:
+            _clear_pending_mailbox_preferences(session_key)
+            result = _apply_mailbox_preferences_plan(pending.get("plan", {}), all_tools)
+            result.setdefault("action", "apply_mailbox_preferences")
+            result.setdefault("_fast_path", "mailbox_preferences_apply")
+            return result
+        if selection == 2:
+            _clear_pending_mailbox_preferences(session_key)
+            prefs = load_mailbox_preferences()
+            file_path = str(get_mailbox_preferences_path())
+            return {
+                "status": "success",
+                "action": "show_mailbox_preferences",
+                "_fast_path": "mailbox_preferences_show",
+                "file_path": file_path,
+                "message": f"{render_mailbox_preferences_summary(prefs)}\n\nPreference file: {file_path}",
+            }
+        if selection == 3:
+            _clear_pending_mailbox_preferences(session_key)
+            return _start_mailbox_preferences_setup(session_key, base_preferences=load_mailbox_preferences())
+        if selection == 4:
+            _clear_pending_mailbox_preferences(session_key)
+            return {
+                "status": "success",
+                "action": "mailbox_plan_cancelled",
+                "_fast_path": "mailbox_plan_cancelled",
+                "message": "Mailbox organization plan canceled.",
+            }
+        return {
+            "status": "success",
+            "action": "mailbox_preferences_invalid_reply",
+            "_fast_path": "mailbox_preferences_invalid_reply",
+            "message": "Reply with 1, 2, 3, or 4.",
+        }
+
+    return None
 
 
 def _extract_ordinal_index(normalized_query: str) -> Optional[int]:
@@ -1188,6 +2046,9 @@ def _build_all_tools() -> Dict[str, Any]:
     def archive_emails(query: str, max_results: int = 50) -> dict:
         return svc.archive_emails(query, max_results)
 
+    def archive_all_matching_emails(query: str, batch_size: int = 200, max_total: int = 0) -> dict:
+        return svc.archive_all_matching_emails(query, batch_size, max_total)
+
     def thread_mute(thread_id: str) -> dict:
         return svc.thread_mute(thread_id)
 
@@ -1319,6 +2180,7 @@ def _build_all_tools() -> Dict[str, Any]:
         "fetch_emails_to_markdown": fetch_emails_to_markdown,
         "unsubscribe_email": unsubscribe_email,
         "archive_emails": archive_emails,
+        "archive_all_matching_emails": archive_all_matching_emails,
         "thread_mute": thread_mute,
         "thread_archive": thread_archive,
         "thread_delete": thread_delete,
@@ -1441,9 +2303,116 @@ def execute_with_llm_orchestration(
     fast_path_query = _extract_fast_path_query(user_query)
     normalized_query = _normalize_query_text(fast_path_query)
     session_id = _get_session_id(artifacts_out)
+    mailbox_session_key = _mailbox_preferences_session_key(artifacts_out)
     is_sender_rule_intent = _is_sender_rule_creation_intent(normalized_query, fast_path_query)
     is_mailbox_preview = _is_mailbox_preview_intent(normalized_query)
     is_mailbox_cleanup = _is_mailbox_cleanup_intent(normalized_query)
+    is_mailbox_organization = _is_mailbox_organization_intent(normalized_query)
+    is_mailbox_preferences_show = _is_mailbox_preferences_show_intent(normalized_query)
+    is_mailbox_preferences_edit = _is_mailbox_preferences_edit_intent(normalized_query)
+    is_mailbox_capabilities = _is_mailbox_capabilities_intent(normalized_query)
+    is_mailbox_preferences_apply = _is_mailbox_preferences_apply_intent(normalized_query)
+    is_mailbox_review = _is_mailbox_review_intent(normalized_query)
+
+    pending_preferences_result = _handle_pending_mailbox_preferences_reply(
+        fast_path_query,
+        normalized_query,
+        mailbox_session_key,
+        all_tools,
+        artifacts_out,
+        agent_id,
+    )
+    if pending_preferences_result is not None:
+        return _return_fast_path_result(pending_preferences_result)
+
+    if is_mailbox_capabilities:
+        _clear_pending_mailbox_preferences(mailbox_session_key)
+        return _return_fast_path_result(
+            {
+                "status": "success",
+                "action": "mailbox_capabilities",
+                "_fast_path": "mailbox_capabilities",
+                "message": render_mailbox_capabilities(),
+            }
+        )
+
+    direct_pref_edit = _apply_direct_mailbox_preference_edits(fast_path_query, agent_id)
+    if direct_pref_edit is not None:
+        _clear_pending_mailbox_preferences(mailbox_session_key)
+        return _return_fast_path_result(direct_pref_edit)
+
+    direct_rule = _save_and_apply_mailbox_rule(fast_path_query, all_tools)
+    if direct_rule is not None:
+        _clear_pending_mailbox_preferences(mailbox_session_key)
+        return _return_fast_path_result(direct_rule)
+
+    if is_mailbox_preferences_show:
+        _clear_pending_mailbox_preferences(mailbox_session_key)
+        prefs = load_mailbox_preferences()
+        file_path = str(get_mailbox_preferences_path())
+        return _return_fast_path_result(
+            {
+                "status": "success",
+                "action": "show_mailbox_preferences",
+                "_fast_path": "mailbox_preferences_show",
+                "file_path": file_path,
+                "message": f"{render_mailbox_preferences_summary(prefs)}\n\nPreference file: {file_path}",
+            }
+        )
+
+    if is_mailbox_preferences_edit:
+        _clear_pending_mailbox_preferences(mailbox_session_key)
+        return _return_fast_path_result(
+            _start_mailbox_preferences_setup(
+                mailbox_session_key,
+                base_preferences=load_mailbox_preferences(),
+            )
+        )
+
+    if is_mailbox_preferences_apply:
+        _clear_pending_mailbox_preferences(mailbox_session_key)
+        prefs = load_mailbox_preferences()
+        plan = _build_mailbox_plan(prefs, all_tools)
+        result = _apply_mailbox_preferences_plan(plan, all_tools)
+        result.setdefault("action", "apply_mailbox_preferences")
+        result.setdefault("_fast_path", "mailbox_preferences_apply")
+        result["message"] = _append_mailbox_automation_sync_note(str(result.get("message", "") or ""), agent_id, prefs)
+        return _return_fast_path_result(result)
+
+    if is_mailbox_review:
+        _clear_pending_mailbox_preferences(mailbox_session_key)
+        return _return_fast_path_result(_build_mailbox_review_digest(all_tools))
+
+    if is_mailbox_organization:
+        _clear_pending_mailbox_preferences(mailbox_session_key)
+        if not mailbox_preferences_exist():
+            _set_pending_mailbox_preferences(mailbox_session_key, {"kind": "entry"})
+            return _return_fast_path_result(
+                {
+                    "status": "success",
+                    "action": "mailbox_preferences_entry",
+                    "_fast_path": "mailbox_preferences_entry",
+                    "message": _build_mailbox_setup_entry_message(),
+                }
+            )
+
+        prefs = load_mailbox_preferences()
+        plan = _build_mailbox_plan(prefs, all_tools)
+        _set_pending_mailbox_preferences(
+            mailbox_session_key,
+            {
+                "kind": "plan_menu",
+                "plan": plan,
+            },
+        )
+        return _return_fast_path_result(
+            {
+                "status": "success",
+                "action": "mailbox_organization_plan",
+                "_fast_path": "mailbox_organization_plan",
+                "message": _format_mailbox_plan(plan),
+            }
+        )
 
     pending_cleanup = _get_pending_mailbox_cleanup(session_id) if session_id else {}
     if pending_cleanup:

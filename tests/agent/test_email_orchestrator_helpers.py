@@ -815,3 +815,326 @@ def test_email_orchestrator_clears_stale_pending_cleanup_for_sender_rule(monkeyp
     assert result["action"] == "create_smart_label_rule"
     assert result["_fast_path"] == "sender_rule_creation"
     assert json.loads(pending_path.read_text(encoding="utf-8")) == {}
+
+
+def test_email_orchestrator_starts_mailbox_preferences_setup_for_organize_request(monkeypatch, tmp_path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+    mailbox_prefs = importlib.import_module("src.email.features.mailbox_preferences")
+
+    pending_path = tmp_path / "email_mailbox_preferences_pending.json"
+    prefs_path = tmp_path / "mailbox_preferences.md"
+    monkeypatch.setattr(orchestrator, "_PENDING_MAILBOX_PREFERENCES_PATH", pending_path)
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_PREFERENCES_PATH", prefs_path)
+    monkeypatch.setattr(orchestrator, "_build_all_tools", lambda: {})
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for mailbox preference entry fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for mailbox preference entry fast path")),
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("Please organize my mailbox properly")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "mailbox_preferences_entry"
+    assert "Guided setup for mailbox preferences" in result["message"]
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert pending["__default__"]["kind"] == "entry"
+
+
+def test_email_orchestrator_guided_mailbox_setup_saves_markdown_preferences(monkeypatch, tmp_path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+    mailbox_prefs = importlib.import_module("src.email.features.mailbox_preferences")
+
+    pending_path = tmp_path / "email_mailbox_preferences_pending.json"
+    prefs_path = tmp_path / "mailbox_preferences.md"
+    monkeypatch.setattr(orchestrator, "_PENDING_MAILBOX_PREFERENCES_PATH", pending_path)
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_PREFERENCES_PATH", prefs_path)
+    monkeypatch.setattr(orchestrator, "_build_all_tools", lambda: {})
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run during mailbox setup fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run during mailbox setup fast path")),
+    )
+
+    first = orchestrator.execute_with_llm_orchestration("Organize my inbox")
+    assert first["_fast_path"] == "mailbox_preferences_entry"
+
+    question_1 = orchestrator.execute_with_llm_orchestration("1")
+    assert question_1["_fast_path"] == "mailbox_preferences_question"
+    assert "Mailbox setup 1/7" in question_1["message"]
+
+    question_2 = orchestrator.execute_with_llm_orchestration("2")
+    assert "Mailbox setup 2/7" in question_2["message"]
+
+    question_3 = orchestrator.execute_with_llm_orchestration("2")
+    assert "Mailbox setup 3/7" in question_3["message"]
+
+    question_4 = orchestrator.execute_with_llm_orchestration("3")
+    assert "Mailbox setup 4/7" in question_4["message"]
+
+    question_5 = orchestrator.execute_with_llm_orchestration("1")
+    assert "Mailbox setup 5/7" in question_5["message"]
+
+    question_6 = orchestrator.execute_with_llm_orchestration("1")
+    assert "Mailbox setup 6/7" in question_6["message"]
+
+    question_7 = orchestrator.execute_with_llm_orchestration("2")
+    assert "Mailbox setup 7/7" in question_7["message"]
+
+    final = orchestrator.execute_with_llm_orchestration("2")
+
+    assert final["status"] == "success"
+    assert final["_fast_path"] == "mailbox_preferences_saved"
+    assert prefs_path.exists()
+    saved_text = prefs_path.read_text(encoding="utf-8")
+    assert "# Mailbox Preferences" in saved_text
+    assert '"operation_mode": "confirm_before_action"' in saved_text
+    assert '"promotions_action": "archive"' in saved_text
+    assert '"newsletters_action": "summarize_then_archive"' in saved_text
+    assert '"review_schedule": "daily"' in saved_text
+    assert '"continuous_cleanup": {' in saved_text
+    assert '"enabled": true' in saved_text
+
+
+def test_email_orchestrator_organize_mailbox_builds_plan_from_saved_preferences(monkeypatch, tmp_path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+    mailbox_prefs = importlib.import_module("src.email.features.mailbox_preferences")
+
+    pending_path = tmp_path / "email_mailbox_preferences_pending.json"
+    prefs_path = tmp_path / "mailbox_preferences.md"
+    monkeypatch.setattr(orchestrator, "_PENDING_MAILBOX_PREFERENCES_PATH", pending_path)
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_PREFERENCES_PATH", prefs_path)
+    mailbox_prefs.save_mailbox_preferences(
+        {
+            "operation_mode": "confirm_before_action",
+            "promotions_action": "archive",
+            "newsletters_action": "summarize_then_archive",
+            "task_extraction": True,
+            "draft_replies": "suggest",
+        }
+    )
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "get_inbox_count": lambda: {"status": "success", "count": 17},
+            "count_matching_emails": lambda query="": {
+                "status": "success",
+                "total_count": 6 if query.startswith("category:promotions") else 4,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for mailbox organization plan fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for mailbox organization plan fast path")),
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("Organize my mailbox properly")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "mailbox_organization_plan"
+    assert "Archive up to 6 promotion email(s)" in result["message"]
+    assert "Summarize then archive up to 4 newsletter-style email(s)" in result["message"]
+    assert "Current unread inbox count: 17" in result["message"]
+
+
+def test_email_orchestrator_applies_saved_mailbox_preferences(monkeypatch, tmp_path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+    mailbox_prefs = importlib.import_module("src.email.features.mailbox_preferences")
+
+    pending_path = tmp_path / "email_mailbox_preferences_pending.json"
+    prefs_path = tmp_path / "mailbox_preferences.md"
+    monkeypatch.setattr(orchestrator, "_PENDING_MAILBOX_PREFERENCES_PATH", pending_path)
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_PREFERENCES_PATH", prefs_path)
+    mailbox_prefs.save_mailbox_preferences(
+        {
+            "operation_mode": "confirm_before_action",
+            "promotions_action": "archive",
+            "newsletters_action": "archive",
+            "task_extraction": True,
+            "draft_replies": "suggest",
+        }
+    )
+
+    calls = []
+
+    def _archive_all(query: str, batch_size: int = 200, max_total: int = 0):
+        calls.append((query, batch_size, max_total))
+        if "category:promotions" in query:
+            return {"status": "success", "archived_count": 201}
+        return {"status": "success", "archived_count": 3}
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "get_inbox_count": lambda: {"status": "success", "unread_messages": 14},
+            "count_matching_emails": lambda query="": {
+                "status": "success",
+                "total_count": 201 if "category:promotions" in query else 3,
+            },
+            "archive_all_matching_emails": _archive_all,
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_dag",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("DAG should not run for mailbox preference apply fast path")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_skill_react",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ReAct should not run for mailbox preference apply fast path")),
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("Apply my mailbox preferences")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "mailbox_preferences_apply"
+    assert "Applied mailbox preferences:" in result["message"]
+    assert "Done: 201 archived." in result["message"]
+    assert len(calls) == 2
+    assert calls[0][0] == "category:promotions in:inbox"
+    assert "unsubscribe OR newsletter" in calls[1][0]
+
+
+def test_email_orchestrator_updates_newsletter_preference_from_conversational_edit(monkeypatch, tmp_path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+    mailbox_prefs = importlib.import_module("src.email.features.mailbox_preferences")
+
+    prefs_path = tmp_path / "mailbox_preferences.md"
+    history_path = tmp_path / "email_mailbox_review_history.json"
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_PREFERENCES_PATH", prefs_path)
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_REVIEW_HISTORY_PATH", history_path)
+    mailbox_prefs.save_mailbox_preferences(mailbox_prefs.default_mailbox_preferences())
+
+    monkeypatch.setattr(orchestrator, "_build_all_tools", lambda: {})
+
+    result = orchestrator.execute_with_llm_orchestration("change newsletters to archive")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "mailbox_preferences_edit"
+    assert "Newsletters will be archived." in result["message"]
+    assert '"newsletters_action": "archive"' in prefs_path.read_text(encoding="utf-8")
+
+
+def test_email_orchestrator_syncs_mailbox_scheduler_settings_from_direct_edit(monkeypatch, tmp_path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+    mailbox_prefs = importlib.import_module("src.email.features.mailbox_preferences")
+
+    prefs_path = tmp_path / "mailbox_preferences.md"
+    history_path = tmp_path / "email_mailbox_review_history.json"
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_PREFERENCES_PATH", prefs_path)
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_REVIEW_HISTORY_PATH", history_path)
+    mailbox_prefs.save_mailbox_preferences(mailbox_prefs.default_mailbox_preferences())
+
+    sync_calls = []
+    monkeypatch.setattr(orchestrator, "_build_all_tools", lambda: {})
+    monkeypatch.setattr(
+        orchestrator,
+        "sync_mailbox_automation_config",
+        lambda agent_id, preferences: sync_calls.append((agent_id, preferences)) or {"status": "success", "message": "Daily review enabled."},
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("set mailbox review to daily", agent_id="pa_test")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "mailbox_preferences_edit"
+    assert "Automation sync: Daily review enabled." in result["message"]
+    assert sync_calls and sync_calls[0][0] == "pa_test"
+    assert sync_calls[0][1]["review_schedule"] == "daily"
+
+
+def test_email_orchestrator_saves_and_applies_mailbox_rule(monkeypatch, tmp_path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+    mailbox_prefs = importlib.import_module("src.email.features.mailbox_preferences")
+
+    prefs_path = tmp_path / "mailbox_preferences.md"
+    history_path = tmp_path / "email_mailbox_review_history.json"
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_PREFERENCES_PATH", prefs_path)
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_REVIEW_HISTORY_PATH", history_path)
+
+    calls = []
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "create_smart_label_rule": lambda **kwargs: calls.append(kwargs) or {"status": "success", "future_rule_created": True},
+        },
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("always move recruiter mail to Jobs")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "mailbox_rule_saved"
+    assert calls and calls[0]["label_name"] == "Jobs"
+    assert calls[0]["from_email"] == "recruiter"
+    assert calls[0]["also_archive"] is True
+    saved_text = prefs_path.read_text(encoding="utf-8")
+    assert '"match_value": "recruiter"' in saved_text
+    assert '"label_name": "Jobs"' in saved_text
+
+
+def test_email_orchestrator_builds_mailbox_review_digest(monkeypatch, tmp_path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.email_agent.orchestrator")
+    mailbox_prefs = importlib.import_module("src.email.features.mailbox_preferences")
+
+    prefs_path = tmp_path / "mailbox_preferences.md"
+    history_path = tmp_path / "email_mailbox_review_history.json"
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_PREFERENCES_PATH", prefs_path)
+    monkeypatch.setattr(mailbox_prefs, "_MAILBOX_REVIEW_HISTORY_PATH", history_path)
+    mailbox_prefs.save_mailbox_preferences(
+        {
+            "operation_mode": "confirm_before_action",
+            "promotions_action": "archive",
+            "newsletters_action": "summarize_then_archive",
+            "task_extraction": True,
+            "draft_replies": "suggest",
+        }
+    )
+    mailbox_prefs.record_mailbox_review_event(
+        {
+            "kind": "mailbox_apply",
+            "promotions_archived": 10,
+            "newsletter_archived": 4,
+            "rules_applied": 1,
+            "recorded_at": "2026-03-19T10:00:00",
+        }
+    )
+    mailbox_prefs.record_mailbox_review_event({"kind": "manual_triage", "recorded_at": "2026-03-19T11:00:00"})
+    mailbox_prefs.record_mailbox_review_event({"kind": "manual_triage", "recorded_at": "2026-03-19T12:00:00"})
+    mailbox_prefs.record_mailbox_review_event({"kind": "manual_triage", "recorded_at": "2026-03-19T13:00:00"})
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_all_tools",
+        lambda: {
+            "get_inbox_count": lambda: {"status": "success", "count": 82},
+            "count_matching_emails": lambda query="": {"status": "success", "total_count": 9 if query.startswith("category:promotions") else 5},
+        },
+    )
+
+    result = orchestrator.execute_with_llm_orchestration("review my mailbox")
+
+    assert result["status"] == "success"
+    assert result["_fast_path"] == "mailbox_review_digest"
+    assert "Mailbox review digest:" in result["message"]
+    assert "Last cleanup run: 2026-03-19T10:00:00" in result["message"]
+    assert "Your inbox looks overloaded." in result["message"]

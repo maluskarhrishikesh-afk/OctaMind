@@ -352,6 +352,44 @@ def test_run_routing_pipeline_uses_context_agent_when_planning_falls_back(monkey
     assert pipeline.intent.agents == ["files"]
 
 
+def test_classify_message_marks_numeric_pending_selection_as_context_followup() -> None:
+    from src.agent.workflows.router import _classify_message
+    from src.agent.workflows.agent_registry import registered_agents
+
+    result = _classify_message(
+        "1",
+        active_context={
+            "agent": "email",
+            "topic": "mailbox_preferences",
+            "awaiting": "email_action",
+            "pending_selection": {"kind": "mailbox_preferences", "step": 0},
+        },
+        session_state=None,
+        valid=set(registered_agents()),
+    )
+
+    assert result.category == "context_followup"
+    assert result.source == "pending_selection"
+
+
+def test_classify_and_route_mailbox_preference_edit_uses_email_only() -> None:
+    from src.agent.workflows.router import classify_and_route
+
+    result = classify_and_route("change newsletters to archive")
+
+    assert result.category == "fresh_task"
+    assert result.agents == ["email"]
+
+
+def test_classify_and_route_organize_mailbox_uses_email_only() -> None:
+    from src.agent.workflows.router import classify_and_route
+
+    result = classify_and_route("please organize my mailbox")
+
+    assert result.category == "fresh_task"
+    assert result.agents == ["email"]
+
+
 def test_keyword_fallback_payslip_routes_to_files() -> None:
     test_case = TestKeywordFallbackRouting()
     test_case.setup_method()
