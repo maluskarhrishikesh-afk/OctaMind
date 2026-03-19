@@ -245,6 +245,123 @@ def test_zip_files_from_manifest_ignores_archive_inputs_when_files_exist(
     ]
 
 
+def test_filter_precise_search_results_excludes_generated_manifest_artifacts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    your_data_root = tmp_path / "your_data"
+
+    def _fake_get_your_data_dir(*parts: str, create: bool = False):
+        target = your_data_root.joinpath(*parts)
+        if create:
+            target.mkdir(parents=True, exist_ok=True)
+        return target
+
+    monkeypatch.setattr(orchestrator, "get_your_data_dir", _fake_get_your_data_dir)
+    monkeypatch.setattr(orchestrator, "_is_temp_or_test_artifact", lambda _path: False)
+
+    manifests_dir = your_data_root / "manifests" / "files"
+    manifests_dir.mkdir(parents=True, exist_ok=True)
+    real_dir = tmp_path / "docs"
+    real_dir.mkdir()
+
+    real_payslip = real_dir / "Payslip_Jan.pdf"
+    manifest_json = manifests_dir / "payslip_20260317_231742_377626.json"
+    manifest_txt = manifests_dir / "payslip_20260317_231742_377626.txt"
+    real_payslip.write_text("jan", encoding="utf-8")
+    manifest_json.write_text("{}", encoding="utf-8")
+    manifest_txt.write_text("manifest", encoding="utf-8")
+
+    filtered = orchestrator._filter_precise_search_results(
+        "How many payslips are there in my computer?",
+        {
+            "results": [
+                {"path": str(real_payslip), "name": real_payslip.name, "type": "file"},
+                {"path": str(manifest_json), "name": manifest_json.name, "type": "file"},
+                {"path": str(manifest_txt), "name": manifest_txt.name, "type": "file"},
+            ],
+            "count": 3,
+            "file_path": str(real_payslip),
+        },
+    )
+
+    assert filtered["count"] == 1
+    assert [item["path"] for item in filtered["results"]] == [str(real_payslip)]
+
+
+def test_direct_copy_from_files_context_uses_single_folder_context(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    source_folder = tmp_path / "Neo"
+    source_folder.mkdir()
+    (source_folder / "note.txt").write_text("neo", encoding="utf-8")
+
+    destination_root = tmp_path / "dest"
+    destination_root.mkdir()
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {
+            "agent": "files",
+            "resolved_entities": {
+                "directory_path": str(source_folder),
+                "selected_paths": [str(source_folder)],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    artifacts_out: dict[str, str] = {}
+    result = orchestrator._try_direct_copy_from_manifest(
+        f"Can you copy Neo folder to {destination_root}?",
+        artifacts_out,
+    )
+
+    copied_folder = destination_root / "Neo"
+    assert result is not None
+    assert result["status"] == "success"
+    assert copied_folder.exists()
+    assert artifacts_out["file_path"] == str(copied_folder)
+
+
+def test_direct_copy_from_files_context_can_make_adjacent_copy(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    source_folder = tmp_path / "Neo"
+    source_folder.mkdir()
+    (source_folder / "note.txt").write_text("neo", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.read_context",
+        lambda agent=None: {
+            "agent": "files",
+            "resolved_entities": {
+                "directory_path": str(source_folder),
+                "selected_paths": [str(source_folder)],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    result = orchestrator._try_direct_copy_from_manifest(
+        "Can you make a copy of it?",
+        {},
+    )
+
+    copied_folder = tmp_path / "Neo - Copy"
+    assert result is not None
+    assert result["status"] == "success"
+    assert copied_folder.exists()
+
+
 def test_parse_precise_named_image_search() -> None:
     orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
 
@@ -263,13 +380,40 @@ def test_parse_precise_payslip_count_search() -> None:
     orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
 
     parsed = orchestrator.parse_precise_full_computer_search(
-        "How many payslips are there on my computer?"
+        "How many payslips are there in my computer?"
     )
 
     assert parsed is not None
     assert parsed["mode"] == "count_search"
     assert parsed["term"] == "payslip"
     assert parsed["limit"] == 0
+
+
+def test_parse_precise_named_image_search_with_name_phrase() -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    parsed = orchestrator.parse_precise_full_computer_search(
+        "Is there any image file name octa on my computer?"
+    )
+
+    assert parsed is not None
+    assert parsed["mode"] == "named_search"
+    assert parsed["term"] == "octa"
+    assert parsed["include_folders"] is False
+    assert "png" in parsed["extensions"]
+
+
+def test_parse_precise_image_search_containing_name_phrase() -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    parsed = orchestrator.parse_precise_full_computer_search(
+        "Are there any images on my computer containing the name octa?"
+    )
+
+    assert parsed is not None
+    assert parsed["mode"] == "named_search"
+    assert parsed["term"] == "octa"
+    assert parsed["include_folders"] is False
 
 
 def test_parse_scoped_named_search_for_downloads_folder() -> None:
@@ -281,9 +425,23 @@ def test_parse_scoped_named_search_for_downloads_folder() -> None:
 
     assert parsed is not None
     assert parsed["term"] == "Text"
+    assert parsed["match_mode"] == "exact"
     assert parsed["item_type"] == "folder"
     assert parsed["scope_label"] == "Downloads"
     assert parsed["directory"].endswith("Downloads")
+
+
+def test_parse_scoped_named_search_for_contains_name_query() -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    parsed = getattr(orchestrator, "_parse_scoped_named_search")(
+        "Is there a folder containing the name Text in Downloads?"
+    )
+
+    assert parsed is not None
+    assert parsed["term"] == "Text"
+    assert parsed["match_mode"] == "contains"
+    assert parsed["item_type"] == "folder"
 
 
 def test_scoped_folder_count_query_lists_directory_and_saves_context(monkeypatch, tmp_path: Path) -> None:
@@ -345,6 +503,86 @@ def test_scoped_folder_count_query_lists_directory_and_saves_context(monkeypatch
     assert result["status"] == "success"
     assert "2 file(s) and 1 folder(s)" in result["message"]
     assert saved["result"]["path"] == str(folder)
+
+
+def test_scoped_named_search_filters_to_exact_name(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    exact_folder = tmp_path / "Downloads" / "Text"
+    partial_folder = tmp_path / "Downloads" / "Text_Folder"
+    exact_folder.mkdir(parents=True)
+    partial_folder.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_system_folder_path",
+        lambda keyword: tmp_path / "Downloads",
+    )
+
+    search_module = importlib.import_module("src.files.features.search")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    monkeypatch.setattr(
+        search_module,
+        "search_by_name",
+        lambda term, directory="", recursive=True, limit=50: {
+            "status": "success",
+            "results": [
+                {"path": str(exact_folder), "type": "folder", "name": "Text"},
+                {"path": str(partial_folder), "type": "folder", "name": "Text_Folder"},
+            ],
+            "count": 2,
+        },
+    )
+    monkeypatch.setattr(context_manifest, "auto_save_files_context", lambda result, query="": result)
+
+    result = getattr(orchestrator, "_try_scoped_named_search")(
+        "Is there a folder named Text in Downloads?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert str(exact_folder) in result["message"]
+    assert str(partial_folder) not in result["message"]
+
+
+def test_precise_full_computer_named_search_filters_to_exact_stem(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    search_module = importlib.import_module("src.files.features.search")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    exact_file = tmp_path / "octa.png"
+    partial_file = tmp_path / "octa_banner.png"
+    exact_file.write_text("exact", encoding="utf-8")
+    partial_file.write_text("partial", encoding="utf-8")
+
+    monkeypatch.setattr(
+        search_module,
+        "search_file_all_drives",
+        lambda query, extensions=None, limit=50, include_folders=True: {
+            "status": "success",
+            "results": [
+                {"path": str(exact_file), "type": "file", "name": exact_file.name},
+                {"path": str(partial_file), "type": "file", "name": partial_file.name},
+            ],
+            "count": 2,
+            "file_path": str(exact_file),
+        },
+    )
+    monkeypatch.setattr(orchestrator, "_filter_precise_search_results", lambda user_query, result: result)
+    monkeypatch.setattr(orchestrator, "_stage_precise_search_results", lambda term, result: result)
+    monkeypatch.setattr(context_manifest, "auto_save_files_context", lambda result, query="": result)
+
+    result = getattr(orchestrator, "_try_precise_full_computer_search")(
+        "Is there any image file named octa on my computer?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert str(exact_file) in result["message"]
+    assert str(partial_file) not in result["message"]
 
 
 def test_parse_filename_contains_search_for_images() -> None:
@@ -585,7 +823,10 @@ def test_try_direct_zip_from_files_context_uses_directory_path(tmp_path: Path, m
     def _fake_get_your_data_dir(*parts: str, create: bool = False):
         target = your_data_root.joinpath(*parts)
         if create:
-            target.parent.mkdir(parents=True, exist_ok=True) if target.suffix else target.mkdir(parents=True, exist_ok=True)
+            if target.suffix:
+                target.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                target.mkdir(parents=True, exist_ok=True)
         return target
 
     def _fake_read_context(agent: str = ""):
@@ -644,17 +885,19 @@ def test_try_direct_rename_from_files_context_uses_current_directory_path(tmp_pa
     def _fake_rename_file(path: str, new_name: str):
         captured["path"] = path
         captured["new_name"] = new_name
-        return {"status": "success", "message": "Renamed to Text-123", "new_path": str(folder.parent / new_name)}
-
-    monkeypatch.setattr(file_ops, "rename_file", _fake_rename_file)
+        return {
+            "status": "success",
+            "new_path": str(folder.with_name("Text-123")),
+        }
 
     artifacts_out = {}
+
+    monkeypatch.setattr(file_ops, "rename_file", _fake_rename_file)
     result = getattr(orchestrator, "_try_direct_rename_from_files_context")(
         "Rename it to Text-123",
         artifacts_out,
     )
 
-    assert result is not None
     assert result["status"] == "success"
     assert captured["path"] == str(folder)
     assert captured["new_name"] == "Text-123"
@@ -695,3 +938,424 @@ def test_merge_manifest_into_session_keeps_compact_file_context(tmp_path: Path, 
     assert merged["file_manifest"] == str(manifest)
     assert merged["found_count"] == 2
     assert "last_found_file_path" not in merged
+
+
+def test_try_last_n_months_payslip_zip_uses_existing_context_subset(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    nov = tmp_path / "Payslip_2025_Nov.pdf"
+    dec = tmp_path / "Payslip_2025_Dec.pdf"
+    jan = tmp_path / "Payslip_2026_Jan.pdf"
+    aug = tmp_path / "Payslip_2025_Aug.pdf"
+    for path in (nov, dec, jan, aug):
+        path.write_text(path.stem, encoding="utf-8")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_active_context_paths",
+        lambda: [str(aug), str(dec), str(nov), str(jan)],
+    )
+    monkeypatch.setattr(orchestrator, "_is_temp_or_test_artifact", lambda path: False)
+
+    captured = {}
+
+    file_ops = importlib.import_module("src.files.features.file_ops")
+
+    def _fake_save_search_manifest(paths, label="search_results", manifest_path=""):
+        del manifest_path
+        captured["paths"] = list(paths)
+        return {
+            "status": "success",
+            "manifest_path": str(tmp_path / "subset_manifest.txt"),
+            "manifest_id": "subset_manifest",
+            "label": label,
+        }
+
+    def _fake_zip_files_from_manifest(manifest_path="", output_path=""):
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_text("zip", encoding="utf-8")
+        return {
+            "status": "success",
+            "file_path": output_path,
+            "manifest_path": manifest_path,
+        }
+
+    monkeypatch.setattr(file_ops, "save_search_manifest", _fake_save_search_manifest)
+    monkeypatch.setattr(file_ops, "zip_files_from_manifest", _fake_zip_files_from_manifest)
+
+    artifacts_out = {}
+    result = getattr(orchestrator, "_try_last_n_months_payslip_zip")(
+        "Can you zip and send me last 3 months payslips?",
+        artifacts_out,
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert captured["paths"] == [str(jan), str(dec), str(nov)]
+    assert artifacts_out["file_path"].endswith("payslips_last_3_months.zip")
+
+
+def test_try_last_n_months_payslip_send_uses_direct_file_when_only_one_match(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    jan = tmp_path / "Payslip_2026_Jan.pdf"
+    jan.write_text("jan", encoding="utf-8")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_active_context_paths",
+        lambda: [str(jan)],
+    )
+    monkeypatch.setattr(orchestrator, "_is_temp_or_test_artifact", lambda path: False)
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    artifacts_out = {}
+    result = getattr(orchestrator, "_try_last_n_months_payslip_zip")(
+        "Send me last one month payslips",
+        artifacts_out,
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert result["file_path"] == str(jan)
+    assert artifacts_out["file_path"] == str(jan)
+
+
+def test_try_context_subset_zip_uses_last_n_files_from_saved_results(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    file_ops = importlib.import_module("src.files.features.file_ops")
+
+    first = tmp_path / "one.txt"
+    second = tmp_path / "two.txt"
+    third = tmp_path / "three.txt"
+    fourth = tmp_path / "four.txt"
+    for path in (first, second, third, fourth):
+        path.write_text(path.stem, encoding="utf-8")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_active_context_entries",
+        lambda: [
+            {"path": str(first), "type": "file", "name": first.name},
+            {"path": str(second), "type": "file", "name": second.name},
+            {"path": str(third), "type": "file", "name": third.name},
+            {"path": str(fourth), "type": "file", "name": fourth.name},
+        ],
+    )
+    monkeypatch.setattr(orchestrator, "_is_temp_or_test_artifact", lambda path: False)
+
+    captured = {}
+
+    def _fake_save_search_manifest(paths, label="search_results", manifest_path=""):
+        del manifest_path
+        captured["paths"] = list(paths)
+        return {
+            "status": "success",
+            "manifest_path": str(tmp_path / "subset_manifest.txt"),
+            "manifest_id": "subset_manifest",
+            "label": label,
+        }
+
+    monkeypatch.setattr(file_ops, "save_search_manifest", _fake_save_search_manifest)
+    monkeypatch.setattr(
+        file_ops,
+        "zip_files_from_manifest",
+        lambda manifest_path="", output_path="": {
+            "status": "success",
+            "file_path": output_path,
+            "manifest_path": manifest_path,
+        },
+    )
+
+    artifacts_out = {}
+    result = getattr(orchestrator, "_try_context_subset_zip")(
+        "Can you zip last 2 files that the assistant searched?",
+        artifacts_out,
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert captured["paths"] == [str(third), str(fourth)]
+    assert artifacts_out["file_path"].endswith("subset_files_last_2.zip")
+
+
+def test_try_context_subset_zip_filters_images_from_saved_results(tmp_path: Path, monkeypatch) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    file_ops = importlib.import_module("src.files.features.file_ops")
+
+    image_one = tmp_path / "one.jpg"
+    image_two = tmp_path / "two.png"
+    doc = tmp_path / "notes.txt"
+    for path in (image_one, image_two, doc):
+        path.write_text(path.stem, encoding="utf-8")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_read_active_context_entries",
+        lambda: [
+            {"path": str(image_one), "type": "file", "name": image_one.name},
+            {"path": str(doc), "type": "file", "name": doc.name},
+            {"path": str(image_two), "type": "file", "name": image_two.name},
+        ],
+    )
+    monkeypatch.setattr(orchestrator, "_is_temp_or_test_artifact", lambda path: False)
+
+    captured = {}
+
+    def _fake_save_search_manifest(paths, label="search_results", manifest_path=""):
+        del manifest_path
+        captured["paths"] = list(paths)
+        return {
+            "status": "success",
+            "manifest_path": str(tmp_path / "subset_manifest.txt"),
+            "manifest_id": "subset_manifest",
+            "label": label,
+        }
+
+    monkeypatch.setattr(file_ops, "save_search_manifest", _fake_save_search_manifest)
+    monkeypatch.setattr(
+        file_ops,
+        "zip_files_from_manifest",
+        lambda manifest_path="", output_path="": {
+            "status": "success",
+            "file_path": output_path,
+            "manifest_path": manifest_path,
+        },
+    )
+
+    result = getattr(orchestrator, "_try_context_subset_zip")(
+        "Zip 2 images",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert captured["paths"] == [str(image_one), str(image_two)]
+    assert result["file_path"].endswith("subset_images_first_2.zip")
+
+
+def test_try_specific_folder_count_query_prefers_exact_personal_folder(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    neo_folder = tmp_path / "Neo"
+    neo_folder.mkdir()
+    (neo_folder / "one.txt").write_text("1", encoding="utf-8")
+    (neo_folder / "two.txt").write_text("2", encoding="utf-8")
+    (neo_folder / "docs").mkdir()
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_named_folder_path",
+        lambda folder_name, drive_letter="": neo_folder,
+    )
+
+    saved = {}
+    monkeypatch.setattr(
+        orchestrator,
+        "_save_single_file_context",
+        lambda path_str, query: saved.setdefault("call", (path_str, query)),
+    )
+
+    result = getattr(orchestrator, "_try_specific_folder_count_query")(
+        "How many files and folders are there in Neo folder in C drive?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert "Total Files: 2" in result["message"]
+    assert "Total Folders: 1" in result["message"]
+    assert Path(result["file_path"]).exists()
+
+
+def test_try_specific_drive_item_query_saves_folder_context(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    neo_folder = tmp_path / "Neo"
+    neo_folder.mkdir()
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_named_folder_path",
+        lambda folder_name, drive_letter="": neo_folder,
+    )
+
+    artifacts_out = {}
+
+    result = getattr(orchestrator, "_try_specific_drive_item_query")(
+        "Is there a folder named Neo on my C drive?",
+        artifacts_out=artifacts_out,
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert str(neo_folder) in result["message"]
+    assert artifacts_out["file_path"] == str(neo_folder)
+
+
+def test_specific_computer_item_lookup_saves_context_for_inside_that_followup(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    xpanse_folder = tmp_path / "xpanse"
+    xpanse_folder.mkdir()
+    (xpanse_folder / "only.txt").write_text("1", encoding="utf-8")
+
+    saved_context = {}
+
+    def _fake_auto_save(result, query=""):
+        del query
+        saved_context["resolved_entities"] = {
+            "selected_paths": [str(xpanse_folder)],
+            "listed_files": [{"path": str(xpanse_folder), "name": xpanse_folder.name, "type": "folder"}],
+        }
+        return result
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_scan_named_path_all_drives",
+        lambda item_name, item_type="folder", limit=20: [xpanse_folder],
+    )
+    monkeypatch.setattr(context_manifest, "auto_save_files_context", _fake_auto_save)
+    monkeypatch.setattr(
+        context_manifest,
+        "read_context",
+        lambda agent="": {"resolved_entities": dict(saved_context.get("resolved_entities", {}))},
+    )
+
+    lookup_result = getattr(orchestrator, "_try_specific_computer_item_query")(
+        "Is there a folder named xpanse on my computer?",
+        artifacts_out={},
+    )
+    assert lookup_result is not None
+    assert lookup_result["status"] == "success"
+
+    followup_result = getattr(orchestrator, "_try_contextual_folder_count_query")(
+        "How many files and folders are there inside that?",
+        artifacts_out={},
+    )
+
+    assert followup_result is not None
+    assert followup_result["status"] == "success"
+    assert "Total Files: 1" in followup_result["message"]
+    assert "Total Folders: 0" in followup_result["message"]
+
+
+def test_try_contextual_folder_count_query_uses_saved_folder(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+    context_manifest = importlib.import_module("src.agent.manifest.context_manifest")
+
+    neo_folder = tmp_path / "Neo"
+    neo_folder.mkdir()
+    (neo_folder / "one.txt").write_text("1", encoding="utf-8")
+    (neo_folder / "nested").mkdir()
+    (neo_folder / "nested" / "two.txt").write_text("2", encoding="utf-8")
+
+    monkeypatch.setattr(
+        context_manifest,
+        "read_context",
+        lambda agent="": {"resolved_entities": {"directory_path": str(neo_folder)}},
+    )
+    monkeypatch.setattr(
+        context_manifest,
+        "auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    result = getattr(orchestrator, "_try_contextual_folder_count_query")(
+        "How many files and folders are there inside it?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert "Total Files: 2" in result["message"]
+    assert "Total Folders: 1" in result["message"]
+
+
+def test_try_specific_computer_item_query_finds_folder_case_insensitively(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    neo_folder = tmp_path / "neo-123"
+    neo_folder.mkdir()
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_scan_named_path_all_drives",
+        lambda item_name, item_type="folder", limit=20: [neo_folder],
+    )
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    result = getattr(orchestrator, "_try_specific_computer_item_query")(
+        "Is there a folder named Neo-123 on my computer?",
+        artifacts_out={},
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert str(neo_folder) in result["message"]
+
+
+def test_specific_computer_folder_count_query_builds_recursive_report(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    neo_folder = tmp_path / "Neo"
+    neo_folder.mkdir()
+    nested = neo_folder / "sub"
+    nested.mkdir()
+    (neo_folder / "one.txt").write_text("1", encoding="utf-8")
+    (nested / "two.txt").write_text("2", encoding="utf-8")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_scan_named_path_all_drives",
+        lambda item_name, item_type="folder", limit=10: [neo_folder],
+    )
+    monkeypatch.setattr(
+        "src.agent.manifest.context_manifest.auto_save_files_context",
+        lambda result, query="": result,
+    )
+
+    artifacts_out = {}
+    result = getattr(orchestrator, "_try_specific_computer_folder_count_query")(
+        "How many files and folders are there in Neo folder on my computer?",
+        artifacts_out,
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert "Total Files: 2" in result["message"]
+    assert "Total Folders: 1" in result["message"]
+    assert Path(artifacts_out["file_path"]).exists()
+
+
+def test_try_reuse_existing_archive_from_context_returns_current_zip(monkeypatch, tmp_path: Path) -> None:
+    orchestrator = importlib.import_module("src.agent.ui.files_agent.orchestrator")
+
+    archive_path = tmp_path / "payslips_last_4_months.zip"
+    archive_path.write_text("zip", encoding="utf-8")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_single_copy_source_from_files_context",
+        lambda: archive_path,
+    )
+
+    artifacts_out = {}
+    result = getattr(orchestrator, "_try_reuse_existing_archive_from_context")(
+        "Can you also mail me the zip that you created for payslips?",
+        artifacts_out,
+    )
+
+    assert result is not None
+    assert result["status"] == "success"
+    assert result["file_path"] == str(archive_path)
+    assert artifacts_out["file_path"] == str(archive_path)

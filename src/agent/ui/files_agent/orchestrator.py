@@ -12,12 +12,16 @@ Key corrections vs. older version:
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 import tempfile
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.agent.runtime_paths import get_your_data_dir
+from src.agent.telemetry import log_fallback_to_react, log_fast_path_hit
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 
@@ -37,11 +41,15 @@ _DOCUMENT_EXTENSIONS = ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt
 _ARCHIVE_EXTENSIONS = {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz"}
 _SKIP_RESULT_PARTS = {"__pycache__", ".pytest_cache"}
 _COMPUTER_SCOPE_RE = re.compile(
-    r"\b(on\s+my\s+(computer|laptop|pc|machine)|across\s+all\s+drives|all\s+drives|whole\s+(computer|system)|entire\s+(computer|laptop|system))\b",
+    r"\b((?:on|in)\s+my\s+(computer|laptop|pc|machine)|(?:on|in)\s+this\s+(computer|laptop|pc|machine)|across\s+all\s+drives|all\s+drives|whole\s+(computer|system)|entire\s+(computer|laptop|system))\b",
     re.IGNORECASE,
 )
 _SCOPED_SYSTEM_FOLDER_RE = re.compile(
     r"\b(?:is\s+there|do\s+i\s+have|find|search\s+for|look\s+for|locate|check\s+if|how\s+many\s+files\s+are\s+there\s+in)\b.*?\b(?:(file|folder)\s+)?(?:named|called)\s+[\"']?([^\"'?.\n]+?)[\"']?\s+in\s+(downloads?|desktop|documents?|pictures?|videos?|music)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_SCOPED_SYSTEM_FOLDER_CONTAINS_RE = re.compile(
+    r"\b(?:is\s+there|do\s+i\s+have|find|search\s+for|look\s+for|locate|check\s+if)\b.*?\b(?:(file|folder)\s+)?(?:containing|contains|with)\s+(?:the\s+)?name\s+[\"']?([^\"'?.\n]+?)[\"']?\s+in\s+(downloads?|desktop|documents?|pictures?|videos?|music)\b",
     re.IGNORECASE | re.DOTALL,
 )
 _FILENAME_CONTAINS_RE = re.compile(
@@ -52,6 +60,79 @@ _RECYCLE_BIN_COUNT_RE = re.compile(
     r"\b(?:how\s+many|count|number\s+of|what\s+is\s+in|how\s+full\s+is)\b.*\b(?:recycle\s+bin|trash\s+bin|bin)\b",
     re.IGNORECASE,
 )
+_LAST_N_MONTHS_PAYSLIP_RE = re.compile(
+    r"\b(?:zip|send|share|give)\b.*\blast\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+months?\b.*\b(payslip|payslips)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_COUNTED_SUBSET_ZIP_RE = re.compile(
+    r"\b(?:zip|compress|archive)\b.*\b(?:last|first|\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b"
+    r"|\b(?:zip|compress|archive)\b.*\b(images?|photos?|pictures?|files?|items?|results?|documents?|pdfs?|videos?)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_SPECIFIC_FOLDER_COUNT_RE = re.compile(
+    r"\bhow\s+many\s+files?\s+and\s+folders?\s+are\s+there\s+in\s+(.+?)\s+folder(?:\s+in\s+([a-z]))?\s+drive\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_SPECIFIC_DRIVE_ITEM_LOOKUP_RE = re.compile(
+    r"\b(?:is\s+there|do\s+i\s+have|find|search\s+for|look\s+for|locate|check\s+if)\b.*?\b(?:(file|folder)\s+)?(?:named|called)\s+[\"']?([^\"'?.\n]+?)[\"']?\s+(?:on|in)\s+(?:my\s+)?([a-z])\s+drive\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_SPECIFIC_COMPUTER_ITEM_LOOKUP_RE = re.compile(
+    r"\b(?:is\s+there|do\s+i\s+have|find|search\s+for|look\s+for|locate|check\s+if)\b.*?\b(?:(file|folder)\s+)?(?:named|called)\s+[\"']?([^\"'?.\n]+?)[\"']?\s+(?:on|in)\s+(?:my|this)\s+(?:computer|laptop|pc|machine)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_CONTEXTUAL_FOLDER_COUNT_RE = re.compile(
+    r"\bhow\s+many\s+(?:files?\s+and\s+folders?|folders?\s+and\s+files?)\b.*?\b(?:inside|in)\s+(?:it|that|this|the\s+folder|the\s+directory)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_DIRECT_FOLDER_COUNT_RE = re.compile(
+    r"\bhow\s+many\s+(?:files?\s+and\s+folders?|folders?\s+and\s+files?)\b.*?\bin\s+(.+?)\s+folder(?:\s+(?:on|in)\s+(?:my|this)\s+(?:computer|laptop|pc|machine))?\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_MONTH_NAME_MAP = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+_COUNT_WORD_MAP = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+
+def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    fast_path = str(result.get("_fast_path", "") or result.get("action", "unknown"))
+    log_fast_path_hit("files", fast_path)
+    return result
 
 
 def _infer_extension_filter(user_query: str) -> Optional[List[str]]:
@@ -77,6 +158,35 @@ def _singularize_term(value: str) -> str:
     return text
 
 
+def _matches_requested_name(item: Dict[str, Any], term: str, match_mode: str = "exact") -> bool:
+    requested = str(term or "").strip().casefold()
+    if not requested:
+        return False
+
+    name = str(item.get("name", "") or "").strip()
+    if not name:
+        name = Path(str(item.get("path", "") or "").strip()).name
+    candidate = name.casefold()
+    if not candidate:
+        return False
+
+    if match_mode == "contains":
+        return requested in candidate
+
+    if candidate == requested:
+        return True
+
+    item_type = str(item.get("type", "") or "").strip().lower()
+    if item_type == "file" and "." not in requested:
+        return Path(name).stem.casefold() == requested
+
+    return False
+
+
+def _filter_named_matches(matches: List[Dict[str, Any]], term: str, match_mode: str = "exact") -> List[Dict[str, Any]]:
+    return [item for item in matches if _matches_requested_name(item, term, match_mode=match_mode)]
+
+
 def _parse_precise_full_computer_search(user_query: str) -> Optional[Dict[str, Any]]:
     raw_query = str(user_query or "")
     lowered = raw_query.lower()
@@ -93,8 +203,41 @@ def _parse_precise_full_computer_search(user_query: str) -> Optional[Dict[str, A
         return {
             "mode": "named_search",
             "term": term,
+            "match_mode": "exact",
             "extensions": _infer_extension_filter(raw_query),
             "include_folders": "folder named" in lowered and "file named" not in lowered,
+            "limit": 50,
+        }
+
+    filename_name_match = re.search(
+        r"\b(?:an?\s+)?(?:image|video|pdf|document)?\s*(?:file|folder)?\s*name\s+[\"']?([^\"'?.\n]+?)[\"']?(?:\s+(?:on|in)\s+(?:my|this)\s+(?:computer|laptop|pc|machine)|\?|$)",
+        raw_query,
+        re.IGNORECASE,
+    )
+    if filename_name_match:
+        term = filename_name_match.group(1).strip().rstrip("?.!,")
+        return {
+            "mode": "named_search",
+            "term": term,
+            "match_mode": "exact",
+            "extensions": _infer_extension_filter(raw_query),
+            "include_folders": False,
+            "limit": 50,
+        }
+
+    contains_name_match = re.search(
+        r"\b(?:containing|contains|with)\s+(?:the\s+)?name\s+[\"']?([^\"'?.\n]+?)[\"']?(?:\s+(?:on|in)\s+(?:my|this)\s+(?:computer|laptop|pc|machine)|\?|$)",
+        raw_query,
+        re.IGNORECASE,
+    )
+    if contains_name_match:
+        term = contains_name_match.group(1).strip().rstrip("?.!,")
+        return {
+            "mode": "named_search",
+            "term": term,
+            "match_mode": "contains",
+            "extensions": _infer_extension_filter(raw_query),
+            "include_folders": False,
             "limit": 50,
         }
 
@@ -137,8 +280,103 @@ def _system_folder_path(keyword: str) -> Optional[Path]:
     return mapping.get(lowered, mapping.get(lowered.rstrip("s")))
 
 
+def _load_personal_folder_map() -> Dict[str, str]:
+    try:
+        settings_path = Path(__file__).resolve().parents[4] / "config" / "settings.json"
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+        personal_folders = payload.get("personal_folders", {}) if isinstance(payload, dict) else {}
+        return {
+            str(name).strip().lower(): str(path).strip()
+            for name, path in personal_folders.items()
+            if not str(name).startswith("_") and str(path).strip()
+        }
+    except (OSError, TypeError, ValueError):
+        return {}
+
+
+def _resolve_named_folder_path(folder_name: str, drive_letter: str = "") -> Optional[Path]:
+    normalized_name = str(folder_name or "").strip().strip('"\'').strip()
+    if not normalized_name:
+        return None
+
+    personal_map = _load_personal_folder_map()
+    mapped = personal_map.get(normalized_name.lower())
+    if mapped:
+        candidate = Path(mapped)
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+
+    if drive_letter:
+        candidate = Path(f"{drive_letter.upper()}:\\") / normalized_name
+        if candidate.exists() and candidate.is_dir():
+            return candidate
+
+    fallback = Path.home() / normalized_name
+    if fallback.exists() and fallback.is_dir():
+        return fallback
+
+    return None
+
+
+def _parse_specific_folder_count_query(user_query: str) -> Optional[Dict[str, str]]:
+    match = _SPECIFIC_FOLDER_COUNT_RE.search(str(user_query or ""))
+    if not match:
+        return None
+    folder_name = str(match.group(1) or "").strip().rstrip("?.!,")
+    drive_letter = str(match.group(2) or "").strip()
+    if not folder_name:
+        return None
+    return {
+        "folder_name": folder_name,
+        "drive_letter": drive_letter,
+    }
+
+
+def _parse_specific_drive_item_query(user_query: str) -> Optional[Dict[str, str]]:
+    match = _SPECIFIC_DRIVE_ITEM_LOOKUP_RE.search(str(user_query or ""))
+    if not match:
+        return None
+    item_type = str(match.group(1) or "folder").strip().lower() or "folder"
+    item_name = str(match.group(2) or "").strip().rstrip("?.!,")
+    drive_letter = str(match.group(3) or "").strip().lower()
+    if not item_name or item_type == "file":
+        return None
+    return {
+        "item_type": item_type,
+        "item_name": item_name,
+        "drive_letter": drive_letter,
+    }
+
+
+def _parse_specific_computer_item_query(user_query: str) -> Optional[Dict[str, str]]:
+    match = _SPECIFIC_COMPUTER_ITEM_LOOKUP_RE.search(str(user_query or ""))
+    if not match:
+        return None
+    item_type = str(match.group(1) or "folder").strip().lower() or "folder"
+    item_name = str(match.group(2) or "").strip().rstrip("?.!,")
+    if not item_name or item_type == "file":
+        return None
+    return {
+        "item_type": item_type,
+        "item_name": item_name,
+    }
+
+
+def _parse_direct_folder_count_query(user_query: str) -> Optional[str]:
+    match = _DIRECT_FOLDER_COUNT_RE.search(str(user_query or ""))
+    if not match:
+        return None
+    folder_name = str(match.group(1) or "").strip().rstrip("?.!,")
+    return folder_name or None
+
+
 def _parse_scoped_named_search(user_query: str) -> Optional[Dict[str, Any]]:
-    match = _SCOPED_SYSTEM_FOLDER_RE.search(str(user_query or ""))
+    raw_query = str(user_query or "")
+    match = _SCOPED_SYSTEM_FOLDER_RE.search(raw_query)
+    match_mode = "exact"
+    if not match:
+        match = _SCOPED_SYSTEM_FOLDER_CONTAINS_RE.search(raw_query)
+        match_mode = "contains"
     if not match:
         return None
 
@@ -151,6 +389,7 @@ def _parse_scoped_named_search(user_query: str) -> Optional[Dict[str, Any]]:
 
     return {
         "term": term,
+        "match_mode": match_mode,
         "item_type": item_type,
         "scope_label": scope_path.name,
         "directory": str(scope_path),
@@ -195,6 +434,16 @@ def _save_precise_search_context(result: Dict[str, Any], query: str) -> None:
 def _query_prefers_archives(user_query: str) -> bool:
     lowered = str(user_query or "").lower()
     return any(token in lowered for token in ("zip", "archive", "compressed", "rar", "7z"))
+
+
+def _is_generated_runtime_artifact(path: Path) -> bool:
+    manifests_root = get_your_data_dir("manifests", create=True)
+    your_data_root = get_your_data_dir(create=True)
+    if _is_within(path, manifests_root):
+        return True
+    if _is_within(path, your_data_root) and path.name in {"active_file_manifest.json", "octa_manifest.txt"}:
+        return True
+    return False
 
 
 def _is_temp_or_test_artifact(path: Path) -> bool:
@@ -256,6 +505,8 @@ def _filter_precise_search_results(user_query: str, result: Dict[str, Any]) -> D
         path_obj = Path(path_str)
         if _is_temp_or_test_artifact(path_obj):
             continue
+        if _is_generated_runtime_artifact(path_obj):
+            continue
         is_archive = path_obj.suffix.lower() in _ARCHIVE_EXTENSIONS
         is_generated_archive = _is_within(path_obj, archive_root)
         if is_archive or is_generated_archive:
@@ -304,9 +555,705 @@ def _strip_injected_blocks(user_query: str) -> str:
     return raw_query.split("## Session State")[0].strip()
 
 
+def _extract_last_n_months(raw_query: str) -> Optional[int]:
+    match = _LAST_N_MONTHS_PAYSLIP_RE.search(str(raw_query or ""))
+    if not match:
+        return None
+    value = str(match.group(1) or "").strip().lower()
+    word_map = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+    }
+    if value.isdigit():
+        return max(int(value), 1)
+    return word_map.get(value)
+
+
+def _extract_requested_count(raw_query: str) -> Optional[int]:
+    digit_match = re.search(r"\b(\d{1,2})\b", str(raw_query or ""))
+    if digit_match:
+        return max(int(digit_match.group(1)), 1)
+    lowered = str(raw_query or "").lower()
+    for token, value in _COUNT_WORD_MAP.items():
+        if re.search(rf"\b{token}\b", lowered):
+            return value
+    return None
+
+
+def _looks_like_current_channel_delivery(raw_query: str) -> bool:
+    lowered = str(raw_query or "").lower()
+    if any(token in lowered for token in ("email", "mail", "forward")):
+        return False
+    return bool(re.search(r"\b(send|share|give|deliver)\b.{0,30}\b(me|here|this chat)\b", lowered, re.DOTALL))
+
+
+def _read_active_context_entries() -> List[Dict[str, Any]]:
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+    listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+    entries: List[Dict[str, Any]] = []
+    if isinstance(listed_files, list) and listed_files:
+        for index, item in enumerate(listed_files):
+            if not isinstance(item, dict):
+                continue
+            path_str = str(item.get("path", "") or "").strip()
+            if not path_str:
+                continue
+            entries.append(
+                {
+                    "index": int(item.get("index", index) or index),
+                    "path": path_str,
+                    "name": str(item.get("name", "") or Path(path_str).name).strip(),
+                    "type": str(item.get("type", "") or "").strip().lower(),
+                }
+            )
+        if entries:
+            return entries
+
+    selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+    if not isinstance(selected_paths, list):
+        return []
+    for index, raw_path in enumerate(selected_paths):
+        path_str = str(raw_path or "").strip()
+        if not path_str:
+            continue
+        path_obj = Path(path_str)
+        entries.append(
+            {
+                "index": index,
+                "path": path_str,
+                "name": path_obj.name,
+                "type": "folder" if path_obj.is_dir() else "file",
+            }
+        )
+    return entries
+
+
+def _subset_filter_extensions(raw_query: str) -> Optional[List[str]]:
+    lowered = str(raw_query or "").lower()
+    if any(token in lowered for token in ("images", "image", "photos", "photo", "pictures", "picture")):
+        return list(_IMAGE_EXTENSIONS)
+    if re.search(r"\bpdfs?\b", lowered):
+        return ["pdf"]
+    if any(token in lowered for token in ("documents", "document")):
+        return list(_DOCUMENT_EXTENSIONS)
+    if any(token in lowered for token in ("videos", "video")):
+        return list(_VIDEO_EXTENSIONS)
+    return None
+
+
+def _subset_label(raw_query: str) -> str:
+    lowered = str(raw_query or "").lower()
+    for label, tokens in (
+        ("images", ("images", "image", "photos", "photo", "pictures", "picture")),
+        ("pdfs", ("pdf", "pdfs")),
+        ("documents", ("documents", "document")),
+        ("videos", ("videos", "video")),
+        ("files", ("files", "file", "results", "result", "items", "item")),
+    ):
+        if any(token in lowered for token in tokens):
+            return label
+    return "files"
+
+
+def _select_context_subset_paths(raw_query: str) -> List[str]:
+    entries = _read_active_context_entries()
+    if not entries:
+        return []
+
+    extensions = _subset_filter_extensions(raw_query)
+    filtered_paths: List[str] = []
+    for item in entries:
+        path_obj = Path(str(item.get("path", "") or "").strip())
+        if not path_obj.exists() or not path_obj.is_file():
+            continue
+        if _is_temp_or_test_artifact(path_obj):
+            continue
+        if path_obj.suffix.lower() in _ARCHIVE_EXTENSIONS:
+            continue
+        if extensions is not None and path_obj.suffix.lower().lstrip(".") not in extensions:
+            continue
+        filtered_paths.append(str(path_obj))
+
+    if not filtered_paths:
+        return []
+
+    count = _extract_requested_count(raw_query)
+    if count is None:
+        return []
+
+    lowered = str(raw_query or "").lower()
+    if re.search(r"\blast\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b", lowered):
+        return filtered_paths[-count:]
+    return filtered_paths[:count]
+
+
+def _try_context_subset_zip(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if _FRESH_SEARCH_RE.search(raw_query):
+        return None
+    if not _COUNTED_SUBSET_ZIP_RE.search(raw_query):
+        return None
+
+    selected_paths = _select_context_subset_paths(raw_query)
+    if not selected_paths:
+        return None
+
+    try:
+        from src.files.features.file_ops import save_search_manifest, zip_files_from_manifest  # noqa: PLC0415
+
+        count = len(selected_paths)
+        subset_name = _subset_label(raw_query)
+        direction = "last" if re.search(r"\blast\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b", raw_query, re.IGNORECASE) else "first"
+        manifest_result = save_search_manifest(selected_paths, label=f"subset_{subset_name}_{direction}_{count}")
+        if manifest_result.get("status") != "success":
+            return manifest_result
+
+        archive_path = _build_archive_output_path(f"subset_{subset_name}_{direction}_{count}")
+        zip_result = zip_files_from_manifest(
+            manifest_path=str(manifest_result.get("manifest_path", "") or ""),
+            output_path=str(archive_path),
+        )
+        if zip_result.get("status") != "success":
+            return zip_result
+
+        if artifacts_out is not None:
+            artifacts_out["file_path"] = zip_result.get("file_path", "")
+            artifacts_out["found_paths"] = selected_paths
+
+        try:
+            _save_single_file_context(str(zip_result.get("file_path", "") or ""), raw_query)
+        except _FILES_ORCHESTRATOR_ERRORS:
+            pass
+
+        return {
+            "status": "success",
+            "message": f"Created a zip with {count} selected {subset_name.rstrip('s') if count == 1 else subset_name} from the current search results.",
+            "action": "react_response",
+            "file_path": zip_result.get("file_path", ""),
+            "selected_paths": selected_paths,
+            "raw": zip_result,
+        }
+    except _FILES_ORCHESTRATOR_ERRORS:
+        return None
+
+
+def _read_active_context_paths() -> List[str]:
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+    from src.files.features.file_ops import resolve_file_manifest_path  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+    listed_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+    cleaned = [str(path).strip() for path in listed_paths if str(path).strip()]
+    if cleaned:
+        return cleaned
+
+    manifest_path = str(entities.get("file_manifest", "") or "").strip()
+    resolved_manifest = resolve_file_manifest_path(manifest_path)
+    if not resolved_manifest.exists():
+        return []
+    return [
+        line.strip()
+        for line in resolved_manifest.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _path_month_key(path: Path) -> Optional[tuple[int, int]]:
+    stem = path.stem.lower()
+    year_match = re.search(r"(?:^|[^0-9])(20\d{2})(?:[^0-9]|$)", stem)
+    month_match = re.search(
+        r"(?<![a-z])(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?![a-z])",
+        stem,
+        re.IGNORECASE,
+    )
+    if year_match and month_match:
+        return (int(year_match.group(1)), _MONTH_NAME_MAP[month_match.group(1).lower()])
+    return None
+
+
+def _pick_recent_monthly_files(paths: List[str], count: int) -> List[str]:
+    candidates: List[tuple[tuple[int, int], float, str]] = []
+    fallback: List[tuple[float, str]] = []
+    for raw_path in paths:
+        path = Path(str(raw_path).strip())
+        if not path.exists() or not path.is_file():
+            continue
+        if _is_temp_or_test_artifact(path):
+            continue
+        if path.suffix.lower() in _ARCHIVE_EXTENSIONS:
+            continue
+        lower_name = path.name.lower()
+        if "payslip" not in lower_name:
+            continue
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        month_key = _path_month_key(path)
+        if month_key is not None:
+            candidates.append((month_key, mtime, str(path)))
+        else:
+            fallback.append((mtime, str(path)))
+
+    if candidates:
+        chosen_by_month: Dict[tuple[int, int], tuple[float, str]] = {}
+        for month_key, mtime, raw_path in candidates:
+            previous = chosen_by_month.get(month_key)
+            if previous is None or mtime > previous[0]:
+                chosen_by_month[month_key] = (mtime, raw_path)
+        ordered_months = sorted(chosen_by_month.keys(), reverse=True)[:count]
+        return [chosen_by_month[key][1] for key in ordered_months]
+
+    fallback.sort(reverse=True)
+    return [raw_path for _, raw_path in fallback[:count]]
+
+
+def _try_last_n_months_payslip_zip(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    months = _extract_last_n_months(raw_query)
+    if months is None:
+        return None
+
+    try:
+        from src.files.features.file_ops import save_search_manifest, zip_files_from_manifest  # noqa: PLC0415
+
+        selected_paths = _pick_recent_monthly_files(_read_active_context_paths(), months)
+        if not selected_paths:
+            return None
+
+        if len(selected_paths) == 1 and _looks_like_current_channel_delivery(raw_query):
+            if artifacts_out is not None:
+                artifacts_out["file_path"] = selected_paths[0]
+                artifacts_out["found_paths"] = selected_paths
+            try:
+                _save_single_file_context(selected_paths[0], raw_query)
+            except _FILES_ORCHESTRATOR_ERRORS:
+                pass
+            return {
+                "status": "success",
+                "message": f"I prepared the payslip for delivery: {selected_paths[0]}",
+                "action": "react_response",
+                "file_path": selected_paths[0],
+                "selected_paths": selected_paths,
+            }
+
+        manifest_result = save_search_manifest(selected_paths, label=f"payslips_last_{months}_months")
+        if manifest_result.get("status") != "success":
+            return manifest_result
+
+        archive_path = _build_archive_output_path(f"payslips_last_{months}_months")
+        zip_result = zip_files_from_manifest(
+            manifest_path=str(manifest_result.get("manifest_path", "") or ""),
+            output_path=str(archive_path),
+        )
+        if zip_result.get("status") != "success":
+            return zip_result
+
+        if artifacts_out is not None:
+            artifacts_out["file_path"] = zip_result.get("file_path", "")
+            artifacts_out["found_paths"] = selected_paths
+
+        try:
+            _save_single_file_context(str(zip_result.get("file_path", "") or ""), raw_query)
+        except _FILES_ORCHESTRATOR_ERRORS:
+            pass
+
+        return {
+            "status": "success",
+            "message": f"Created a zip with the last {len(selected_paths)} monthly payslip(s).",
+            "action": "react_response",
+            "file_path": zip_result.get("file_path", ""),
+            "selected_paths": selected_paths,
+            "raw": zip_result,
+        }
+    except _FILES_ORCHESTRATOR_ERRORS:
+        return None
+
+
+def _try_specific_folder_count_query(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    parsed = _parse_specific_folder_count_query(user_query)
+    if not parsed:
+        return None
+
+    target_path = _resolve_named_folder_path(parsed["folder_name"], parsed["drive_letter"])
+    if target_path is None:
+        return None
+
+    return _build_recursive_folder_count_response(target_path, parsed["folder_name"], artifacts_out)
+
+
+def _try_specific_computer_folder_count_query(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    folder_name = _parse_direct_folder_count_query(user_query)
+    if not folder_name:
+        return None
+
+    matches = _scan_named_path_all_drives(folder_name, item_type="folder", limit=10)
+    if not matches:
+        return None
+
+    return _build_recursive_folder_count_response(matches[0], folder_name, artifacts_out)
+
+
+def _resolve_folder_path_from_files_context() -> Optional[Path]:
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+
+    directory_value = str(entities.get("directory_path", "") or "").strip()
+    if directory_value:
+        directory_path = Path(directory_value)
+        if directory_path.exists() and directory_path.is_dir():
+            return directory_path
+
+    selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+    if isinstance(selected_paths, list) and len(selected_paths) == 1:
+        selected_path = Path(str(selected_paths[0] or "").strip())
+        if selected_path.exists() and selected_path.is_dir():
+            return selected_path
+
+    listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+    if isinstance(listed_files, list) and len(listed_files) == 1 and isinstance(listed_files[0], dict):
+        listed_path = Path(str(listed_files[0].get("path", "") or "").strip())
+        if listed_path.exists() and listed_path.is_dir():
+            return listed_path
+
+    return None
+
+
+def _try_contextual_folder_count_query(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    if not _CONTEXTUAL_FOLDER_COUNT_RE.search(raw_query):
+        return None
+
+    target_path = _resolve_folder_path_from_files_context()
+    if target_path is None:
+        return None
+
+    return _build_recursive_folder_count_response(target_path, target_path.name, artifacts_out)
+
+
+def _try_specific_drive_item_query(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    parsed = _parse_specific_drive_item_query(user_query)
+    if not parsed:
+        return None
+
+    target_path = _resolve_named_folder_path(parsed["item_name"], parsed["drive_letter"])
+    if target_path is None:
+        return {
+            "status": "success",
+            "message": (
+                f"I couldn't find a {parsed['item_type']} named {parsed['item_name']} "
+                f"on your {parsed['drive_letter'].upper()} drive."
+            ),
+            "action": "react_response",
+        }
+
+    _save_single_file_context(str(target_path), user_query)
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = str(target_path)
+
+    modified_label = ""
+    try:
+        modified_label = datetime.fromtimestamp(target_path.stat().st_mtime).strftime("%B %d, %Y")
+    except (OSError, RuntimeError, ValueError):
+        modified_label = ""
+
+    message = (
+        f"Yes, there is a {parsed['item_type']} named {target_path.name} on your {parsed['drive_letter'].upper()} drive.\n"
+        f"Path: {target_path}"
+    )
+    if modified_label:
+        message += f"\nLast Modified: {modified_label}"
+
+    return {
+        "status": "success",
+        "message": message,
+        "action": "react_response",
+        "raw": {
+            "path": str(target_path),
+            "type": parsed["item_type"],
+        },
+    }
+
+
+def _scan_named_path_all_drives(item_name: str, *, item_type: str = "folder", limit: int = 20) -> List[Path]:
+    import string as _string
+
+    normalized = str(item_name or "").strip().lower()
+    if not normalized:
+        return []
+
+    matches: List[Path] = []
+    stack: List[Path] = []
+    seen: set[str] = set()
+
+    for letter in _string.ascii_uppercase:
+        drive = Path(f"{letter}:\\")
+        try:
+            if drive.exists():
+                stack.append(drive)
+        except OSError:
+            continue
+
+    while stack and len(matches) < limit:
+        current = stack.pop()
+        current_key = str(current).lower()
+        if current_key in seen:
+            continue
+        seen.add(current_key)
+        try:
+            with os.scandir(current) as entries:
+                child_dirs: List[Path] = []
+                for entry in entries:
+                    try:
+                        entry_name = str(entry.name or "").strip()
+                        if not entry_name:
+                            continue
+                        entry_is_dir = entry.is_dir(follow_symlinks=False)
+                        entry_is_file = entry.is_file(follow_symlinks=False)
+                        if entry_name.lower() == normalized:
+                            if item_type == "folder" and entry_is_dir:
+                                matches.append(Path(entry.path))
+                            elif item_type == "file" and entry_is_file:
+                                matches.append(Path(entry.path))
+                            elif item_type == "any":
+                                matches.append(Path(entry.path))
+                            if len(matches) >= limit:
+                                break
+                        if entry_is_dir and entry_name not in _SKIP_RESULT_PARTS:
+                            child_dirs.append(Path(entry.path))
+                    except (OSError, PermissionError):
+                        continue
+                stack.extend(reversed(child_dirs))
+        except (OSError, PermissionError):
+            continue
+
+    return matches
+
+
+def _try_specific_computer_item_query(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    parsed = _parse_specific_computer_item_query(user_query)
+    if not parsed:
+        return None
+
+    matches = _scan_named_path_all_drives(parsed["item_name"], item_type=parsed["item_type"], limit=20)
+    if not matches:
+        return {
+            "status": "success",
+            "message": (
+                f"I couldn't find a {parsed['item_type']} named {parsed['item_name']} "
+                "on your computer."
+            ),
+            "action": "react_response",
+        }
+
+    target_path = matches[0]
+    _save_single_file_context(str(target_path), user_query)
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = str(target_path)
+
+    if len(matches) == 1:
+        return {
+            "status": "success",
+            "message": (
+                f"Yes, there is a {parsed['item_type']} named {target_path.name} on your computer.\n"
+                f"Path: {target_path}"
+            ),
+            "action": "react_response",
+            "raw": {"path": str(target_path), "type": parsed["item_type"]},
+        }
+
+    preview = "\n".join(f"- {path}" for path in matches[:10])
+    return {
+        "status": "success",
+        "message": (
+            f"I found {len(matches)} matching {parsed['item_type']}(s) named {parsed['item_name']} on your computer.\n\n"
+            f"Top matches:\n{preview}"
+        ),
+        "action": "react_response",
+        "raw": {"matches": [str(path) for path in matches], "type": parsed["item_type"]},
+    }
+
+
+def _count_folder_tree(path: Path) -> Dict[str, Any]:
+    files = 0
+    folders = 0
+    children: List[Dict[str, Any]] = []
+    try:
+        with os.scandir(path) as entries:
+            for entry in sorted(entries, key=lambda item: item.name.lower()):
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        nested = _count_folder_tree(Path(entry.path))
+                        folders += 1 + int(nested.get("folders", 0) or 0)
+                        files += int(nested.get("files", 0) or 0)
+                        children.append(
+                            {
+                                "name": entry.name,
+                                "path": entry.path,
+                                "files": int(nested.get("files", 0) or 0),
+                                "folders": int(nested.get("folders", 0) or 0),
+                            }
+                        )
+                    elif entry.is_file(follow_symlinks=False):
+                        files += 1
+                except (OSError, PermissionError):
+                    continue
+    except (OSError, PermissionError):
+        pass
+    return {"files": files, "folders": folders, "children": children}
+
+
+def _write_recursive_folder_report(target_path: Path, summary: Dict[str, Any]) -> Path:
+    report_dir = get_your_data_dir("reports", "files", create=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_path = report_dir / f"{target_path.name}_recursive_report_{timestamp}.txt"
+    lines = [
+        f"Folder Report: {target_path.name}",
+        f"Path: {target_path}",
+        "",
+        f"Total Files: {int(summary.get('files', 0) or 0)}",
+        f"Total Folders: {int(summary.get('folders', 0) or 0)}",
+        f"Total Items (Files + Folders): {int(summary.get('files', 0) or 0) + int(summary.get('folders', 0) or 0)}",
+    ]
+    children = summary.get("children", []) if isinstance(summary, dict) else []
+    if isinstance(children, list) and children:
+        lines.append("")
+        lines.append("Immediate Subfolder Breakdown:")
+        for child in children[:50]:
+            if not isinstance(child, dict):
+                continue
+            lines.append(
+                f"- {child.get('name', '')}: {int(child.get('files', 0) or 0)} file(s), {int(child.get('folders', 0) or 0)} nested folder(s)"
+            )
+    report_path.write_text("\n".join(lines), encoding="utf-8")
+    return report_path
+
+
+def _build_recursive_folder_count_response(
+    target_path: Path,
+    folder_label: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    summary = _count_folder_tree(target_path)
+    report_path = _write_recursive_folder_report(target_path, summary)
+    _save_single_file_context(str(target_path), folder_label)
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = str(report_path)
+
+    file_count = int(summary.get("files", 0) or 0)
+    folder_count = int(summary.get("folders", 0) or 0)
+    return {
+        "status": "success",
+        "message": (
+            f"Here's the recursive breakdown of the contents in the {target_path.name} folder:\n\n"
+            f"Total Files: {file_count}\n"
+            f"Total Folders: {folder_count}\n"
+            f"Total Items (Files + Folders): {file_count + folder_count}\n\n"
+            f"I also created a detailed report at: {report_path}"
+        ),
+        "action": "react_response",
+        "file_path": str(report_path),
+        "raw": {"path": str(target_path), **summary},
+    }
+
+
+def _resolve_existing_archive_from_files_context() -> Optional[Path]:
+    source_path = _resolve_single_copy_source_from_files_context()
+    if source_path is None or not source_path.exists() or not source_path.is_file():
+        return None
+    if source_path.suffix.lower() not in _ARCHIVE_EXTENSIONS:
+        return None
+    return source_path
+
+
+def _try_reuse_existing_archive_from_context(
+    user_query: str,
+    artifacts_out: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    raw_query = _strip_injected_blocks(user_query)
+    lowered = raw_query.lower()
+    if "zip" not in lowered and "archive" not in lowered:
+        return None
+    if not any(token in lowered for token in ("created", "made", "that zip", "the zip", "previous zip")):
+        return None
+
+    archive_path = _resolve_existing_archive_from_files_context()
+    if archive_path is None:
+        return None
+
+    if artifacts_out is not None:
+        artifacts_out["file_path"] = str(archive_path)
+
+    return {
+        "status": "success",
+        "message": f"Using the existing zip archive: {archive_path}",
+        "action": "react_response",
+        "file_path": str(archive_path),
+    }
+
+
 def _build_archive_output_path(folder_name: str) -> Path:
     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", folder_name).strip("._") or "search_results"
     return get_your_data_dir("archives", f"{safe_name}.zip")
+
+
+def _save_single_file_context(path_str: str, query: str) -> None:
+    from src.agent.manifest.context_manifest import auto_save_files_context  # noqa: PLC0415
+
+    file_path = Path(str(path_str or "").strip())
+    if not file_path.exists():
+        return
+
+    auto_save_files_context(
+        {
+            "status": "success",
+            "results": [
+                {
+                    "path": str(file_path),
+                    "name": file_path.name,
+                    "type": "folder" if file_path.is_dir() else "file",
+                }
+            ],
+            "count": 1,
+            "file_path": str(file_path),
+        },
+        query,
+    )
 
 
 def _try_list_names_from_files_context(user_query: str) -> Optional[Dict[str, Any]]:
@@ -422,6 +1369,57 @@ def _try_direct_rename_from_files_context(
     }
 
 
+def _resolve_single_copy_source_from_files_context() -> Optional[Path]:
+    from src.agent.manifest.context_manifest import read_context  # noqa: PLC0415
+
+    ctx = read_context(agent="files") or {}
+    entities = ctx.get("resolved_entities", {}) if isinstance(ctx, dict) else {}
+
+    directory_value = str(entities.get("directory_path", "") or "").strip()
+    if directory_value:
+        directory_path = Path(directory_value)
+        if directory_path.exists():
+            return directory_path
+
+    selected_paths = entities.get("selected_paths", []) if isinstance(entities, dict) else []
+    if isinstance(selected_paths, list) and len(selected_paths) == 1:
+        selected_path = Path(str(selected_paths[0] or "").strip())
+        if selected_path.exists():
+            return selected_path
+
+    listed_files = entities.get("listed_files", []) if isinstance(entities, dict) else []
+    if isinstance(listed_files, list) and len(listed_files) == 1 and isinstance(listed_files[0], dict):
+        listed_path = Path(str(listed_files[0].get("path", "") or "").strip())
+        if listed_path.exists():
+            return listed_path
+
+    return None
+
+
+_MAKE_COPY_RE = re.compile(
+    r"\b(make|create)\b.{0,20}\ba\s+copy\b|\bduplicate\b|\bcopy\s+(it|this|that)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _build_adjacent_copy_destination(source_path: Path) -> Path:
+    if source_path.is_dir():
+        candidate = source_path.with_name(f"{source_path.name} - Copy")
+    else:
+        candidate = source_path.with_name(f"{source_path.stem} - Copy{source_path.suffix}")
+
+    counter = 2
+    while candidate.exists():
+        if source_path.is_dir():
+            candidate = source_path.with_name(f"{source_path.name} - Copy ({counter})")
+        else:
+            candidate = source_path.with_name(
+                f"{source_path.stem} - Copy ({counter}){source_path.suffix}"
+            )
+        counter += 1
+    return candidate
+
+
 def _try_direct_zip_from_files_context(
     user_query: str,
     artifacts_out: Optional[Dict[str, Any]],
@@ -482,6 +1480,11 @@ def _try_direct_zip_from_files_context(
     if artifacts_out is not None:
         artifacts_out["file_path"] = result.get("file_path", "")
 
+    try:
+        _save_single_file_context(str(result.get("file_path", "") or ""), raw_query)
+    except _FILES_ORCHESTRATOR_ERRORS:
+        pass
+
     return {
         "status": "success",
         "message": f"Created zip archive: {result.get('file_path', '')}",
@@ -523,6 +1526,11 @@ def _try_direct_zip_from_search_bundle(
     if artifacts_out is not None:
         artifacts_out["file_path"] = result.get("file_path", "")
 
+    try:
+        _save_single_file_context(str(result.get("file_path", "") or ""), raw_query)
+    except _FILES_ORCHESTRATOR_ERRORS:
+        pass
+
     return {
         "status": "success",
         "message": f"Created zip archive for the previous search results: {result.get('file_path', '')}",
@@ -534,14 +1542,16 @@ def _try_direct_zip_from_search_bundle(
 def _format_precise_search_response(mode: str, term: str, result: Dict[str, Any]) -> str:
     matches = result.get("results", []) or []
     count = int(result.get("count", 0) or 0)
+    match_mode = str(result.get("match_mode", "exact") or "exact")
     lines: List[str] = []
 
     if mode == "named_search":
+        descriptor = f"with '{term}' in the name" if match_mode == "contains" else f"named '{term}'"
         if count == 0:
-            return f"I couldn't find any matching file named '{term}' on the detected drives."
+            return f"I couldn't find any matching file {descriptor} on the detected drives."
         if count == 1:
-            return f"Yes — I found 1 matching item named '{term}':\n{matches[0].get('path', '')}"
-        lines.append(f"Yes — I found {count} matching items named '{term}'.")
+            return f"Yes — I found 1 matching item {descriptor}:\n{matches[0].get('path', '')}"
+        lines.append(f"Yes — I found {count} matching items {descriptor}.")
     else:
         if count == 0:
             return f"I couldn't find any files with '{term}' in the filename on the detected drives."
@@ -582,6 +1592,15 @@ def _try_precise_full_computer_search(
         }
 
     result = _filter_precise_search_results(user_query, result)
+    if parsed["mode"] == "named_search":
+        result["results"] = _filter_named_matches(
+            result.get("results", []) or [],
+            parsed["term"],
+            match_mode=str(parsed.get("match_mode", "exact") or "exact"),
+        )
+        result["count"] = len(result["results"])
+        result["file_path"] = str(result["results"][0].get("path", "") or "") if result["results"] else ""
+        result["match_mode"] = str(parsed.get("match_mode", "exact") or "exact")
     result = _stage_precise_search_results(parsed["term"], result)
 
     paths = [str(item.get("path", "") or "").strip() for item in result.get("results", []) if str(item.get("path", "") or "").strip()]
@@ -628,8 +1647,13 @@ def _try_scoped_named_search(
     item_type = parsed.get("item_type")
     if item_type in {"file", "folder"}:
         matches = [item for item in matches if str(item.get("type", "")).lower() == item_type]
-        result["results"] = matches
-        result["count"] = len(matches)
+    matches = _filter_named_matches(
+        matches,
+        parsed["term"],
+        match_mode=str(parsed.get("match_mode", "exact") or "exact"),
+    )
+    result["results"] = matches
+    result["count"] = len(matches)
 
     paths = [str(item.get("path", "") or "").strip() for item in matches if str(item.get("path", "") or "").strip()]
     first_path = paths[0] if paths else ""
@@ -639,6 +1663,11 @@ def _try_scoped_named_search(
         artifacts_out["found_paths"] = paths
 
     noun = item_type or "item"
+    descriptor = (
+        f"with '{parsed['term']}' in the name"
+        if parsed.get("match_mode") == "contains"
+        else f"named '{parsed['term']}'"
+    )
     if matches:
         _save_precise_search_context(result, parsed["term"])
         if item_type == "folder" and len(matches) == 1 and _DIRECTORY_FILE_COUNT_RE.search(user_query):
@@ -658,15 +1687,15 @@ def _try_scoped_named_search(
                     "raw": directory_result,
                 }
         if len(matches) == 1:
-            message = f"Yes — I found 1 matching {noun} named '{parsed['term']}' in {parsed['scope_label']}:\n{first_path}"
+            message = f"Yes — I found 1 matching {noun} {descriptor} in {parsed['scope_label']}:\n{first_path}"
         else:
             preview = "\n".join(f"- {path}" for path in paths[:10])
             message = (
-                f"Yes — I found {len(matches)} matching {noun}s named '{parsed['term']}' in {parsed['scope_label']}."
+                f"Yes — I found {len(matches)} matching {noun}s {descriptor} in {parsed['scope_label']}."
                 f"\n\nTop matches:\n{preview}"
             )
     else:
-        message = f"I couldn't find any matching {noun} named '{parsed['term']}' in {parsed['scope_label']}."
+        message = f"I couldn't find any matching {noun} {descriptor} in {parsed['scope_label']}."
 
     return {
         "status": "success",
@@ -765,9 +1794,8 @@ def _build_skill_context() -> str:
     # Load user-defined personal folders from settings.json
     personal_folders_note = ""
     try:
-        import json as _json
         _sf = Path(__file__).resolve().parents[4] / "config" / "settings.json"
-        _cfg = _json.loads(_sf.read_text(encoding="utf-8"))
+        _cfg = json.loads(_sf.read_text(encoding="utf-8"))
         _pf = {k: v for k, v in _cfg.get("personal_folders", {}).items() if not k.startswith("_")}
         if _pf:
             _lines = "\n".join(f"  {k}: {v}" for k, v in _pf.items())
@@ -1035,7 +2063,7 @@ def _resolve_destination_from_query(user_query: str) -> str:
         user_query, re.IGNORECASE,
     )
     if abs_m:
-        return abs_m.group(1).strip().rstrip("/\\")
+        return abs_m.group(1).strip().rstrip("/\\?!. ,")
 
     # 2. "a folder named/called X" / "folder named/called X" / "named/called X folder"
     named_m = re.search(
@@ -1143,9 +2171,37 @@ def _try_direct_copy_from_manifest(
 
     from src.files.features.file_ops import (
         collect_files_from_manifest,  # noqa: PLC0415
+        copy_file,
         _DEFAULT_MANIFEST,
         _DEFAULT_OCTAMIND_DIR,
     )
+
+    source_path = _resolve_single_copy_source_from_files_context()
+    destination = _resolve_destination_from_query(_raw)
+
+    if source_path is not None:
+        if not destination and _MAKE_COPY_RE.search(_raw):
+            destination = str(_build_adjacent_copy_destination(source_path))
+        if destination:
+            result = copy_file(str(source_path), destination)
+            copied_path = str(result.get("destination", "") or "").strip()
+            if artifacts_out is not None and copied_path:
+                artifacts_out["file_path"] = copied_path
+            if result.get("status") == "success" and copied_path:
+                try:
+                    _save_single_file_context(copied_path, _raw)
+                except _FILES_ORCHESTRATOR_ERRORS:
+                    pass
+                return {
+                    "status": "success",
+                    "message": f"✅ Copied **{source_path.name}** to:\n`{copied_path}`",
+                    "action": "react_response",
+                }
+            return {
+                "status": result.get("status", "error"),
+                "message": f"❌ Copy failed: {result.get('message', 'unknown error')}",
+                "action": "react_response",
+            }
 
     if not _DEFAULT_MANIFEST.exists():
         import logging as _lg
@@ -1160,7 +2216,6 @@ def _try_direct_copy_from_manifest(
     )
 
     # Resolve destination using the cleaned raw intent (no injected ## blocks)
-    destination = _resolve_destination_from_query(_raw)
     _lg.getLogger("files.orchestrator").info(
         "[direct-copy] resolved destination=%r from query=%r", destination, _raw
     )
@@ -1263,8 +2318,7 @@ def _try_background_job(
 
     # Fallback: read PA_ID from the process environment (set by Telegram poller)
     if not pa_id:
-        import os as _os
-        pa_id = _os.environ.get("PA_ID", "")
+        pa_id = os.environ.get("PA_ID", "")
 
     try:
         from src.agent.manifest.job_manifest import create_job, update_job  # noqa: PLC0415
@@ -1503,46 +2557,78 @@ def execute_with_llm_orchestration(
     # ── Pre-flight: copy-from-manifest bypass (no LLM needed) ────────────
     direct = _try_direct_copy_from_manifest(user_query, artifacts_out)
     if direct is not None:
-        return direct
+        return _return_fast_path_result(direct)
 
     list_names = _try_list_names_from_files_context(user_query)
     if list_names is not None:
-        return list_names
+        return _return_fast_path_result(list_names)
 
     direct_rename = _try_direct_rename_from_files_context(user_query, artifacts_out)
     if direct_rename is not None:
-        return direct_rename
+        return _return_fast_path_result(direct_rename)
+
+    existing_archive = _try_reuse_existing_archive_from_context(user_query, artifacts_out)
+    if existing_archive is not None:
+        return _return_fast_path_result(existing_archive)
+
+    subset_zip = _try_context_subset_zip(user_query, artifacts_out)
+    if subset_zip is not None:
+        return _return_fast_path_result(subset_zip)
 
     direct_zip_from_context = _try_direct_zip_from_files_context(user_query, artifacts_out)
     if direct_zip_from_context is not None:
-        return direct_zip_from_context
+        return _return_fast_path_result(direct_zip_from_context)
+
+    recent_payslip_zip = _try_last_n_months_payslip_zip(user_query, artifacts_out)
+    if recent_payslip_zip is not None:
+        return _return_fast_path_result(recent_payslip_zip)
 
     direct_zip = _try_direct_zip_from_search_bundle(user_query, artifacts_out)
     if direct_zip is not None:
-        return direct_zip
+        return _return_fast_path_result(direct_zip)
 
     recycle_bin = _try_recycle_bin_query(user_query)
     if recycle_bin is not None:
-        return recycle_bin
+        return _return_fast_path_result(recycle_bin)
+
+    specific_drive_item = _try_specific_drive_item_query(user_query, artifacts_out)
+    if specific_drive_item is not None:
+        return _return_fast_path_result(specific_drive_item)
+
+    specific_computer_item = _try_specific_computer_item_query(user_query, artifacts_out)
+    if specific_computer_item is not None:
+        return _return_fast_path_result(specific_computer_item)
+
+    contextual_folder_count = _try_contextual_folder_count_query(user_query, artifacts_out)
+    if contextual_folder_count is not None:
+        return _return_fast_path_result(contextual_folder_count)
+
+    specific_computer_folder_count = _try_specific_computer_folder_count_query(user_query, artifacts_out)
+    if specific_computer_folder_count is not None:
+        return _return_fast_path_result(specific_computer_folder_count)
+
+    specific_folder_count = _try_specific_folder_count_query(user_query, artifacts_out)
+    if specific_folder_count is not None:
+        return _return_fast_path_result(specific_folder_count)
 
     scoped = _try_scoped_named_search(user_query, artifacts_out)
     if scoped is not None:
-        return scoped
+        return _return_fast_path_result(scoped)
 
     filename_contains = _try_filename_contains_search(user_query, artifacts_out)
     if filename_contains is not None:
-        return filename_contains
+        return _return_fast_path_result(filename_contains)
 
     # ── Pre-flight: deterministic targeted full-computer search ───────────
     precise = _try_precise_full_computer_search(user_query, artifacts_out)
     if precise is not None:
-        return precise
+        return _return_fast_path_result(precise)
 
     # ── Background dispatch: heavy full-disk scans run async ──────────────
     try:
         bg = _try_background_job(user_query, artifacts_out)
         if bg is not None:
-            return bg
+            return _return_fast_path_result(bg)
     except _FILES_ORCHESTRATOR_ERRORS as _bg_exc:
         import logging as _bg_log
         _bg_log.getLogger("files.orchestrator").warning(
@@ -1571,6 +2657,7 @@ def execute_with_llm_orchestration(
         _logging.getLogger("files.orchestrator").warning(
             "DAG path raised %s — falling back to ReAct", dag_exc
         )
+        log_fallback_to_react("files", "files_orchestrator_exception")
     try:
         result = run_skill_react(
             skill_name="files",

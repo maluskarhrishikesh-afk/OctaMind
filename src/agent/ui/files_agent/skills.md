@@ -23,7 +23,7 @@
 
 ### search_by_name
 - **signature**: `search_by_name(query, directory="~", recursive=True, limit=50)`
-- **description**: Check if a specific file or folder named X exists inside a known directory and locate it. Use when the user asks "is there a folder named X in Downloads?", "do I have a file called X?", "find a folder named X", "check if X exists in Y", "does folder X exist in Downloads?", "locate file X in Documents", "find file named report.pdf", or "is there a Text folder in Downloads". Pass only the target name as `query` like `Text` or `report.pdf`, not the whole natural-language sentence. Use the directory parameter for the known scope such as Downloads or Documents.
+- **description**: Check if a specific file or folder named X exists inside a known directory and locate it. Treat `named` and `called` queries as exact name matches, case-insensitive, so `Text` matches `Text`/`text`/`TEXT` but not `Text_Folder`. Use partial-name matching only when the user explicitly says `contains`, `containing`, or `with the name`. Use when the user asks "is there a folder named X in Downloads?", "do I have a file called X?", "find a folder named X", "check if X exists in Y", "does folder X exist in Downloads?", "locate file X in Documents", "find file named report.pdf", or "is there a Text folder in Downloads". Pass only the target name as `query` like `Text` or `report.pdf`, not the whole natural-language sentence. Use the directory parameter for the known scope such as Downloads or Documents.
 - **tags**: search, find, exists, check, name, locate, is there, folder named, file named, does it exist, present, find named, locate file
 
 ### search_by_extension
