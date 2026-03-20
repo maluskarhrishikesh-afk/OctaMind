@@ -30,6 +30,11 @@ from src.email.features.mailbox_preferences import (
     upsert_mailbox_label_rule,
 )
 from src.email.features.mailbox_automation import sync_mailbox_automation_config
+from src.email.features.mailbox_learning import (
+    detect_mailbox_learning_signals,
+    record_mailbox_preference_learning,
+    summarize_mailbox_learning,
+)
 
 
 _PENDING_MAILBOX_CLEANUP_PATH = get_runtime_state_path(
@@ -255,6 +260,8 @@ _MAILBOX_PREFERENCE_QUESTIONS = [
     },
 ]
 
+_MAILBOX_APPLY_CONFIDENCE_THRESHOLD = 0.72
+
 
 def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
     fast_path = str(result.get("_fast_path", "") or result.get("action", "unknown"))
@@ -450,6 +457,44 @@ def _sync_mailbox_preferences_context(session_key: str, state: Optional[Dict[str
         pass
 
 
+def _sync_mailbox_followup_context(
+    session_key: str,
+    *,
+    followup_kind: str,
+    preferences: Optional[Dict[str, Any]] = None,
+    counts: Optional[Dict[str, Any]] = None,
+    plan: Optional[Dict[str, Any]] = None,
+) -> None:
+    try:
+        from src.agent.manifest.context_manifest import write_context  # noqa: PLC0415
+
+        resolved_entities: Dict[str, Any] = {
+            "session_key": session_key,
+            "preference_file": str(get_mailbox_preferences_path()),
+            "followup_kind": followup_kind,
+        }
+        if isinstance(preferences, dict):
+            resolved_entities["mailbox_preferences"] = preferences
+        if isinstance(counts, dict):
+            resolved_entities["mailbox_counts"] = counts
+        if isinstance(plan, dict):
+            resolved_entities["mailbox_plan"] = plan
+
+        write_context(
+            agent="email",
+            topic=f"mailbox_{followup_kind}",
+            resolved_entities=resolved_entities,
+            awaiting="email_action",
+            pending_selection={
+                "kind": "mailbox_followup",
+                "session_key": session_key,
+                "followup_kind": followup_kind,
+            },
+        )
+    except Exception:
+        pass
+
+
 def _get_pending_mailbox_preferences(session_key: str) -> Dict[str, Any]:
     return _load_pending_mailbox_preferences().get(session_key, {})
 
@@ -520,7 +565,8 @@ def _parse_mailbox_label_rule_request(raw_query: str) -> Optional[Dict[str, Any]
 
 def _apply_direct_mailbox_preference_edits(raw_query: str, agent_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
     lowered = _normalize_query_text(raw_query)
-    updated = load_mailbox_preferences()
+    previous = load_mailbox_preferences()
+    updated = dict(previous)
     changes: List[str] = []
 
     if _NEWSLETTER_EDIT_RE.search(lowered):
@@ -582,6 +628,7 @@ def _apply_direct_mailbox_preference_edits(raw_query: str, agent_id: Optional[st
         return None
 
     saved = save_mailbox_preferences(updated)
+    record_mailbox_preference_learning(previous, saved.get("preferences", {}), source="direct_edit")
     return {
         "status": "success",
         "action": "mailbox_preferences_edit",
@@ -647,7 +694,11 @@ def _save_and_apply_mailbox_rule(raw_query: str, all_tools: Dict[str, Any]) -> O
 
 
 def _detect_mailbox_signals(counts: Dict[str, Any], preferences: Dict[str, Any], history: List[Dict[str, Any]]) -> List[str]:
-    return detect_mailbox_signals(counts, preferences, history)
+    signals = list(detect_mailbox_signals(counts, preferences, history))
+    for learning_signal in detect_mailbox_learning_signals():
+        if learning_signal not in signals:
+            signals.append(learning_signal)
+    return signals
 
 
 def _extract_mailbox_unread_total(inbox_result: Dict[str, Any]) -> int:
@@ -715,30 +766,215 @@ def _build_mailbox_review_digest(all_tools: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _build_mailbox_setup_entry_message() -> str:
-    return "\n".join([
-        "I can organize your mailbox in a controlled way instead of guessing.",
+def _build_mailbox_setup_profile(all_tools: Dict[str, Any], preferences: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    prefs = preferences or default_mailbox_preferences()
+    plan = _build_mailbox_plan(prefs, all_tools)
+    counts = plan.get("counts", {}) if isinstance(plan.get("counts"), dict) else {}
+    learning = summarize_mailbox_learning()
+    recommendations: Dict[str, Any] = {}
+    advisories: List[str] = []
+    profile = "balanced"
+
+    unread_total = int(counts.get("unread_total", 0) or 0)
+    promotions = int(counts.get("promotions", 0) or 0)
+    newsletters = int(counts.get("newsletters", 0) or 0)
+
+    if newsletters >= max(10, promotions + 5):
+        profile = "newsletter_heavy"
+        recommendations.update(
+            {
+                "promotions_action": "archive",
+                "newsletters_action": "summarize_then_archive",
+                "review_schedule": "daily",
+            }
+        )
+        advisories.append(
+            f"Mailbox profile: newsletter-heavy. I found {newsletters} newsletter-style emails in the inbox, so summarize-then-archive is the safest starting point."
+        )
+    elif unread_total >= 25 and promotions <= 5 and newsletters <= 8:
+        profile = "work_heavy"
+        recommendations.update(
+            {
+                "task_extraction": True,
+                "draft_replies": "suggest",
+                "review_schedule": "daily",
+                "operation_mode": "confirm_before_action",
+            }
+        )
+        advisories.append(
+            f"Mailbox profile: work-heavy. The inbox has {unread_total} unread messages with relatively little marketing noise, so task extraction and draft suggestions are likely useful."
+        )
+    else:
+        advisories.append(
+            f"Mailbox profile: balanced. I found {unread_total} unread emails, {promotions} promotions, and {newsletters} newsletter-style emails."
+        )
+
+    reversals = learning.get("reversal_counts", {}) if isinstance(learning.get("reversal_counts"), dict) else {}
+    if int(reversals.get("newsletters_action", 0) or 0) >= 2:
+        advisories.append(
+            "Learning note: newsletter handling has been reversed multiple times before, so I will keep newsletter cleanup as a recommendation instead of an assumption."
+        )
+    if int(reversals.get("promotions_action", 0) or 0) >= 2:
+        advisories.append(
+            "Learning note: promotion cleanup has changed repeatedly before, so I will keep promotion cleanup conservative."
+        )
+
+    return {
+        "profile": profile,
+        "counts": counts,
+        "recommended_options": recommendations,
+        "advisories": advisories,
+    }
+
+
+def _build_mailbox_setup_entry_message(setup_profile: Optional[Dict[str, Any]] = None) -> str:
+    lines = ["I can organize your mailbox in a controlled way instead of guessing."]
+    if isinstance(setup_profile, dict):
+        counts = setup_profile.get("counts", {}) if isinstance(setup_profile.get("counts"), dict) else {}
+        if counts:
+            lines.append(
+                f"Current mailbox snapshot: {int(counts.get('unread_total', 0) or 0)} unread, {int(counts.get('promotions', 0) or 0)} promotions, {int(counts.get('newsletters', 0) or 0)} newsletter-style emails."
+            )
+        for advisory in setup_profile.get("advisories", [])[:2] if isinstance(setup_profile.get("advisories"), list) else []:
+            lines.append(advisory)
+    lines.extend([
         "Choose one option:",
         "1. Guided setup for mailbox preferences",
         "2. Show what I can truly automate",
         "3. Use safe default mailbox preferences",
         "4. Cancel",
     ])
+    return "\n".join(lines)
 
 
 def _build_mailbox_preference_question_message(state: Dict[str, Any]) -> str:
     step = int(state.get("step", 0) or 0)
     preferences = state.get("preferences", {}) if isinstance(state.get("preferences"), dict) else {}
+    setup_profile = state.get("setup_profile", {}) if isinstance(state.get("setup_profile"), dict) else {}
+    recommended_options = setup_profile.get("recommended_options", {}) if isinstance(setup_profile.get("recommended_options"), dict) else {}
     question = _MAILBOX_PREFERENCE_QUESTIONS[step]
-    lines = [
-        f"Mailbox setup {step + 1}/{len(_MAILBOX_PREFERENCE_QUESTIONS)}: {question['title']}",
-        question["prompt"],
-    ]
+    lines = [f"Mailbox setup {step + 1}/{len(_MAILBOX_PREFERENCE_QUESTIONS)}: {question['title']}"]
+    for advisory in setup_profile.get("advisories", [])[:1] if isinstance(setup_profile.get("advisories"), list) else []:
+        lines.append(advisory)
+    lines.append(question["prompt"])
     current_value = preferences.get(question["key"])
+    recommended_value = recommended_options.get(question["key"])
     for index, (_, label) in enumerate(question["options"], start=1):
         marker = " (current)" if question["options"][index - 1][0] == current_value else ""
+        if recommended_value == question["options"][index - 1][0]:
+            marker += " (recommended)"
         lines.append(f"{index}. {label}{marker}")
     return "\n".join(lines)
+
+
+def _clamp_mailbox_confidence(value: Any) -> float:
+    try:
+        numeric = float(value)
+    except Exception:
+        return 0.0
+    return max(0.0, min(numeric, 1.0))
+
+
+def _mailbox_confidence_label(confidence: Any) -> str:
+    score = _clamp_mailbox_confidence(confidence)
+    if score >= 0.9:
+        return "high"
+    if score >= 0.75:
+        return "medium"
+    return "low"
+
+
+def _mailbox_risk_label(confidence: Any, safe_to_apply: bool = True) -> str:
+    if not safe_to_apply:
+        return "advisory"
+    label = _mailbox_confidence_label(confidence)
+    if label == "high":
+        return "low"
+    if label == "medium":
+        return "medium"
+    return "high"
+
+
+def _mailbox_confidence_badge(confidence: Any) -> str:
+    score = _clamp_mailbox_confidence(confidence)
+    return f"{_mailbox_confidence_label(score)} confidence ({score:.2f})"
+
+
+def _estimate_mailbox_rule_confidence(rule: Dict[str, Any]) -> float:
+    match_type = str(rule.get("match_type", "") or "").strip().lower()
+    match_value = str(rule.get("match_value", "") or "").strip()
+    if match_type == "domain":
+        return 0.95
+    if match_type == "sender":
+        return 0.92
+    if match_type == "keyword":
+        if len(match_value) >= 10 or " " in match_value:
+            return 0.78
+        if len(match_value) >= 6:
+            return 0.74
+        return 0.64
+    return 0.7
+
+
+def _build_mailbox_step(
+    *,
+    step_id: str,
+    description: str,
+    confidence: float,
+    why: List[str],
+    safe_to_apply: bool,
+    query: str = "",
+    count: int = 0,
+    rule: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    score = _clamp_mailbox_confidence(confidence)
+    step: Dict[str, Any] = {
+        "id": step_id,
+        "description": description,
+        "confidence": score,
+        "confidence_label": _mailbox_confidence_label(score),
+        "risk_level": _mailbox_risk_label(score, safe_to_apply=safe_to_apply),
+        "safe_to_apply": bool(safe_to_apply),
+        "requires_confirmation": (not safe_to_apply) or score < 0.9,
+        "why": [item for item in why if str(item or "").strip()],
+    }
+    if query:
+        step["query"] = query
+    if count:
+        step["count"] = int(count)
+    if isinstance(rule, dict) and rule:
+        step["rule"] = rule
+    return step
+
+
+def _build_mailbox_execution_plan(preferences: Dict[str, Any], steps: List[Dict[str, Any]]) -> Dict[str, Any]:
+    safe_steps = [step for step in steps if isinstance(step, dict) and step.get("safe_to_apply")]
+    confidence_values = [
+        _clamp_mailbox_confidence(step.get("confidence", 0.0))
+        for step in safe_steps
+    ]
+    overall_confidence = min(confidence_values) if confidence_values else 1.0
+    requires_confirmation = str(preferences.get("operation_mode", "") or "") != "safe_autopilot"
+    if any(str(step.get("risk_level", "") or "") in {"medium", "high"} for step in safe_steps):
+        requires_confirmation = True
+
+    if any(str(step.get("risk_level", "") or "") == "high" for step in safe_steps):
+        risk_level = "high"
+    elif requires_confirmation:
+        risk_level = "medium"
+    else:
+        risk_level = "low"
+
+    return {
+        "goal": "Organize the mailbox using the saved mailbox preferences.",
+        "requires_confirmation": requires_confirmation,
+        "confidence": overall_confidence,
+        "confidence_label": _mailbox_confidence_label(overall_confidence),
+        "risk_level": risk_level,
+        "step_count": len(steps),
+        "safe_step_count": len(safe_steps),
+        "steps": steps,
+    }
 
 
 def _build_mailbox_plan(preferences: Dict[str, Any], all_tools: Dict[str, Any]) -> Dict[str, Any]:
@@ -765,65 +1001,104 @@ def _build_mailbox_plan(preferences: Dict[str, Any], all_tools: Dict[str, Any]) 
     promotions_count = _count("category:promotions in:inbox")
     counts["promotions"] = promotions_count
     if preferences.get("promotions_action") == "archive":
-        plan_items.append({
-            "id": "archive_promotions",
-            "query": "category:promotions in:inbox",
-            "description": f"Archive up to {promotions_count} promotion email(s) from Inbox.",
-            "count": promotions_count,
-            "safe_to_apply": True,
-        })
+        plan_items.append(
+            _build_mailbox_step(
+                step_id="archive_promotions",
+                query="category:promotions in:inbox",
+                description=f"Archive up to {promotions_count} promotion email(s) from Inbox.",
+                count=promotions_count,
+                confidence=0.98,
+                safe_to_apply=True,
+                why=[
+                    "Your saved mailbox preference says promotions should be archived.",
+                    f"There are currently {promotions_count} promotion email(s) in the inbox.",
+                    "Archiving removes them from Inbox without deleting them.",
+                ],
+            )
+        )
 
     newsletters_count = _count('in:inbox (unsubscribe OR newsletter OR "mailing list") -category:promotions')
     counts["newsletters"] = newsletters_count
     newsletters_action = str(preferences.get("newsletters_action", "keep") or "keep")
     if newsletters_action in {"archive", "summarize_then_archive"}:
-        plan_items.append({
-            "id": "archive_newsletters",
-            "query": 'in:inbox (unsubscribe OR newsletter OR "mailing list") -category:promotions',
-            "description": (
-                f"{'Summarize then archive' if newsletters_action == 'summarize_then_archive' else 'Archive'} "
-                f"up to {newsletters_count} newsletter-style email(s)."
-            ),
-            "count": newsletters_count,
-            "safe_to_apply": True,
-        })
+        plan_items.append(
+            _build_mailbox_step(
+                step_id="archive_newsletters",
+                query='in:inbox (unsubscribe OR newsletter OR "mailing list") -category:promotions',
+                description=(
+                    f"{'Summarize then archive' if newsletters_action == 'summarize_then_archive' else 'Archive'} "
+                    f"up to {newsletters_count} newsletter-style email(s)."
+                ),
+                count=newsletters_count,
+                confidence=0.84 if newsletters_action == "summarize_then_archive" else 0.86,
+                safe_to_apply=True,
+                why=[
+                    f"Your saved mailbox preference is set to '{newsletters_action.replace('_', ' ')}' for newsletters.",
+                    f"The current inbox search matched {newsletters_count} newsletter-style email(s).",
+                    "This relies on unsubscribe/newsletter heuristics, so it is slightly less certain than Gmail promotions.",
+                ],
+            )
+        )
 
     if preferences.get("task_extraction"):
-        plan_items.append({
-            "id": "task_extraction",
-            "description": "Surface pending tasks from inbox emails when you ask for an email task review.",
-            "safe_to_apply": False,
-        })
+        plan_items.append(
+            _build_mailbox_step(
+                step_id="task_extraction",
+                description="Surface pending tasks from inbox emails when you ask for an email task review.",
+                confidence=0.9,
+                safe_to_apply=False,
+                why=[
+                    "Task extraction is enabled in your saved mailbox preferences.",
+                    "This is advisory only and does not change the mailbox automatically.",
+                ],
+            )
+        )
 
     if preferences.get("draft_replies") == "suggest":
-        plan_items.append({
-            "id": "draft_suggestions",
-            "description": "Suggest draft replies for important emails instead of sending automatically.",
-            "safe_to_apply": False,
-        })
+        plan_items.append(
+            _build_mailbox_step(
+                step_id="draft_suggestions",
+                description="Suggest draft replies for important emails instead of sending automatically.",
+                confidence=0.9,
+                safe_to_apply=False,
+                why=[
+                    "Draft suggestions are enabled in your saved mailbox preferences.",
+                    "This produces suggestions only and does not send anything automatically.",
+                ],
+            )
+        )
 
     for rule in preferences.get("label_rules", []):
         if not isinstance(rule, dict):
             continue
+        rule_confidence = _estimate_mailbox_rule_confidence(rule)
         plan_items.append(
-            {
-                "id": "label_rule",
-                "description": (
+            _build_mailbox_step(
+                step_id="label_rule",
+                description=(
                     f"Create or refresh the rule: label emails matching '{rule.get('match_value', '')}' as '{rule.get('label_name', '')}'"
                     f"{' and archive them from Inbox' if rule.get('also_archive') else ''}."
                 ),
-                "safe_to_apply": True,
-                "rule": rule,
-            }
+                confidence=rule_confidence,
+                safe_to_apply=True,
+                why=[
+                    "This rule was explicitly saved in your mailbox preferences.",
+                    f"The matcher type is '{str(rule.get('match_type', '') or 'sender')}'.",
+                    "Rule application affects future matching mail rather than deleting existing email.",
+                ],
+                rule=rule,
+            )
         )
 
     history = load_mailbox_review_history()
     signals = _detect_mailbox_signals(counts, preferences, history)
+    execution_plan = _build_mailbox_execution_plan(preferences, plan_items)
 
     return {
         "preferences": preferences,
         "counts": counts,
         "items": plan_items,
+        "execution_plan": execution_plan,
         "signals": signals,
     }
 
@@ -833,16 +1108,30 @@ def _format_mailbox_plan(plan: Dict[str, Any]) -> str:
     counts = plan.get("counts", {}) if isinstance(plan.get("counts"), dict) else {}
     items = plan.get("items", []) if isinstance(plan.get("items"), list) else []
     signals = plan.get("signals", []) if isinstance(plan.get("signals"), list) else []
+    execution_plan = plan.get("execution_plan", {}) if isinstance(plan.get("execution_plan"), dict) else {}
     lines = [
         "Mailbox organization plan:",
         render_mailbox_preferences_summary(preferences),
         "",
+        f"Goal: {str(execution_plan.get('goal', 'Organize the mailbox safely.'))}",
+        f"Plan confidence: {_mailbox_confidence_badge(execution_plan.get('confidence', 0.0))}",
+        f"Risk posture: {str(execution_plan.get('risk_level', 'medium') or 'medium')}",
+        (
+            "Confirmation is still required before mailbox-wide changes."
+            if execution_plan.get("requires_confirmation", True)
+            else "This plan is eligible for direct execution because your mailbox mode is Safe autopilot."
+        ),
         f"Current unread inbox count: {int(counts.get('unread_total', 0) or 0)}",
     ]
     if items:
         lines.append("Planned actions:")
         for index, item in enumerate(items, start=1):
-            lines.append(f"{index}. {item.get('description', '')}")
+            lines.append(
+                f"{index}. {item.get('description', '')} [{_mailbox_confidence_label(item.get('confidence', 0.0))} confidence | {item.get('risk_level', 'medium')} risk]"
+            )
+            why_lines = item.get("why", []) if isinstance(item.get("why"), list) else []
+            for reason in why_lines[:3]:
+                lines.append(f"   - {reason}")
     else:
         lines.append("No mailbox actions are enabled yet. Edit your mailbox preferences to turn actions on.")
     if signals:
@@ -875,15 +1164,25 @@ def _apply_mailbox_preferences_plan(plan: Dict[str, Any], all_tools: Dict[str, A
     promotions_archived = 0
     newsletter_archived = 0
     rules_applied = 0
+    low_confidence_skipped = 0
     for item in plan.get("items", []):
         if not isinstance(item, dict) or not item.get("safe_to_apply"):
+            continue
+        confidence = _clamp_mailbox_confidence(item.get("confidence", 0.0))
+        if confidence < _MAILBOX_APPLY_CONFIDENCE_THRESHOLD:
+            low_confidence_skipped += 1
+            results.append(
+                f"- {item.get('description', '').rstrip('.')} Needs review: only {_mailbox_confidence_badge(confidence)}."
+            )
             continue
         if item.get("id") == "label_rule":
             rule = item.get("rule", {}) if isinstance(item.get("rule"), dict) else {}
             result = _apply_saved_mailbox_rule(rule, all_tools)
             if isinstance(result, dict) and result.get("status") == "success":
                 rules_applied += 1
-                results.append(f"- {item.get('description', '').rstrip('.')} Done.")
+                results.append(
+                    f"- {item.get('description', '').rstrip('.')} Done. Why: {str((item.get('why') or ['Saved rule matched the current mailbox policy.'])[0])}"
+                )
             else:
                 message = result.get("message", "unknown error") if isinstance(result, dict) else "unknown error"
                 results.append(f"- {item.get('description', '').rstrip('.')} Skipped: {message}.")
@@ -903,7 +1202,9 @@ def _apply_mailbox_preferences_plan(plan: Dict[str, Any], all_tools: Dict[str, A
                 promotions_archived += archived
             if item.get("id") == "archive_newsletters":
                 newsletter_archived += archived
-            results.append(f"- {item.get('description', '').rstrip('.')} Done: {archived} archived.")
+            results.append(
+                f"- {item.get('description', '').rstrip('.')} Done: {archived} archived. Why: {str((item.get('why') or ['Matched the saved mailbox policy.'])[0])}"
+            )
         else:
             message = result.get("message", "unknown error") if isinstance(result, dict) else "unknown error"
             results.append(f"- {item.get('description', '').rstrip('.')} Skipped: {message}.")
@@ -922,14 +1223,22 @@ def _apply_mailbox_preferences_plan(plan: Dict[str, Any], all_tools: Dict[str, A
         "promotions_archived": promotions_archived,
         "newsletter_archived": newsletter_archived,
         "rules_applied": rules_applied,
+        "low_confidence_skipped": low_confidence_skipped,
     }
 
 
-def _start_mailbox_preferences_setup(session_key: str, *, base_preferences: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _start_mailbox_preferences_setup(
+    session_key: str,
+    *,
+    all_tools: Optional[Dict[str, Any]] = None,
+    base_preferences: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    setup_profile = _build_mailbox_setup_profile(all_tools or {}, base_preferences)
     state = {
         "kind": "guided_setup",
         "step": 0,
         "preferences": base_preferences or default_mailbox_preferences(),
+        "setup_profile": setup_profile,
     }
     _set_pending_mailbox_preferences(session_key, state)
     return {
@@ -961,7 +1270,7 @@ def _handle_pending_mailbox_preferences_reply(
     kind = str(pending.get("kind", "") or "")
     if kind == "entry":
         if selection == 1:
-            return _start_mailbox_preferences_setup(session_key)
+            return _start_mailbox_preferences_setup(session_key, all_tools=all_tools)
         if selection == 2:
             _clear_pending_mailbox_preferences(session_key)
             return {
@@ -972,7 +1281,9 @@ def _handle_pending_mailbox_preferences_reply(
             }
         if selection == 3:
             _clear_pending_mailbox_preferences(session_key)
+            previous = load_mailbox_preferences() if mailbox_preferences_exist() else default_mailbox_preferences()
             save_result = save_mailbox_preferences(default_mailbox_preferences())
+            record_mailbox_preference_learning(previous, save_result.get("preferences", {}), source="safe_defaults")
             message = (
                 f"Saved safe default mailbox preferences.\n"
                 f"{render_mailbox_preferences_summary(save_result.get('preferences', {}))}\n\n"
@@ -1020,7 +1331,9 @@ def _handle_pending_mailbox_preferences_reply(
         next_step = step + 1
         if next_step >= len(_MAILBOX_PREFERENCE_QUESTIONS):
             _clear_pending_mailbox_preferences(session_key)
+            previous = load_mailbox_preferences() if mailbox_preferences_exist() else default_mailbox_preferences()
             save_result = save_mailbox_preferences(preferences)
+            record_mailbox_preference_learning(previous, save_result.get("preferences", {}), source="guided_setup")
             message = (
                 f"Mailbox preferences saved.\n"
                 f"{render_mailbox_preferences_summary(save_result.get('preferences', {}))}\n\n"
@@ -1065,7 +1378,7 @@ def _handle_pending_mailbox_preferences_reply(
             }
         if selection == 3:
             _clear_pending_mailbox_preferences(session_key)
-            return _start_mailbox_preferences_setup(session_key, base_preferences=load_mailbox_preferences())
+            return _start_mailbox_preferences_setup(session_key, all_tools=all_tools, base_preferences=load_mailbox_preferences())
         if selection == 4:
             _clear_pending_mailbox_preferences(session_key)
             return {
@@ -2365,6 +2678,7 @@ def execute_with_llm_orchestration(
         return _return_fast_path_result(
             _start_mailbox_preferences_setup(
                 mailbox_session_key,
+                all_tools=all_tools,
                 base_preferences=load_mailbox_preferences(),
             )
         )
@@ -2377,22 +2691,40 @@ def execute_with_llm_orchestration(
         result.setdefault("action", "apply_mailbox_preferences")
         result.setdefault("_fast_path", "mailbox_preferences_apply")
         result["message"] = _append_mailbox_automation_sync_note(str(result.get("message", "") or ""), agent_id, prefs)
+        _sync_mailbox_followup_context(
+            mailbox_session_key,
+            followup_kind="apply",
+            preferences=prefs,
+            counts=plan.get("counts", {}) if isinstance(plan.get("counts"), dict) else {},
+            plan=plan,
+        )
         return _return_fast_path_result(result)
 
     if is_mailbox_review:
         _clear_pending_mailbox_preferences(mailbox_session_key)
-        return _return_fast_path_result(_build_mailbox_review_digest(all_tools))
+        result = _build_mailbox_review_digest(all_tools)
+        prefs = load_mailbox_preferences()
+        plan = _build_mailbox_plan(prefs, all_tools)
+        _sync_mailbox_followup_context(
+            mailbox_session_key,
+            followup_kind="review",
+            preferences=prefs,
+            counts=plan.get("counts", {}) if isinstance(plan.get("counts"), dict) else {},
+            plan=plan,
+        )
+        return _return_fast_path_result(result)
 
     if is_mailbox_organization:
         _clear_pending_mailbox_preferences(mailbox_session_key)
         if not mailbox_preferences_exist():
-            _set_pending_mailbox_preferences(mailbox_session_key, {"kind": "entry"})
+            setup_profile = _build_mailbox_setup_profile(all_tools)
+            _set_pending_mailbox_preferences(mailbox_session_key, {"kind": "entry", "setup_profile": setup_profile})
             return _return_fast_path_result(
                 {
                     "status": "success",
                     "action": "mailbox_preferences_entry",
                     "_fast_path": "mailbox_preferences_entry",
-                    "message": _build_mailbox_setup_entry_message(),
+                    "message": _build_mailbox_setup_entry_message(setup_profile),
                 }
             )
 

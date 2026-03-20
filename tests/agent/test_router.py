@@ -259,6 +259,29 @@ def test_classify_and_route_filename_search_uses_files_only() -> None:
     assert result.agents == ["files"]
 
 
+def test_classify_message_treats_apply_cleanup_now_as_mailbox_followup_with_email_context() -> None:
+    from src.agent.workflows.router import _classify_message
+    from src.agent.workflows.agent_registry import registered_agents
+
+    result = _classify_message(
+        "apply cleanup now",
+        active_context={
+            "agent": "email",
+            "topic": "mailbox_review",
+            "resolved_entities": {
+                "followup_kind": "review",
+                "mailbox_preferences": {"promotions_action": "archive"},
+            },
+            "awaiting": "email_action",
+        },
+        session_state=None,
+        valid=set(registered_agents()),
+    )
+
+    assert result.category == "context_followup"
+    assert result.source == "mailbox_followup"
+
+
 def test_classify_and_route_todays_email_query_uses_email_only() -> None:
     from src.agent.workflows.router import classify_and_route
 
@@ -372,6 +395,53 @@ def test_classify_message_marks_numeric_pending_selection_as_context_followup() 
     assert result.source == "pending_selection"
 
 
+def test_classify_message_marks_scheduler_preference_followup_as_context_followup() -> None:
+    from src.agent.workflows.router import _classify_message
+    from src.agent.workflows.agent_registry import registered_agents
+
+    result = _classify_message(
+        "want to add new ones",
+        active_context={
+            "agent": "scheduler",
+            "topic": "scheduler_preferences",
+            "awaiting": "scheduler_action",
+            "resolved_entities": {
+                "session_key": "telegram_1",
+                "followup_kind": "show",
+                "scheduler_preferences": {"focus_block_minutes": 90},
+            },
+        },
+        session_state=None,
+        valid=set(registered_agents()),
+    )
+
+    assert result.category == "context_followup"
+    assert result.source == "skill_preference_followup"
+
+
+def test_classify_message_does_not_hijack_calendar_setup_into_scheduler_followup() -> None:
+    from src.agent.workflows.router import _classify_message
+    from src.agent.workflows.agent_registry import registered_agents
+
+    result = _classify_message(
+        "setup my calendar prefrences",
+        active_context={
+            "agent": "scheduler",
+            "topic": "scheduler_preferences",
+            "awaiting": "scheduler_action",
+            "resolved_entities": {
+                "session_key": "telegram_1",
+                "followup_kind": "show",
+                "scheduler_preferences": {"focus_block_minutes": 90},
+            },
+        },
+        session_state=None,
+        valid=set(registered_agents()),
+    )
+
+    assert result.source != "skill_preference_followup"
+
+
 def test_classify_and_route_mailbox_preference_edit_uses_email_only() -> None:
     from src.agent.workflows.router import classify_and_route
 
@@ -379,6 +449,26 @@ def test_classify_and_route_mailbox_preference_edit_uses_email_only() -> None:
 
     assert result.category == "fresh_task"
     assert result.agents == ["email"]
+
+
+def test_classify_and_route_typoed_scheduler_preferences_uses_scheduler_only() -> None:
+    from src.agent.workflows.router import classify_and_route
+
+    result = classify_and_route("Setup my schedular prefrences")
+
+    assert result.category == "fresh_task"
+    assert result.agents == ["scheduler"]
+
+
+def test_classify_and_route_gym_time_preference_uses_scheduler_only() -> None:
+    from src.agent.workflows.router import classify_and_route
+
+    result = classify_and_route(
+        "Add a new preference - no meetings between 7:45 PM and 9:15 PM because that is my gym time"
+    )
+
+    assert result.category == "fresh_task"
+    assert result.agents == ["scheduler"]
 
 
 def test_classify_and_route_organize_mailbox_uses_email_only() -> None:

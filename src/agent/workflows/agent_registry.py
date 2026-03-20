@@ -134,7 +134,7 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
             "optimisation, or scheduling for multiple people."
         ),
         "trigger_keywords": [
-            "schedule", "scheduling", "slot", "slots", "availability",
+            "scheduler", "schedular", "schedule", "scheduling", "slot", "slots", "availability",
             "focus block", "deep work", "block time", "free time",
             "when can", "best time", "meeting time", "timeslot",
         ],

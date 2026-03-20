@@ -7,9 +7,20 @@ import json
 import re
 from typing import Any, Dict, Optional
 
+from src.agent.runtime_paths import get_runtime_state_path
 from src.agent.telemetry import log_fallback_to_react, log_fast_path_hit
+from src.agent.workflows.execution_plan import attach_execution_plan, build_execution_plan, build_execution_step
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
+from src.calendar.calendar_preferences import (
+    default_calendar_preferences,
+    get_calendar_preferences_path,
+    get_calendar_review_recommendations,
+    load_calendar_preferences,
+    render_calendar_preference_guidance,
+    render_calendar_preferences_summary,
+    save_calendar_preferences,
+)
 
 
 _SESSION_STATE_MARKER = "## Session State"
@@ -37,12 +48,334 @@ _OVERVIEW_NOISE_TOKENS = {
     "next", "last", "previous",
     *_MONTH_NAMES.keys(),
 }
+_PENDING_CALENDAR_PREFERENCES_PATH = get_runtime_state_path(
+    "runtime_state",
+    "calendar_preferences_pending.json",
+    create_parent=True,
+)
+_NUMERIC_REPLY_RE = re.compile(r"^\s*(?:option\s+)?\d{1,2}\s*[?.!]*\s*$", re.IGNORECASE)
+_CALENDAR_PREFERENCES_SHOW_RE = re.compile(
+    r"\b(show|view|list|open|read)\b.*\b(calendar)\b.*\b(preferences|settings|preference|prefrence|prefrences)\b"
+    r"|\b(calendar)\b.*\b(preferences|settings|preference|prefrence|prefrences)\b.*\b(show|view|list|open|read)\b",
+    re.IGNORECASE,
+)
+_CALENDAR_PREFERENCES_EDIT_RE = re.compile(
+    r"\b(edit|change|update|modify|reconfigure|set|setup|set\s*up|configure|customi[sz]e)\b.*\b(calendar)\b.*\b(preferences|settings|preference|prefrence|prefrences)\b"
+    r"|\b(calendar)\b.*\b(preferences|settings|preference|prefrence|prefrences)\b.*\b(edit|change|update|modify|reconfigure|set|setup|set\s*up|configure|customi[sz]e)\b",
+    re.IGNORECASE,
+)
+_CALENDAR_PREFERENCES_APPLY_RE = re.compile(
+    r"\b(apply|use|follow)\b.*\b(calendar)\b.*\b(preferences|settings)\b"
+    r"|\b(calendar)\b.*\b(preferences|settings)\b.*\b(apply|use|follow)\b",
+    re.IGNORECASE,
+)
+_CALENDAR_REVIEW_RE = re.compile(
+    r"\b(review|digest|recap)\b.*\b(calendar)\b"
+    r"|\b(calendar)\b.*\b(review|digest|recap)\b",
+    re.IGNORECASE,
+)
+_CALENDAR_PREFERENCE_FOLLOWUP_RE = re.compile(
+    r"\b(edit|change|update|modify|setup|set\s*up|configure|customi[sz]e|adjust|restart)\b"
+    r"|\b(add\s+new\s+ones?|want\s+to\s+add\s+new\s+ones?)\b"
+    r"|\b(change\s+them|update\s+them|edit\s+them|use\s+different\s+ones?)\b",
+    re.IGNORECASE,
+)
+_CALENDAR_PREFERENCE_QUESTIONS = [
+    {
+        "key": "working_hours_start",
+        "title": "Working-hours start",
+        "prompt": "Choose the default start hour to use when looking for calendar slots.",
+        "options": [(8, "08:00"), (9, "09:00"), (10, "10:00")],
+    },
+    {
+        "key": "working_hours_end",
+        "title": "Working-hours end",
+        "prompt": "Choose the default end hour to use when looking for calendar slots.",
+        "options": [(17, "17:00"), (18, "18:00"), (19, "19:00")],
+    },
+    {
+        "key": "default_meeting_minutes",
+        "title": "Default meeting duration",
+        "prompt": "Choose the default meeting duration when you create a meeting without specifying one.",
+        "options": [(30, "30 minutes"), (45, "45 minutes"), (60, "60 minutes")],
+    },
+    {
+        "key": "default_reminder_minutes",
+        "title": "Default reminder",
+        "prompt": "Choose the default reminder lead time when you add a reminder without specifying minutes.",
+        "options": [(10, "10 minutes before"), (15, "15 minutes before"), (30, "30 minutes before")],
+    },
+]
 
 
 def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
     fast_path = str(result.get("_fast_path", "") or result.get("action", "unknown"))
     log_fast_path_hit("calendar", fast_path)
     return result
+
+
+def _extract_preference_query(user_query: str) -> str:
+    raw_query = str(user_query or "")
+    for marker in (_CONTEXT_MARKER, _DIARY_MARKER, _SESSION_STATE_MARKER):
+        if marker in raw_query:
+            raw_query = raw_query.split(marker, 1)[0]
+    return raw_query.strip()
+
+
+def _get_session_id(artifacts_out: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(artifacts_out, dict):
+        return ""
+    return str(artifacts_out.get("_session_id", "") or "").strip()
+
+
+def _calendar_preferences_session_key(artifacts_out: Optional[Dict[str, Any]]) -> str:
+    return _get_session_id(artifacts_out) or "__default__"
+
+
+def _load_pending_calendar_preferences() -> Dict[str, Dict[str, Any]]:
+    try:
+        if _PENDING_CALENDAR_PREFERENCES_PATH.exists():
+            payload = json.loads(_PENDING_CALENDAR_PREFERENCES_PATH.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception:
+        pass
+    return {}
+
+
+def _save_pending_calendar_preferences(state: Dict[str, Dict[str, Any]]) -> None:
+    _PENDING_CALENDAR_PREFERENCES_PATH.write_text(
+        json.dumps(state, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _sync_calendar_preferences_context(session_key: str, state: Optional[Dict[str, Any]]) -> None:
+    try:
+        from src.agent.manifest.context_manifest import clear_context, write_context  # noqa: PLC0415
+
+        if not state:
+            clear_context(agent="calendar")
+            return
+        resolved_entities = {
+            "session_key": session_key,
+            "preference_file": str(get_calendar_preferences_path()),
+            "state_kind": str(state.get("kind", "") or ""),
+            "step": int(state.get("step", 0) or 0),
+        }
+        if isinstance(state.get("preferences"), dict):
+            resolved_entities["calendar_preferences"] = state.get("preferences", {})
+        write_context(
+            agent="calendar",
+            topic="calendar_preferences",
+            resolved_entities=resolved_entities,
+            awaiting="calendar_action",
+            pending_selection={
+                "kind": "calendar_preferences",
+                "session_key": session_key,
+                "state_kind": str(state.get("kind", "") or ""),
+                "step": int(state.get("step", 0) or 0),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _sync_calendar_preferences_followup_context(session_key: str, preferences: Dict[str, Any], *, followup_kind: str) -> None:
+    try:
+        from src.agent.manifest.context_manifest import write_context  # noqa: PLC0415
+
+        write_context(
+            agent="calendar",
+            topic="calendar_preferences",
+            resolved_entities={
+                "session_key": session_key,
+                "followup_kind": followup_kind,
+                "preference_file": str(get_calendar_preferences_path()),
+                "calendar_preferences": preferences,
+            },
+            awaiting="calendar_action",
+        )
+    except Exception:
+        pass
+
+
+def _get_pending_calendar_preferences(session_key: str) -> Dict[str, Any]:
+    return _load_pending_calendar_preferences().get(session_key, {})
+
+
+def _set_pending_calendar_preferences(session_key: str, state: Dict[str, Any]) -> None:
+    all_state = _load_pending_calendar_preferences()
+    all_state[session_key] = state
+    _save_pending_calendar_preferences(all_state)
+    _sync_calendar_preferences_context(session_key, state)
+
+
+def _clear_pending_calendar_preferences(session_key: str) -> None:
+    all_state = _load_pending_calendar_preferences()
+    if session_key in all_state:
+        del all_state[session_key]
+        _save_pending_calendar_preferences(all_state)
+    _sync_calendar_preferences_context(session_key, None)
+
+
+def _build_calendar_skill_context() -> str:
+    return f"{_load_skill_context()}\n\n## Active Calendar Preferences\n{render_calendar_preference_guidance(load_calendar_preferences())}"
+
+
+def _build_calendar_preference_question_message(state: Dict[str, Any]) -> str:
+    step = int(state.get("step", 0) or 0)
+    preferences = state.get("preferences", {}) if isinstance(state.get("preferences"), dict) else {}
+    question = _CALENDAR_PREFERENCE_QUESTIONS[step]
+    if question["key"] == "working_hours_start":
+        current_value = preferences.get("working_hours", {}).get("start_hour") if isinstance(preferences.get("working_hours"), dict) else None
+    elif question["key"] == "working_hours_end":
+        current_value = preferences.get("working_hours", {}).get("end_hour") if isinstance(preferences.get("working_hours"), dict) else None
+    else:
+        current_value = preferences.get(question["key"])
+    lines = [
+        f"Calendar setup {step + 1}/{len(_CALENDAR_PREFERENCE_QUESTIONS)}: {question['title']}",
+        question["prompt"],
+    ]
+    for index, (value, label) in enumerate(question["options"], start=1):
+        marker = " (current)" if value == current_value else ""
+        lines.append(f"{index}. {label}{marker}")
+    return "\n".join(lines)
+
+
+def _start_calendar_preferences_setup(session_key: str, *, base_preferences: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    state = {
+        "kind": "guided_setup",
+        "step": 0,
+        "preferences": base_preferences or load_calendar_preferences() or default_calendar_preferences(),
+    }
+    _set_pending_calendar_preferences(session_key, state)
+    return {
+        "status": "success",
+        "action": "calendar_preferences_question",
+        "_fast_path": "calendar_preferences_question",
+        "message": _build_calendar_preference_question_message(state),
+    }
+
+
+def _handle_pending_calendar_preferences_reply(raw_query: str, session_key: str) -> Optional[Dict[str, Any]]:
+    pending = _get_pending_calendar_preferences(session_key)
+    if not pending:
+        return None
+    if not _NUMERIC_REPLY_RE.match(str(raw_query or "")):
+        return None
+    selection = int(re.findall(r"\d+", raw_query)[0])
+    step = int(pending.get("step", 0) or 0)
+    question = _CALENDAR_PREFERENCE_QUESTIONS[step]
+    options = question["options"]
+    if selection < 1 or selection > len(options):
+        return {
+            "status": "success",
+            "action": "calendar_preferences_question",
+            "_fast_path": "calendar_preferences_question",
+            "message": f"Please reply with a number between 1 and {len(options)}.\n\n{_build_calendar_preference_question_message(pending)}",
+        }
+    chosen_value = options[selection - 1][0]
+    preferences = dict(pending.get("preferences", {}) if isinstance(pending.get("preferences"), dict) else {})
+    working_hours = dict(preferences.get("working_hours", {}) if isinstance(preferences.get("working_hours"), dict) else {})
+    if question["key"] == "working_hours_start":
+        working_hours["start_hour"] = chosen_value
+        preferences["working_hours"] = working_hours
+    elif question["key"] == "working_hours_end":
+        working_hours["end_hour"] = chosen_value
+        preferences["working_hours"] = working_hours
+    else:
+        preferences[question["key"]] = chosen_value
+    next_step = step + 1
+    if next_step >= len(_CALENDAR_PREFERENCE_QUESTIONS):
+        _clear_pending_calendar_preferences(session_key)
+        save_result = save_calendar_preferences(preferences)
+        return {
+            "status": "success",
+            "action": "calendar_preferences_saved",
+            "_fast_path": "calendar_preferences_saved",
+            "message": f"Calendar preferences saved.\n{render_calendar_preferences_summary(save_result.get('preferences', {}))}",
+            "file_path": save_result.get("file_path", ""),
+        }
+    pending["preferences"] = preferences
+    pending["step"] = next_step
+    _set_pending_calendar_preferences(session_key, pending)
+    return {
+        "status": "success",
+        "action": "calendar_preferences_question",
+        "_fast_path": "calendar_preferences_question",
+        "message": _build_calendar_preference_question_message(pending),
+    }
+
+
+def _build_calendar_review_digest() -> Dict[str, Any]:
+    prefs = load_calendar_preferences()
+    recommendations = get_calendar_review_recommendations(prefs)
+    lines = [
+        "Calendar review digest:",
+        render_calendar_preferences_summary(prefs),
+        "",
+        "Recommendations:",
+    ]
+    if recommendations:
+        lines.extend(f"- {item}" for item in recommendations)
+    else:
+        lines.append("- Your current Calendar defaults look stable.")
+    return {
+        "status": "success",
+        "action": "calendar_review_digest",
+        "_fast_path": "calendar_review_digest",
+        "message": "\n".join(lines),
+    }
+
+
+def _looks_like_calendar_preference_followup_setup(raw_query: str) -> bool:
+    text = str(raw_query or "")
+    lowered = text.lower()
+    if not _CALENDAR_PREFERENCE_FOLLOWUP_RE.search(lowered):
+        return False
+    return "topic=calendar_preferences" in lowered or '"calendar_preferences"' in lowered or "calendar preferences" in lowered
+
+
+def _query_has_explicit_duration(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return bool(
+        re.search(r"\bfor\s+\d+\s*(minutes?|mins?|hours?|hrs?)\b", lowered)
+        or re.search(r"\bfrom\b.*\bto\b", lowered)
+        or re.search(r"\b\d{1,2}:\d{2}\b.*\b\d{1,2}:\d{2}\b", lowered)
+    )
+
+
+def _calendar_apply_creation_defaults(text: str, preferences: Dict[str, Any] | None, active_date: str = "") -> str:
+    prefs = load_calendar_preferences() if preferences is None else preferences
+    normalized = str(text or "").strip()
+    if active_date and not re.search(r"\b\d{4}-\d{2}-\d{2}\b", normalized) and not re.search(r"\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\b", normalized, re.IGNORECASE):
+        normalized = f"{normalized} on {active_date}"
+    if _query_has_explicit_duration(normalized):
+        return normalized
+    if not re.search(r"\b(meeting|call|appointment|sync|review|session|lunch|focus block|block)\b", normalized, re.IGNORECASE):
+        return normalized
+    return f"{normalized} for {int(prefs.get('default_meeting_minutes', 45) or 45)} minutes"
+
+
+def _build_calendar_execution_plan(
+    *,
+    goal: str,
+    description: str,
+    confidence: float,
+    why: list[str],
+    safe_to_apply: bool = True,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    step = build_execution_step(
+        step_id="calendar_fast_path",
+        description=description,
+        confidence=confidence,
+        why=why,
+        safe_to_apply=safe_to_apply,
+        metadata=metadata,
+    )
+    return build_execution_plan(goal=goal, steps=[step], requires_confirmation=not safe_to_apply)
 
 
 def _load_skill_context() -> str:
@@ -228,7 +561,7 @@ def _handle_ordinal_event_delete_query(user_query: str, tool_map: Dict[str, Any]
         message_lines.append("I could not delete these event(s):")
         message_lines.extend(f"- {item}" for item in failed)
 
-    return {
+    return attach_execution_plan({
         "status": "success" if deleted_titles and not failed else "error" if failed and not deleted_titles else "success",
         "message": "\n".join(message_lines) if message_lines else "No matching events were deleted.",
         "action": "react_response",
@@ -236,7 +569,17 @@ def _handle_ordinal_event_delete_query(user_query: str, tool_map: Dict[str, Any]
         "found_paths": [],
         "results": [{"position": position, "title": title} for position, title in deleted_titles],
         "_fast_path": "ordinal_event_delete",
-    }
+    }, _build_calendar_execution_plan(
+        goal="Delete the selected calendar events from the saved event list.",
+        description=f"Delete {len(deleted_titles)} event(s) by ordinal position from the saved calendar context.",
+        confidence=0.93 if deleted_titles else 0.62,
+        why=[
+            "The request referred to ordinal positions and the current calendar context already held a saved event list.",
+            "Each deletion used the explicit event id stored in that saved context.",
+        ],
+        safe_to_apply=False,
+        metadata={"deleted_count": len(deleted_titles), "failed_count": len(failed)},
+    ), include_summary=True, heading="Execution plan", include_step_reasons=True)
 
 
 def _get_reference_date(user_query: str):
@@ -364,14 +707,23 @@ def _handle_month_overview_query(user_query: str, tool_map: Dict[str, Any]) -> O
             message_lines.append("")
             message_lines.append(f"{count - display_limit} more event(s) are scheduled later in the month.")
 
-    return {
+    return attach_execution_plan({
         "status": "success",
         "message": "\n".join(message_lines),
         "action": "react_response",
         "_fast_path": "month_overview",
         "file_path": "",
         "found_paths": [],
-    }
+    }, _build_calendar_execution_plan(
+        goal="Summarize the calendar load for the requested month.",
+        description=f"Review the saved month overview for {month_label} and summarize {count} event(s).",
+        confidence=0.97,
+        why=[
+            "The request matched the deterministic month-overview fast path.",
+            "The month boundaries were resolved explicitly before reading calendar events.",
+        ],
+        metadata={"month_label": month_label, "event_count": count},
+    ), include_summary=True, heading="Execution plan", include_step_reasons=True)
 
 
 def _build_all_tools(user_query: str = "") -> Dict[str, Any]:
@@ -382,6 +734,7 @@ def _build_all_tools(user_query: str = "") -> Dict[str, Any]:
     from datetime import date as _date, datetime as _datetime, timedelta as _td
 
     session_vars = _extract_session_state(user_query)
+    calendar_preferences = load_calendar_preferences()
 
     def _remember_event(result: dict) -> dict:
         if not isinstance(result, dict) or result.get("status") != "success":
@@ -408,15 +761,7 @@ def _build_all_tools(user_query: str = "") -> Dict[str, Any]:
 
     def _augment_quick_add_text(text: str) -> str:
         active_date = session_vars.get("active_date", "")
-        if not active_date:
-            return text
-        if re.search(r"\b\d{4}-\d{2}-\d{2}\b", text):
-            return text
-        if re.search(r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b", text, re.IGNORECASE):
-            return text
-        if re.search(r"\b(?:today|tomorrow|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", text, re.IGNORECASE):
-            return text
-        return f"{text} on {active_date}"
+        return _calendar_apply_creation_defaults(text, calendar_preferences, active_date)
 
     def get_todays_events() -> dict:
         result = cs.get_todays_events()
@@ -449,11 +794,23 @@ def _build_all_tools(user_query: str = "") -> Dict[str, Any]:
         "search_events": lambda query, days=30, max_results=10: cs.search_events(query, days, max_results),
         "list_events": lambda start=None, end=None, max_results=20, calendar_id="primary": cs.list_events(start, end, max_results, calendar_id),
         "get_event": lambda event_id: cs.get_event(event_id),
+        "find_free_slots": lambda date_str, duration_minutes=None, working_start_hour=None, working_end_hour=None, calendar_id="primary": cs.find_free_slots(
+            date_str,
+            int(duration_minutes or calendar_preferences["default_meeting_minutes"]),
+            int(working_start_hour or calendar_preferences["working_hours"]["start_hour"]),
+            int(working_end_hour or calendar_preferences["working_hours"]["end_hour"]),
+            calendar_id,
+        ),
         "create_event": lambda title, start, end, description="", location="", attendees=None, calendar_id="primary": _remember_event(cs.create_event(title, start, end, description, location, attendees, calendar_id)),
         "quick_add_event": lambda text: _remember_event(cs.quick_add_event(_augment_quick_add_text(text))),
         "update_event": lambda event_id, **kwargs: _remember_event(cs.update_event(event_id, **kwargs)),
         "delete_event": lambda event_id: cs.delete_event(event_id),
         "create_recurring_event": lambda title, start, end, recurrence, description="", location="", attendees=None: cs.create_recurring_event(title, start, end, recurrence, description, location, attendees),
+        "set_reminder": lambda event_id, minutes_before=None, calendar_id="primary": cs.set_reminder(
+            event_id,
+            int(minutes_before or calendar_preferences["default_reminder_minutes"]),
+            calendar_id,
+        ),
         "list_calendars": lambda: cs.list_calendars(),
         "save_context": make_save_context_tool("calendar"),
     }
@@ -502,6 +859,54 @@ def execute_with_llm_orchestration(
     agent_id: Optional[str] = None,
     artifacts_out: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    _ = agent_id
+    fast_path_query = _extract_preference_query(user_query)
+    normalized_query = fast_path_query.lower()
+    session_key = _calendar_preferences_session_key(artifacts_out)
+
+    pending_result = _handle_pending_calendar_preferences_reply(fast_path_query, session_key)
+    if pending_result is not None:
+        return _return_fast_path_result(pending_result)
+
+    if _looks_like_calendar_preference_followup_setup(user_query):
+        return _return_fast_path_result(_start_calendar_preferences_setup(session_key, base_preferences=load_calendar_preferences()))
+
+    if _CALENDAR_PREFERENCES_SHOW_RE.search(normalized_query):
+        prefs = load_calendar_preferences()
+        _sync_calendar_preferences_followup_context(session_key, prefs, followup_kind="show")
+        return _return_fast_path_result(
+            {
+                "status": "success",
+                "action": "show_calendar_preferences",
+                "_fast_path": "calendar_preferences_show",
+                "file_path": str(get_calendar_preferences_path()),
+                "message": f"{render_calendar_preferences_summary(prefs)}\n\nPreference file: {get_calendar_preferences_path()}",
+            }
+        )
+
+    if _CALENDAR_PREFERENCES_EDIT_RE.search(normalized_query):
+        return _return_fast_path_result(_start_calendar_preferences_setup(session_key, base_preferences=load_calendar_preferences()))
+
+    if _CALENDAR_PREFERENCES_APPLY_RE.search(normalized_query):
+        prefs = load_calendar_preferences()
+        _sync_calendar_preferences_followup_context(session_key, prefs, followup_kind="apply")
+        return _return_fast_path_result(
+            {
+                "status": "success",
+                "action": "apply_calendar_preferences",
+                "_fast_path": "calendar_preferences_apply",
+                "message": (
+                    "Calendar preferences are active and will be used as defaults for slot finding, meeting duration, and reminders when you do not override them in the current request.\n\n"
+                    f"{render_calendar_preferences_summary(prefs)}"
+                ),
+            }
+        )
+
+    if _CALENDAR_REVIEW_RE.search(normalized_query):
+        prefs = load_calendar_preferences()
+        _sync_calendar_preferences_followup_context(session_key, prefs, followup_kind="review")
+        return _return_fast_path_result(_build_calendar_review_digest())
+
     all_tools = _build_all_tools(user_query)
     ordinal_delete_result = _handle_ordinal_event_delete_query(user_query, all_tools)
     if ordinal_delete_result is not None:
@@ -509,7 +914,7 @@ def execute_with_llm_orchestration(
     fast_path_result = _handle_month_overview_query(user_query, all_tools)
     if fast_path_result is not None:
         return _return_fast_path_result(fast_path_result)
-    skill_context = _load_skill_context()
+    skill_context = _build_calendar_skill_context()
     dag_tool_docs = _get_tool_docs_for_dag()
     react_tool_docs = _get_tool_docs_for_react(user_query)
     try:

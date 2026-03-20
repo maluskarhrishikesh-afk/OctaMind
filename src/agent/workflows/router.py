@@ -566,6 +566,24 @@ _MAILBOX_PREFERENCE_EDIT_RE = re.compile(
     r"|\b(review|digest|recap)\b.*\b(mailbox|inbox|email)\b",
     re.IGNORECASE,
 )
+_SCHEDULER_PREFERENCE_EDIT_RE = re.compile(
+    r"\b(show|view|edit|change|update|modify|set|setup|set\s*up|configure|review|apply|add)\b.*\b(scheduler|schedular|schedule)\b.*\b(preferences|settings|preference|prefrence|prefrences|defaults?)\b"
+    r"|\b(scheduler|schedular|schedule)\b.*\b(preferences|settings|preference|prefrence|prefrences|defaults?)\b.*\b(show|view|edit|change|update|modify|set|setup|set\s*up|configure|review|apply|add)\b"
+    r"|\b(preferences|settings|preference|prefrence|prefrences|defaults?)\b.*\b(no\s+meetings?|avoid\s+meetings?|gym\s+time|protected\s+time|meeting\s+buffer|focus\s+block)\b"
+    r"|\b(no\s+meetings?|avoid\s+meetings?|gym\s+time|protected\s+time)\b.*\b(preferences|settings|preference|prefrence|prefrences|defaults?)\b",
+    re.IGNORECASE,
+)
+_MAILBOX_FOLLOWUP_ACTION_RE = re.compile(
+    r"\b(apply|run|do|start|continue|go\s+ahead\s+with)\b.*\b(clean\s*up|cleanup|preferences|settings|rules?)\b"
+    r"|\b(clean\s*up|cleanup)\b.*\b(now|please|again)\b",
+    re.IGNORECASE,
+)
+_SKILL_PREFERENCE_FOLLOWUP_RE = re.compile(
+    r"\b(edit|change|update|modify|setup|set\s*up|configure|customi[sz]e|adjust|restart)\b"
+    r"|\b(add\s+new\s+ones?|want\s+to\s+add\s+new\s+ones?)\b"
+    r"|\b(use\s+different\s+ones?|change\s+them|update\s+them|edit\s+them)\b",
+    re.IGNORECASE,
+)
 _FILENAME_SEARCH_RE = re.compile(
     r"\b(filename|file\s*name)\b.*\bcontain(?:s|ing)?\b"
     r"|\bcontain(?:s|ing)?\b.*\b(filename|file\s*name)\b",
@@ -589,6 +607,77 @@ def _looks_like_mailbox_query(command: str) -> bool:
     if re.search(r"\b(list|show|find|search|count|what|which|latest|recent|unread|received)\b", lower):
         return True
     return False
+
+
+def _looks_like_scheduler_preference_query(command: str) -> bool:
+    lower = str(command or "").lower().strip()
+    if not lower:
+        return False
+    if re.search(r"\b(calendar|event|events|appointment|reminder|mailbox|inbox|email|gmail|file|files|folder|folders|drive|linkedin|telegram|whatsapp)\b", lower):
+        return False
+    return bool(_SCHEDULER_PREFERENCE_EDIT_RE.search(lower))
+
+
+def _looks_like_mailbox_followup(command: str, active_context: Optional[dict]) -> bool:
+    if not active_context:
+        return False
+
+    lower = str(command or "").lower().strip()
+    if not lower:
+        return False
+
+    if _looks_like_mailbox_query(command):
+        return True
+
+    if re.search(r"\b(file|files|folder|folders|drive|calendar|meeting|event|events|scheduler|linkedin|telegram|whatsapp)\b", lower):
+        return False
+
+    ctx_agent = str(active_context.get("agent", "") or "").strip().lower()
+    ctx_topic = str(active_context.get("topic", "") or "").strip().lower()
+    resolved = active_context.get("resolved_entities", {}) if isinstance(active_context.get("resolved_entities"), dict) else {}
+    followup_kind = str(resolved.get("followup_kind", "") or "").strip().lower()
+
+    if ctx_agent != "email":
+        return False
+    if not (
+        ctx_topic.startswith("mailbox_")
+        or followup_kind in {"review", "apply", "plan", "preferences"}
+        or isinstance(resolved.get("mailbox_preferences"), dict)
+        or isinstance(resolved.get("mailbox_plan"), dict)
+    ):
+        return False
+
+    return bool(_MAILBOX_FOLLOWUP_ACTION_RE.search(lower))
+
+
+def _looks_like_skill_preference_followup(command: str, active_context: Optional[dict]) -> bool:
+    if not active_context:
+        return False
+
+    lower = str(command or "").lower().strip()
+    if not lower or not _SKILL_PREFERENCE_FOLLOWUP_RE.search(lower):
+        return False
+
+    ctx_agent = str(active_context.get("agent", "") or "").strip().lower()
+    if ctx_agent == "scheduler" and re.search(r"\bcalendar\b", lower):
+        return False
+    if ctx_agent == "calendar" and re.search(r"\b(scheduler|schedule)\b", lower):
+        return False
+
+    if re.search(r"\b(file|files|folder|folders|drive|mailbox|inbox|email|gmail|linkedin|telegram|whatsapp)\b", lower):
+        return False
+
+    if ctx_agent not in {"calendar", "scheduler"}:
+        return False
+
+    ctx_topic = str(active_context.get("topic", "") or "").strip().lower()
+    resolved = active_context.get("resolved_entities", {}) if isinstance(active_context.get("resolved_entities"), dict) else {}
+    return (
+        ctx_topic in {"calendar_preferences", "scheduler_preferences"}
+        or isinstance(resolved.get("calendar_preferences"), dict)
+        or isinstance(resolved.get("scheduler_preferences"), dict)
+        or str(resolved.get("followup_kind", "") or "").strip().lower() in {"show", "review", "apply", "preferences"}
+    )
 
 
 def _looks_like_filename_search(command: str) -> bool:
@@ -648,6 +737,13 @@ def _route_high_confidence_single_agent(command: str, valid: set[str]) -> Option
             category="fresh_task",
             agents=["files"],
             reason="high-confidence: filename-based local file search",
+        )
+
+    if "scheduler" in valid and _looks_like_scheduler_preference_query(command):
+        return IntentResult(
+            category="fresh_task",
+            agents=["scheduler"],
+            reason="high-confidence: scheduler preference query",
         )
 
     if "email" in valid and _looks_like_mailbox_query(command):
@@ -882,6 +978,20 @@ def _classify_message(
             reason="freshness-priority: public-web query",
             preset_agents=["browser"],
             source="freshness_priority",
+        )
+
+    if active_context and _looks_like_mailbox_followup(command, active_context):
+        return ClassificationStageResult(
+            category="context_followup",
+            reason="heuristic: mailbox follow-up with active email context",
+            source="mailbox_followup",
+        )
+
+    if active_context and _looks_like_skill_preference_followup(command, active_context):
+        return ClassificationStageResult(
+            category="context_followup",
+            reason="heuristic: skill preference follow-up with active calendar/scheduler context",
+            source="skill_preference_followup",
         )
 
     if active_context and _looks_like_pronoun_followup(command):

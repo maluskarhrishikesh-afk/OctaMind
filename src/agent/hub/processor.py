@@ -96,6 +96,13 @@ _GOOGLE_AUTH_ERROR_RE = re.compile(
     r"|credentials\.json\s+not\s+found",
     re.IGNORECASE,
 )
+_AMBIGUOUS_CLEANUP_FOLLOWUP_RE = re.compile(
+    r"^\s*(?:please\s+)?(?:apply|run|do|start|continue|go\s+ahead\s+with)?\s*(?:the\s+)?cleanup(?:\s+now|\s+please|\s+again)?\s*[.!?]*\s*$"
+    r"|^\s*(?:please\s+)?apply\s+cleanup\s+now\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+_EXPLICIT_MAILBOX_WORDS_RE = re.compile(r"\b(mailbox|inbox|email|gmail)\b", re.IGNORECASE)
+_EXPLICIT_FILE_CLEANUP_WORDS_RE = re.compile(r"\b(file|files|folder|folders|directory|disk|drive)\b", re.IGNORECASE)
 
 
 def _get_pa_skills(agent_id: str) -> Optional[set[str]]:
@@ -120,6 +127,25 @@ def _format_missing_skills_reply(agent_name: str, missing_skills: List[str], sou
     from src.agent.hub.skill_help import format_missing_skills_reply as _shared_format_missing_skills_reply
 
     return _shared_format_missing_skills_reply(agent_name, missing_skills, source)
+
+
+def _should_clarify_ambiguous_cleanup_followup(
+    message: str,
+    active_context: Optional[Dict[str, Any]],
+    agents_needed: Optional[List[str]],
+) -> bool:
+    lowered = str(message or "").strip().lower()
+    if not lowered or not _AMBIGUOUS_CLEANUP_FOLLOWUP_RE.match(lowered):
+        return False
+    if _EXPLICIT_MAILBOX_WORDS_RE.search(lowered) or _EXPLICIT_FILE_CLEANUP_WORDS_RE.search(lowered):
+        return False
+
+    context_agent = str((active_context or {}).get("agent", "") or "").strip().lower()
+    if context_agent in {"files", "file_organizer"}:
+        return True
+
+    normalized_agents = [str(agent or "").strip().lower() for agent in (agents_needed or [])]
+    return any(agent in {"files", "file_organizer"} for agent in normalized_agents) and "email" not in normalized_agents
 
 
 def _is_fresh_files_query(message: str, agents: Optional[List[str]] = None) -> bool:
@@ -948,7 +974,7 @@ class HubProcessor:
         #   FRESH_TASK        → "Are there any payslip files on my computer?"
         try:
             from src.agent.manifest.context_manifest import read_context as _read_ctx
-            _active_ctx = _read_ctx()
+            _active_ctx = _read_ctx(session_id=req.session_id)
         except Exception:
             _active_ctx = None
         try:
@@ -990,6 +1016,23 @@ class HubProcessor:
                 log_context_followup_resolved(req.source, agents_needed)
             except Exception:
                 pass
+
+        if _should_clarify_ambiguous_cleanup_followup(req.message, _active_ctx, agents_needed):
+            logger.info("│  [INTENT-CLARIFY] ambiguous cleanup follow-up with stale file context → clarification")
+            return (
+                "I need to clarify what you want to clean up before I continue.\n\n"
+                "Do you mean:\n"
+                "- mailbox cleanup in Email\n"
+                "- file or folder cleanup from the earlier Files/File Organizer result\n\n"
+                "Say one of these explicitly:\n"
+                "- 'apply mailbox cleanup now'\n"
+                "- 'apply file cleanup for that folder'",
+                [],
+                "success",
+                [],
+                [],
+                {},
+            )
 
         # ── Pronoun clarification guard ────────────────────────────────────
         # When classify_and_route returns a non-chat intent but can resolve no

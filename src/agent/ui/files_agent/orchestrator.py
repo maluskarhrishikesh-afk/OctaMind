@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from src.agent.runtime_paths import get_your_data_dir
 from src.agent.telemetry import log_fallback_to_react, log_fast_path_hit
+from src.agent.workflows.execution_plan import attach_execution_plan, build_execution_plan, build_execution_step
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 
@@ -142,6 +143,26 @@ def _return_fast_path_result(result: Dict[str, Any]) -> Dict[str, Any]:
     fast_path = str(result.get("_fast_path", "") or result.get("action", "unknown"))
     log_fast_path_hit("files", fast_path)
     return result
+
+
+def _build_files_direct_execution_plan(
+    *,
+    goal: str,
+    description: str,
+    confidence: float,
+    why: List[str],
+    safe_to_apply: bool = True,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    step = build_execution_step(
+        step_id="files_direct_action",
+        description=description,
+        confidence=confidence,
+        why=why,
+        safe_to_apply=safe_to_apply,
+        metadata=metadata,
+    )
+    return build_execution_plan(goal=goal, steps=[step], requires_confirmation=not safe_to_apply)
 
 
 def _infer_extension_filter(user_query: str) -> Optional[List[str]]:
@@ -3011,11 +3032,20 @@ def _try_direct_copy_from_manifest(
                     _save_single_file_context(copied_path, _raw)
                 except _FILES_ORCHESTRATOR_ERRORS:
                     pass
-                return {
+                return attach_execution_plan({
                     "status": "success",
                     "message": f"✅ Copied **{source_path.name}** to:\n`{copied_path}`",
                     "action": "react_response",
-                }
+                }, _build_files_direct_execution_plan(
+                    goal="Copy the selected local file or folder to the requested destination.",
+                    description=f"Copy '{source_path.name}' to the requested destination.",
+                    confidence=0.96,
+                    why=[
+                        "The source path was resolved from the current files context or an explicit path in the request.",
+                        "The destination path was explicitly provided or derived as an adjacent copy request.",
+                    ],
+                    metadata={"source_path": str(source_path), "destination_path": copied_path},
+                ), include_summary=True, heading="Execution plan", include_step_reasons=True)
             return {
                 "status": result.get("status", "error"),
                 "message": f"❌ Copy failed: {result.get('message', 'unknown error')}",
@@ -3034,14 +3064,23 @@ def _try_direct_copy_from_manifest(
         skipped = result.get("skipped", [])
         skipped_note = f"  ({len(skipped)} file(s) skipped — not found on disk)" if skipped else ""
 
-        return {
+        return attach_execution_plan({
             "status": result.get("status", "error"),
             "message": (
                 f"✅ Copied **{count}** file(s) from the previous search into:\n"
                 f"`{dest}`{skipped_note}"
             ) if result.get("status") == "success" else f"❌ Copy failed: {result.get('message', 'unknown error')}",
             "action": "react_response",
-        }
+        }, _build_files_direct_execution_plan(
+            goal="Copy the selected search results into the requested destination folder.",
+            description=f"Copy {count} selected file(s) into '{dest}'.",
+            confidence=0.93,
+            why=[
+                "The current files context already contains the selected paths from the previous search.",
+                "The request explicitly asked to copy those selected files into a destination folder.",
+            ],
+            metadata={"destination_path": dest, "copied_count": count},
+        ), include_summary=True, heading="Execution plan", include_step_reasons=True)
 
     if not _DEFAULT_MANIFEST.exists():
         import logging as _lg
@@ -3093,11 +3132,20 @@ def _try_direct_copy_from_manifest(
     else:
         message = f"❌ Copy failed: {result.get('message', 'unknown error')}"
 
-    return {
+    return attach_execution_plan({
         "status":  result.get("status", "error"),
         "message": message,
         "action":  "react_response",
-    }
+    }, _build_files_direct_execution_plan(
+        goal="Copy the previous search results into the requested destination.",
+        description=f"Copy files from the active manifest into '{dest}'.",
+        confidence=0.9,
+        why=[
+            "The active file manifest was used to replay the previous search results without another search.",
+            "The destination path was extracted from the follow-up request.",
+        ],
+        metadata={"destination_path": dest, "copied_count": count},
+    ), include_summary=True, heading="Execution plan", include_step_reasons=True)
 
 
 def _try_direct_move_from_context(
@@ -3141,12 +3189,21 @@ def _try_direct_move_from_context(
         except _FILES_ORCHESTRATOR_ERRORS:
             pass
 
-    return {
+    return attach_execution_plan({
         "status": "success",
         "message": result.get("message", f"Moved to {moved_path}"),
         "action": "react_response",
         "file_path": moved_path,
-    }
+    }, _build_files_direct_execution_plan(
+        goal="Move the selected local file or folder to the requested destination.",
+        description=f"Move '{source_path.name}' to '{moved_path or destination}'.",
+        confidence=0.95,
+        why=[
+            "The source was grounded in the active files context.",
+            "The destination path was explicitly present in the follow-up request.",
+        ],
+        metadata={"source_path": str(source_path), "destination_path": moved_path or destination},
+    ), include_summary=True, heading="Execution plan", include_step_reasons=True)
 
 
 def _try_direct_delete_from_context(
@@ -3180,11 +3237,21 @@ def _try_direct_delete_from_context(
     if artifacts_out is not None:
         artifacts_out["file_path"] = str(target_path)
 
-    return {
+    return attach_execution_plan({
         "status": "success",
         "message": result.get("message", f"Moved to Recycle Bin: {target_path}"),
         "action": "react_response",
-    }
+    }, _build_files_direct_execution_plan(
+        goal="Delete the selected local file or folder using the safest available path.",
+        description=f"Move '{target_path.name}' to the Recycle Bin.",
+        confidence=0.94,
+        why=[
+            "The target was resolved from the current files context.",
+            "The delete path uses Recycle Bin deletion rather than permanent removal.",
+        ],
+        safe_to_apply=False,
+        metadata={"target_path": str(target_path)},
+    ), include_summary=True, heading="Execution plan", include_step_reasons=True)
 
 # ---------------------------------------------------------------------------
 # Background job dispatch — heavy full-disk scans

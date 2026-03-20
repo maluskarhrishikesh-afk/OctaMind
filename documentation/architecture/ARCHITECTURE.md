@@ -1,6 +1,6 @@
 # OctaMind — Architecture
 
-Last updated: 2026-03-15
+Last updated: 2026-03-20
 
 > **See also:** [DAG_WALKTHROUGH.md](DAG_WALKTHROUGH.md) for a complete step-by-step trace of the DAG algorithm through two worked examples (simple single-skill and complex multi-agent).
 > **See also:** [SECURITY_ARCHITECTURE.md](SECURITY_ARCHITECTURE.md) for the shared security control plane, enterprise roadmap, and research-oriented evaluation plan.
@@ -72,6 +72,14 @@ Each agent has its own orchestrator that:
 2. Calls `run_skill_dag()` (DAG planner) or `run_skill_react()` (ReAct loop) with tool docs loaded from `skills.md`
 3. Returns `{"action": "react_response", "message": "<final_answer>"}` — a complete, LLM-formatted response
 
+Deterministic fast paths can also return a structured execution plan alongside the natural-language response. This is now the standard explainability contract for fast-path or planner-backed actions that want to expose:
+- goal
+- confidence score and label
+- risk posture
+- ordered steps with short reasons
+
+The shared implementation lives in `src/agent/workflows/execution_plan.py` and is currently used by Email mailbox planning plus Files, Calendar, and Drive orchestration responses.
+
 ### `src/agent/ui/*/app.py` � Response Composition
 
 After a tool result comes back, `_compose_*_response()` sends the raw JSON directly to the LLM with a formatting prompt. The LLM writes the final response (tables, bullets, emojis, bold). No hardcoded formatters.
@@ -91,6 +99,54 @@ Multi-agent commands use a **two-level ReAct architecture**:
 **Shared skill engine:** `src/agent/workflows/skill_react_engine.py` — `run_skill_react()` is the shared ReAct loop used by every skill orchestrator and serves as the **fallback path**.
 
 **Sub-agent DAG engine (new):** `src/agent/workflows/skill_dag_engine.py` — `run_skill_dag()` is the **primary path** for Email, Files and Drive agents. Instead of iterating 1-call-per-step, it uses exactly **2 LLM calls** per task regardless of complexity: one to plan a list of tool steps (JSON), then tools execute deterministically, then one synthesis call produces the friendly final answer. Falls back to `run_skill_react()` automatically if planning fails or returns an unknown tool.
+
+### Shared Execution Plans and Explainability
+
+OctaMind now has a cross-skill explainability layer for action-oriented responses.
+
+- `src/agent/workflows/execution_plan.py` provides the shared helpers to build and attach execution metadata.
+- The contract is intentionally small: `goal`, `confidence`, `confidence_label`, `risk_level`, `requires_confirmation`, and `steps`.
+- `attach_execution_plan(...)` can also append a short human-readable summary into the returned message so the user sees the plan without opening raw JSON.
+
+Current usage:
+
+- Email mailbox organization uses a structured plan with confidence gating, step-level reasons, and safe apply thresholds.
+- Files direct copy, move, and delete follow-ups attach a plan describing the scoped context resolution and the pending file operation.
+- Calendar fast paths for ordinal deletion and month overviews attach a plan to show what event/window was resolved.
+- Drive orchestration wraps DAG and ReAct results with a plan that exposes which engine handled the request and whether the operation looks higher risk.
+
+This gives OctaMind one reusable UX pattern for “what I am about to do” and “how certain I am” across skills instead of bespoke per-agent wording.
+
+### Mailbox Learning and Adaptive Setup
+
+Mailbox cleanup now has a lightweight learning loop rather than a purely static rule set.
+
+- `src/email/features/mailbox_learning.py` stores mailbox preference changes and reversal-like edits under runtime data.
+- The email orchestrator merges these learning signals with current mailbox-state signals when building review recommendations.
+- Guided mailbox setup can adapt its recommended answers and advisory text based on the mailbox profile, for example newsletter-heavy versus work-heavy inbox patterns.
+
+The goal is not autonomous policy drift. The learning layer only informs recommendations and review signals so the user still stays in control of mailbox preference changes.
+
+### Cross-Turn Mailbox Follow-Up Safety
+
+Mailbox review and apply flows now establish an explicit email follow-up context so short commands like `apply cleanup now` can resolve back to the mailbox flow instead of accidentally binding to older file-management context.
+
+- Email review/apply fast paths now write mailbox-specific follow-up context.
+- The router treats short cleanup imperatives as email context follow-ups when that mailbox context is active.
+- The hub adds a clarification guard for ambiguous cleanup phrases when only stale Files or File Organizer context is available.
+
+This is a deliberate safety rule: underspecified cleanup requests should never silently turn into destructive file actions.
+
+### Skill Preferences Architecture
+
+Persistent markdown-backed preferences are currently implemented only for mailbox behavior in Email.
+
+- Email has a durable markdown preference file plus review history and learning state.
+- Files, Drive, Calendar, and Scheduler currently expose explainability through execution plans, but they do not yet have persistent user-policy markdown files.
+
+That asymmetry is intentional for now. A skill should only gain persistent preferences when it has stable, user-owned policy decisions that matter across sessions, for example cleanup posture, default review cadence, or automation mode.
+
+See [documentation/architecture/SKILL_PREFERENCES_ROADMAP.md](documentation/architecture/SKILL_PREFERENCES_ROADMAP.md) for the recommended rollout model.
 
 Single-agent commands routed through the Personal Assistant bypass the multi-agent planner and call the individual skill's ReAct orchestrator directly.
 

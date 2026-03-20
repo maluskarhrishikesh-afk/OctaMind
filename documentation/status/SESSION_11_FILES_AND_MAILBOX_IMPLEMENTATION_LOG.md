@@ -2,6 +2,8 @@
 
 Date: 2026-03-19
 
+Follow-up work for mailbox learning, adaptive setup, and shared execution-plan metadata is captured separately in [documentation/status/SESSION_12_EXECUTION_PLANS_AND_MAILBOX_LEARNING.md](documentation/status/SESSION_12_EXECUTION_PLANS_AND_MAILBOX_LEARNING.md).
+
 This document captures the major features implemented in the current workstream, the user-facing commands now supported, the main code changes, the regression coverage added, and the validation commands run during implementation.
 
 ## Scope

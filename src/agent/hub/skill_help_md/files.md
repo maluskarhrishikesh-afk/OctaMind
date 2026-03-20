@@ -26,3 +26,8 @@ The Files skill helps you work with files and folders on your computer.
 - Say the folder name if you want me to search in one place only.
 - Say whether you want to search, move, rename, zip, or send the file.
 - If you want the file back in chat, say "send it here" or "download here".
+
+**How to operate it safely**
+- Say `file`, `folder`, or the path explicitly when the request could be confused with another skill.
+- For cleanup or organization, prefer phrases like `clean up that folder` or `organize my Downloads folder`.
+- If you mean email cleanup instead, say `mailbox cleanup` explicitly.

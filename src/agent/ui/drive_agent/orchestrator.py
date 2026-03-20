@@ -4,14 +4,63 @@ Google Drive skill orchestrator.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from src.agent.telemetry import log_fallback_to_react
+from src.agent.workflows.execution_plan import attach_execution_plan, build_execution_plan, build_execution_step
 from src.agent.workflows.skill_react_engine import run_skill_react
 from src.agent.workflows.skill_dag_engine import run_skill_dag
 
 
 logger = logging.getLogger("drive.orchestrator")
+
+
+def _build_drive_execution_plan(user_query: str, engine: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    lowered = str(user_query or "").lower()
+    destructive = bool(re.search(r"\b(delete|trash|remove|revoke|cleanup)\b", lowered))
+    confidence = 0.86 if engine == "dag" else 0.78
+    if destructive:
+        confidence -= 0.08
+    if str(result.get("status", "") or "") != "success":
+        confidence = min(confidence, 0.45)
+
+    step = build_execution_step(
+        step_id="drive_execution",
+        description="Execute the requested Google Drive operation.",
+        confidence=confidence,
+        why=[
+            "The request was routed to the Drive skill based on Google Drive intent.",
+            (
+                "The request ran through the DAG planner before tool execution."
+                if engine == "dag"
+                else "The request ran through the ReAct fallback path because DAG planning was unavailable or skipped."
+            ),
+        ],
+        safe_to_apply=not destructive,
+        metadata={
+            "engine": engine,
+            "query": user_query,
+            "action": str(result.get("action", "") or "react_response"),
+        },
+    )
+    return build_execution_plan(
+        goal="Fulfill the requested Google Drive task safely and transparently.",
+        steps=[step],
+        requires_confirmation=destructive,
+    )
+
+
+def _attach_drive_execution_plan(user_query: str, engine: str, result: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(result, dict):
+        return result
+    return attach_execution_plan(
+        result,
+        _build_drive_execution_plan(user_query, engine, result),
+        include_summary=str(result.get("status", "") or "") == "success",
+        heading="Execution plan",
+        include_step_reasons=True,
+    )
 
 
 
@@ -145,7 +194,7 @@ def execute_with_llm_orchestration(
     dag_tool_docs = _get_tool_docs_for_dag()
     react_tool_docs = _get_tool_docs_for_react(user_query)
     try:
-        return run_skill_dag(
+        return _attach_drive_execution_plan(user_query, "dag", run_skill_dag(
             skill_name="drive",
             skill_context=skill_context,
             tool_map=all_tools,
@@ -154,19 +203,19 @@ def execute_with_llm_orchestration(
             artifacts_out=artifacts_out,
             react_tool_map=_get_tool_map_for_react(user_query, all_tools),
             react_tool_docs=react_tool_docs,
-        )
+        ))
     except Exception as dag_exc:
         logger.warning("DAG path raised %s — falling back to ReAct", dag_exc)
         log_fallback_to_react("drive", "drive_orchestrator_exception")
     try:
-        return run_skill_react(
+        return _attach_drive_execution_plan(user_query, "react", run_skill_react(
             skill_name="drive",
             skill_context=skill_context,
             tool_map=_get_tool_map_for_react(user_query, all_tools),
             tool_docs=react_tool_docs,
             user_query=user_query,
             artifacts_out=artifacts_out,
-        )
+        ))
     except Exception as exc:
         return {
             "status": "error",

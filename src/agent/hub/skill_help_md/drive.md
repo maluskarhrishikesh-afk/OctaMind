@@ -26,3 +26,8 @@ The Drive skill helps you find and manage files in Google Drive.
 - Say the folder name if you want me to upload or move something.
 - Say who to share with if the task involves sharing.
 - If there are similar files, mention the file name clearly.
+
+**How to operate it safely**
+- Say `Drive` or `Google Drive` explicitly when the task could also apply to local files.
+- If the task is destructive or sharing-related, include the file name and destination or recipient clearly.
+- If you mean local file cleanup, use the Files or File Organizer wording instead of generic `cleanup`.

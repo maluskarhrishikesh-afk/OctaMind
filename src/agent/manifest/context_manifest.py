@@ -298,6 +298,7 @@ def write_context(
 def read_context(
     max_age_minutes: int = _DEFAULT_TTL,
     agent: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Return the context manifest entry if it exists and has not expired.
@@ -329,6 +330,22 @@ def read_context(
         # Filter by requested agent
         if agent:
             entries = [e for e in entries if e.get("agent") == agent]
+
+        if session_id:
+            requested_session = str(session_id or "").strip()
+
+            def _entry_session_matches(entry: Dict[str, Any]) -> bool:
+                pending = entry.get("pending_selection") if isinstance(entry.get("pending_selection"), dict) else {}
+                resolved = entry.get("resolved_entities") if isinstance(entry.get("resolved_entities"), dict) else {}
+                candidate_values = [
+                    pending.get("session_key"),
+                    resolved.get("session_key"),
+                ]
+                return any(str(value or "").strip() == requested_session for value in candidate_values)
+
+            session_entries = [e for e in entries if _entry_session_matches(e)]
+            if session_entries:
+                entries = session_entries
 
         if not entries:
             return None

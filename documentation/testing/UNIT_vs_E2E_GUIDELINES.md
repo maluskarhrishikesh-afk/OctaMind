@@ -184,6 +184,56 @@ python -m pytest tests/ -v
 
 Mark E2E tests with `@pytest.mark.e2e` and add `e2e` to `pytest.ini` markers section.
 
+## Repo-Specific E2E Flow Checks
+
+For the current assistant workflow, use the following practical sequence.
+
+### 1. Fast targeted regression for the new orchestration behavior
+
+```powershell
+c:/Hrishikesh/OctaMind/.venv/Scripts/python.exe -m pytest tests/agent/test_email_orchestrator_helpers.py tests/agent/test_files_orchestrator_precision.py tests/agent/test_calendar_orchestrator.py tests/agent/test_calendar_orchestrator_month_queries.py tests/agent/test_drive_orchestrator.py -q
+```
+
+Use this first when validating mailbox learning, adaptive mailbox setup, or execution-plan metadata changes.
+
+### 2. Hub-level mailbox routing check
+
+```powershell
+c:/Hrishikesh/OctaMind/.venv/Scripts/python.exe -m pytest tests/agent/test_hub_mailbox_e2e.py -q
+```
+
+This verifies that a real hub request like `please organize my mailbox` reaches the email agent path.
+
+### 3. Live LLM routing e2e
+
+```powershell
+c:/Hrishikesh/OctaMind/.venv/Scripts/python.exe -m pytest tests/agent/e2e_linked_agent.py -v -m e2e
+```
+
+Use this only when an LLM provider is configured. It checks natural-language routing across single-agent and linked multi-agent flows.
+
+### 4. Manual hub + background-job end-to-end script
+
+```powershell
+c:/Hrishikesh/OctaMind/.venv/Scripts/python.exe tests/manual/__real_e2e_test.py
+```
+
+This is the closest built-in full-flow check for the hub. It exercises `HubProcessor().process(...)`, waits for job progression, and inspects persisted job and notification state.
+
+### 5. Mailbox ambiguity safety regressions
+
+```powershell
+c:/Hrishikesh/OctaMind/.venv/Scripts/python.exe -m pytest tests/agent/test_email_orchestrator_helpers.py -q
+```
+
+Use this when validating mailbox review/apply behavior, mailbox follow-up context writes, and mailbox preference logic.
+
+```powershell
+c:/Hrishikesh/OctaMind/.venv/Scripts/python.exe -m pytest tests/agent/test_hub_mailbox_e2e.py -q
+```
+
+Use this when validating mailbox-specific hub routing and ambiguity handling at the hub boundary.
+
 ---
 
 ## Marking Convention

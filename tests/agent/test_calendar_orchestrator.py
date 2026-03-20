@@ -64,6 +64,8 @@ def test_handle_ordinal_event_delete_query_uses_saved_event_positions(monkeypatc
     assert deleted_ids == ["evt-10", "evt-9"]
     assert "9. Meeting 9" in result["message"]
     assert "10. Meeting 10" in result["message"]
+    assert result["execution_plan"]["requires_confirmation"] is True
+    assert "Execution plan:" in result["message"]
     assert saved_payloads
     updated_events = saved_payloads[-1]["resolved_entities"]["events"]
     assert len(updated_events) == 20
@@ -106,4 +108,5 @@ def test_calendar_ordinal_delete_logs_fast_path_telemetry(monkeypatch) -> None:
 
     assert result["status"] == "success"
     assert result["_fast_path"] == "ordinal_event_delete"
+    assert result["execution_plan"]["confidence_label"] == "high"
     assert telemetry_calls == [("calendar", "ordinal_event_delete")]

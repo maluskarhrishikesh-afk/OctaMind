@@ -327,6 +327,8 @@ def test_direct_copy_from_files_context_uses_single_folder_context(tmp_path: Pat
     assert result["status"] == "success"
     assert copied_folder.exists()
     assert artifacts_out["file_path"] == str(copied_folder)
+    assert result["execution_plan"]["confidence_label"] == "high"
+    assert "Execution plan:" in result["message"]
 
 
 def test_direct_copy_from_files_context_can_make_adjacent_copy(tmp_path: Path, monkeypatch) -> None:
@@ -577,6 +579,7 @@ def test_direct_move_from_context_resolves_the_one_in_parent_hint(monkeypatch, t
     assert result["status"] == "success"
     assert not hrishikesh_folder.exists()
     assert (destination_root / "Neo").exists()
+    assert result["execution_plan"]["risk_level"] == "low"
 
 
 def test_direct_delete_from_context_resolves_the_one_in_parent_hint(monkeypatch, tmp_path: Path) -> None:
@@ -625,6 +628,8 @@ def test_direct_delete_from_context_resolves_the_one_in_parent_hint(monkeypatch,
     assert result is not None
     assert result["status"] == "success"
     assert deleted["path"] == str(hrishikesh_folder)
+    assert result["execution_plan"]["requires_confirmation"] is True
+    assert "Risk posture: medium" in result["message"]
 
 
 def test_parse_precise_named_image_search() -> None:

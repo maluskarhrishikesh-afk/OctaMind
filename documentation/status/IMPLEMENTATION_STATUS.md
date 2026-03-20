@@ -2,6 +2,9 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
+Last updated: 2026-03-20 (Session 13 - mailbox follow-up routing safety, ambiguity clarification guard, skill-preferences roadmap, skill help guidance)
+Last updated: 2026-03-20 (Session 14 - scheduler preferences, calendar preferences, product guide help path)
+Last updated: 2026-03-20 (Session 12 - mailbox learning, adaptive mailbox setup, shared execution-plan metadata across email/files/calendar/drive)
 Last updated: 2026-03-19 (Session 10 - staged routing pipeline, local planner fallback, telemetry counters, deterministic email fast paths, dashboard history restore hardening)
 Last updated: 2026-03-19 (Session 11 - files-agent follow-up grounding/disambiguation, mailbox preferences, mailbox review scheduling, continuous cleanup, full-batch Gmail archive pagination)
 Last updated: 2026-03-17 (Session 9 - security control plane, active manifest registry, per-PA Telegram runtime hardening, dashboard operations panels)
@@ -16,6 +19,48 @@ Previous: 2026-03-02 (Telegram UX overhaul: typing indicators, real-time progres
 Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine causing cascading `unknown action ''` failures; fixed tilde path expansion in dag_planner instruction resolver; added total LLM call count to workflow completion log; fixed website unicode emoji rendering; updated quickstart to remove internal Python snippet)
 
 ---
+
+## ✅ 2026-03-20 Session 14 — Scheduler + Calendar Preferences + Product Guide Help
+
+Detailed session log:
+
+- [documentation/status/SESSION_14_SCHEDULER_CALENDAR_PREFERENCES_AND_PRODUCT_GUIDE.md](documentation/status/SESSION_14_SCHEDULER_CALENDAR_PREFERENCES_AND_PRODUCT_GUIDE.md)
+
+Highlights:
+
+- Scheduler now has durable markdown-backed preferences for focus-block length, meeting buffer, planning style, constraint mode, and optional no-meeting windows
+- Scheduler preference edits now support exact minute windows like gym-time blocks and tolerate common typo variants such as `schedular` / `prefrences`
+- Calendar now has durable markdown-backed preferences for working hours, default meeting duration, and reminder timing
+- Calendar default preferences now feed slot-finding, quick-add duration inference, and reminder setup when the user does not override them
+- built-in help now includes a product-level `Using OctaMind` guide that answers questions like `How do I use this assistant?`
+
+---
+
+## ✅ 2026-03-20 Session 13 — Mailbox Follow-Up Safety + Skill Preferences Roadmap
+
+Detailed session log:
+
+- [documentation/status/SESSION_13_MAILBOX_FOLLOWUP_ROUTING_AND_SKILL_PREFERENCES_ROADMAP.md](documentation/status/SESSION_13_MAILBOX_FOLLOWUP_ROUTING_AND_SKILL_PREFERENCES_ROADMAP.md)
+
+Highlights:
+
+- mailbox review/apply flows now establish explicit email follow-up context so short phrases like `apply cleanup now` can route back to email
+- the hub now asks for clarification instead of executing stale file cleanup when the command is underspecified
+- persistent markdown-backed preferences remain implemented only for Email; the recommended next rollout is Scheduler, then Calendar
+- built-in skill help markdown was expanded so the assistant can better explain how to operate Email, Files, Drive, Calendar, and Scheduler
+
+## ✅ 2026-03-20 Session 12 — Mailbox Learning + Shared Execution Plans
+
+Detailed session log:
+
+- [documentation/status/SESSION_12_EXECUTION_PLANS_AND_MAILBOX_LEARNING.md](documentation/status/SESSION_12_EXECUTION_PLANS_AND_MAILBOX_LEARNING.md)
+
+Highlights:
+
+- mailbox preference changes now write to a learning log so review recommendations can detect likely reversals or unstable cleanup rules
+- guided mailbox setup now adapts recommendations based on mailbox state such as newsletter-heavy versus work-heavy inboxes
+- a shared execution-plan contract now surfaces confidence, risk, and step summaries across email, files, calendar, and drive flows
+- targeted regression coverage now includes drive execution-plan wrapping and mailbox learning/adaptive setup behavior
 
 ## ✅ 2026-03-19 Session 11 — Files Grounding + Mailbox Automation
 

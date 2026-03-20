@@ -89,6 +89,8 @@ def test_calendar_orchestrator_handles_this_month_count_without_llm(monkeypatch)
     assert "March 2026" in result["message"]
     assert "1. **Event 1**" in result["message"]
     assert "2 more event(s) are scheduled later in the month." in result["message"]
+    assert result["execution_plan"]["confidence_label"] == "high"
+    assert "Execution plan:" in result["message"]
 
 
 def test_calendar_month_overview_logs_fast_path_telemetry(monkeypatch):

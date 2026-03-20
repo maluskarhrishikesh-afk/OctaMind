@@ -12,6 +12,7 @@ class SkillHelpDoc:
     title: str
     aliases: tuple[str, ...]
     body: str
+    enableable: bool = True
 
 
 _DOC_CACHE_STATE: dict[str, object] = {
@@ -91,6 +92,7 @@ def _load_skill_docs() -> dict[str, SkillHelpDoc]:
             title=title,
             aliases=aliases,
             body=body,
+            enableable=str(metadata.get("enableable", "true") or "true").strip().lower() not in {"false", "0", "no"},
         )
     _DOC_CACHE_STATE["docs"] = docs
     _DOC_CACHE_STATE["token"] = token
@@ -155,7 +157,7 @@ def _find_skills_in_text(text: str) -> list[str]:
 
 
 def format_enable_commands(skill_names: Iterable[str]) -> str:
-    skills = [skill for skill in skill_names if _get_skill_doc(skill) is not None]
+    skills = [skill for skill in skill_names if _get_skill_doc(skill) is not None and _get_skill_doc(skill).enableable]  # type: ignore[union-attr]
     if not skills:
         return "Use `/skills` to view available skills, then enable one with `/enable <skill_name>`."
     commands = "\n".join(f"- `/enable {_display_enable_command(skill)}`" for skill in skills)
@@ -207,6 +209,23 @@ def _is_skill_help_query(text: str) -> bool:
         "what things does",
         "how does",
         "what is the",
+        "how do i use",
+        "how can i use",
+        "how do i operate",
+        "how does this assistant work",
+        "how does octamind work",
+    ))
+
+
+def _is_product_help_query(text: str) -> bool:
+    lowered = str(text or "").lower()
+    return any(phrase in lowered for phrase in (
+        "how do i use this assistant",
+        "how can i use this assistant",
+        "how do i use octamind",
+        "how do i operate this assistant",
+        "how do i operate this product",
+        "how exactly do i run this",
     ))
 
 
@@ -218,7 +237,7 @@ def format_skill_help(skill_name: str, source: str = "telegram", enabled_skills:
     title = guide.title
 
     enabled_note = ""
-    if source == "telegram":
+    if source == "telegram" and guide.enableable:
         if enabled_skills is not None and skill_name in enabled_skills:
             enabled_note = f"\n\n✅ **{title}** is already enabled for this assistant."
         else:
@@ -233,6 +252,9 @@ def maybe_get_skill_help_reply(
     source: str = "telegram",
     enabled_skills: Optional[set[str]] = None,
 ) -> Optional[str]:
+    if _is_product_help_query(message):
+        return format_skill_help("assistant_guide", source=source, enabled_skills=enabled_skills)
+
     skills = _find_skills_in_text(message)
     if not skills:
         return None
