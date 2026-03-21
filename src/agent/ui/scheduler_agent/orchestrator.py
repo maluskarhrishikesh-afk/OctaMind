@@ -10,18 +10,20 @@ import json
 import re
 from typing import Any, Dict, Optional
 
-from src.agent.runtime_paths import get_runtime_state_path
+from src.agent.runtime_paths import get_runtime_state_path, get_your_data_dir
 from src.calendar.scheduler_preferences import (
     default_scheduler_preferences,
-    derive_no_meeting_window_preset,
     get_scheduler_preferences_path,
     get_scheduler_review_recommendations,
     load_scheduler_preferences,
-    _preset_to_no_meeting_windows,
+    parse_scheduler_preferences_template,
     render_scheduler_preference_guidance,
     render_scheduler_preferences_summary,
+    render_scheduler_preferences_template,
     save_scheduler_preferences,
     try_apply_scheduler_preference_edits,
+    upsert_no_meeting_window,
+    upsert_recurring_reminder,
 )
 from src.agent.workflows.skill_react_engine import run_skill_react
 
@@ -38,6 +40,8 @@ _PENDING_SCHEDULER_PREFERENCES_PATH = get_runtime_state_path(
     "scheduler_preferences_pending.json",
     create_parent=True,
 )
+_SCHEDULER_SCHEDULE_DRAFT_PATH = get_your_data_dir("scheduler_schedule_draft.md")
+_DRAFT_JSON_BLOCK_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 _NUMERIC_REPLY_RE = re.compile(r"^\s*(?:option\s+)?\d{1,2}\s*[?.!]*\s*$", re.IGNORECASE)
 _SCHEDULER_PREFERENCES_SHOW_RE = re.compile(
     r"\b(show|view|list|open|read)\b.*\b(scheduler|schedular|schedule)\b.*\b(preferences|settings|preference|prefrence|prefrences)\b"
@@ -50,8 +54,8 @@ _SCHEDULER_PREFERENCES_EDIT_RE = re.compile(
     re.IGNORECASE,
 )
 _SCHEDULER_PREFERENCES_APPLY_RE = re.compile(
-    r"\b(apply|use|follow)\b.*\b(scheduler|schedular|schedule)\b.*\b(preferences|settings)\b"
-    r"|\b(scheduler|schedular|schedule)\b.*\b(preferences|settings)\b.*\b(apply|use|follow)\b",
+    r"\b(apply|use|follow)\b.*\b(scheduler|schedular|schedule)\b.*\b(preferences|settings|preference|prefrence|prefrences)\b"
+    r"|\b(scheduler|schedular|schedule)\b.*\b(preferences|settings|preference|prefrence|prefrences)\b.*\b(apply|use|follow)\b",
     re.IGNORECASE,
 )
 _SCHEDULER_REVIEW_RE = re.compile(
@@ -65,38 +69,27 @@ _SCHEDULER_PREFERENCE_FOLLOWUP_RE = re.compile(
     r"|\b(change\s+them|update\s+them|edit\s+them|use\s+different\s+ones?)\b",
     re.IGNORECASE,
 )
-_SCHEDULER_PREFERENCE_QUESTIONS = [
-    {
-        "key": "focus_block_minutes",
-        "title": "Default focus block length",
-        "prompt": "Choose the default focus-block length to use when you ask for deep work without giving a duration.",
-        "options": [(60, "60 minutes"), (90, "90 minutes"), (120, "120 minutes")],
-    },
-    {
-        "key": "meeting_buffer_minutes",
-        "title": "Meeting buffer",
-        "prompt": "Choose the default buffer to protect before or after meetings.",
-        "options": [(0, "No buffer"), (10, "10 minutes"), (15, "15 minutes")],
-    },
-    {
-        "key": "daily_planning_style",
-        "title": "Planning style",
-        "prompt": "Choose the default planning style for the Scheduler.",
-        "options": [("balanced", "Balanced day"), ("deep_work_first", "Deep-work first"), ("meeting_friendly", "Meeting-friendly")],
-    },
-    {
-        "key": "constraint_mode",
-        "title": "Constraint mode",
-        "prompt": "Choose how aggressively the Scheduler should protect your defaults.",
-        "options": [("soft", "Soft constraints"), ("hard", "Hard constraints")],
-    },
-    {
-        "key": "no_meeting_windows_preset",
-        "title": "Protected no-meeting window",
-        "prompt": "Choose an optional protected window that the Scheduler should avoid when possible.",
-        "options": [("none", "No protected window"), ("lunch_weekdays", "Weekday lunch window (13:00-14:00)"), ("focus_mornings", "Weekday focus mornings (09:00-12:00)")],
-    },
-]
+_SCHEDULER_SETUP_CANCEL_RE = re.compile(r"\b(cancel|stop|skip|exit|never\s*mind|nevermind)\b", re.IGNORECASE)
+_SCHEDULE_REPORT_RE = re.compile(
+    r"\b(report|summary|overview|analytics|insights?)\b.*\b(schedule|scheduler|calendar|meetings?|free\s+time)\b"
+    r"|\b(how\s+many\s+meetings?|how\s+much\s+free\s+time)\b",
+    re.IGNORECASE,
+)
+_SUGGESTED_SCHEDULE_RE = re.compile(
+    r"\b(set|setup|set\s*up|create|build|plan|organi[sz]e)\b.*\b(my|the|a)?\s*(daily\s+)?(schedule|day|routine)\b"
+    r"|\bcan\s+you\s+setup\s+my\s+schedule\b"
+    r"|\bhelp\s+me\s+setup\s+my\s+schedule\b",
+    re.IGNORECASE,
+)
+_SCHEDULE_APPROVAL_RE = re.compile(
+    r"\b(looks\s+good|look\s+good|sounds\s+good|this\s+works|keep\s+it|use\s+this|go\s+with\s+this|approved?)\b",
+    re.IGNORECASE,
+)
+_SCHEDULE_APPLY_RE = re.compile(
+    r"\b(apply|save|use|activate)\b.*\b(these\s+changes|this\s+schedule|my\s+schedule|schedule)\b"
+    r"|\bapply\s+these\s+changes\s+to\s+my\s+sched(?:u|e)d?ule\b",
+    re.IGNORECASE,
+)
 
 
 def _get_session_id(artifacts_out: Optional[Dict[str, Any]]) -> str:
@@ -208,25 +201,244 @@ def _build_scheduler_skill_context() -> str:
     return f"{_load_skill_context()}\n\n## Active Scheduler Preferences\n{render_scheduler_preference_guidance(load_scheduler_preferences())}"
 
 
-def _build_scheduler_preference_question_message(state: Dict[str, Any]) -> str:
-    step = int(state.get("step", 0) or 0)
+def _build_scheduler_preference_setup_message(state: Dict[str, Any]) -> str:
     preferences = state.get("preferences", {}) if isinstance(state.get("preferences"), dict) else {}
-    question = _SCHEDULER_PREFERENCE_QUESTIONS[step]
-    current_value = derive_no_meeting_window_preset(preferences) if question["key"] == "no_meeting_windows_preset" else preferences.get(question["key"])
+    if str(state.get("kind", "") or "") == "daily_schedule_setup":
+        return _build_suggested_schedule_message(preferences)
+    return render_scheduler_preferences_template(preferences)
+
+
+def _render_scheduler_schedule_draft_markdown(preferences: Dict[str, Any]) -> str:
+    return "\n".join([
+        "# Scheduler Draft Schedule",
+        "",
+        "This draft is editable through natural-language follow-ups.",
+        "It is not active until you say `apply these changes to my schedule` or `looks good`.",
+        "",
+        _build_suggested_schedule_message(preferences),
+        "",
+        "```json",
+        json.dumps(preferences, indent=2, ensure_ascii=False),
+        "```",
+    ])
+
+
+def _save_scheduler_schedule_draft(preferences: Dict[str, Any]) -> str:
+    normalized = _seed_suggested_schedule_preferences(preferences)
+    _SCHEDULER_SCHEDULE_DRAFT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _SCHEDULER_SCHEDULE_DRAFT_PATH.write_text(_render_scheduler_schedule_draft_markdown(normalized), encoding="utf-8")
+    return str(_SCHEDULER_SCHEDULE_DRAFT_PATH)
+
+
+def _load_scheduler_schedule_draft() -> Dict[str, Any] | None:
+    try:
+        if not _SCHEDULER_SCHEDULE_DRAFT_PATH.exists():
+            return None
+        content = _SCHEDULER_SCHEDULE_DRAFT_PATH.read_text(encoding="utf-8")
+        match = _DRAFT_JSON_BLOCK_RE.search(content)
+        if not match:
+            return None
+        payload = json.loads(match.group(1))
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _schedule_suggestion_context_present(raw_query: str) -> bool:
+    lowered = str(raw_query or "").lower()
+    return any(token in lowered for token in (
+        "daily_schedule_setup",
+        '"followup_kind": "schedule_suggestion"',
+        "schedule_setup_suggestion",
+        "scheduler draft schedule",
+    ))
+
+
+def _save_schedule_suggestion_preview(session_key: str, preferences: Dict[str, Any], changes: Optional[list[str]] = None) -> Dict[str, Any]:
+    normalized = _seed_suggested_schedule_preferences(preferences)
+    pending = {
+        "kind": "daily_schedule_setup",
+        "preferences": normalized,
+    }
+    _set_pending_scheduler_preferences(session_key, pending)
+    draft_path = _save_scheduler_schedule_draft(normalized)
+    message = _build_suggested_schedule_message(normalized)
+    if changes:
+        change_lines = "\n".join(f"- {item}" for item in changes if str(item or "").strip())
+        if change_lines:
+            message = f"Updated the suggested schedule.\n\n{message}\n\nApplied changes:\n{change_lines}"
+    return {
+        "status": "success",
+        "action": "schedule_setup_suggestion",
+        "_fast_path": "schedule_setup_suggestion",
+        "message": message,
+        "file_path": draft_path,
+    }
+
+
+def _apply_schedule_draft(session_key: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+    _clear_pending_scheduler_preferences(session_key)
+    save_result = save_scheduler_preferences(preferences)
+    _save_scheduler_schedule_draft(save_result.get("preferences", preferences) if isinstance(save_result.get("preferences"), dict) else preferences)
+    return {
+        "status": "success",
+        "action": "scheduler_preferences_saved",
+        "_fast_path": "scheduler_preferences_saved",
+        "message": f"Daily schedule applied and active.\n{render_scheduler_preferences_summary(save_result.get('preferences', {}))}",
+        "file_path": save_result.get("file_path", ""),
+    }
+
+
+def _seed_suggested_schedule_preferences(preferences: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    prefs = preferences or load_scheduler_preferences() or default_scheduler_preferences()
+    seeded = dict(prefs)
+    working_hours = dict(seeded.get("working_hours", {}) if isinstance(seeded.get("working_hours"), dict) else {})
+    if (
+        int(working_hours.get("start_hour", 9) or 9),
+        int(working_hours.get("start_minute", 0) or 0),
+        int(working_hours.get("end_hour", 18) or 18),
+        int(working_hours.get("end_minute", 0) or 0),
+    ) == (9, 0, 18, 0):
+        working_hours = {
+            "start_hour": 9,
+            "start_minute": 30,
+            "end_hour": 18,
+            "end_minute": 30,
+        }
+    seeded["working_hours"] = working_hours
+    seeded["default_meeting_reminder_minutes"] = int(seeded.get("default_meeting_reminder_minutes", 15) or 15)
+
+    window_labels = {
+        str(item.get("label", "") or "").strip().lower()
+        for item in seeded.get("no_meeting_windows", []) if isinstance(item, dict)
+    }
+    if "lunch window" not in window_labels:
+        seeded = upsert_no_meeting_window(
+            seeded,
+            label="Lunch window",
+            start_hour=13,
+            start_minute=0,
+            end_hour=14,
+            end_minute=0,
+            days=["mon", "tue", "wed", "thu", "fri"],
+        )
+    if "focus time" not in window_labels and "focus block" not in window_labels and "focus mornings" not in window_labels:
+        seeded = upsert_no_meeting_window(
+            seeded,
+            label="Focus time",
+            start_hour=10,
+            start_minute=0,
+            end_hour=12,
+            end_minute=0,
+            days=["mon", "tue", "wed", "thu", "fri"],
+        )
+
+    reminder_labels = {
+        str(item.get("label", "") or "").strip().lower()
+        for item in seeded.get("recurring_reminders", []) if isinstance(item, dict)
+    }
+    if "gym" not in reminder_labels and "gym time" not in reminder_labels:
+        seeded = upsert_recurring_reminder(seeded, label="Gym", hour=20, minute=0, days=["mon", "tue", "wed", "thu", "fri", "sat", "sun"])
+    if "meditation" not in reminder_labels:
+        seeded = upsert_recurring_reminder(seeded, label="Meditation", hour=6, minute=30, days=["mon", "tue", "wed", "thu", "fri", "sat", "sun"])
+    return seeded
+
+
+def _clock_to_label(hour: int, minute: int) -> str:
+    normalized_hour = int(hour) % 24
+    suffix = "AM" if normalized_hour < 12 else "PM"
+    display_hour = normalized_hour % 12 or 12
+    return f"{display_hour}:{max(0, min(int(minute), 59)):02d} {suffix}"
+
+
+def _find_window(preferences: Dict[str, Any], *labels: str) -> Dict[str, Any]:
+    windows = preferences.get("no_meeting_windows", []) if isinstance(preferences.get("no_meeting_windows"), list) else []
+    normalized_labels = {label.lower() for label in labels}
+    for item in windows:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("label", "") or "").strip().lower() in normalized_labels:
+            return item
+    return {}
+
+
+def _find_reminder(preferences: Dict[str, Any], *labels: str) -> Dict[str, Any]:
+    reminders = preferences.get("recurring_reminders", []) if isinstance(preferences.get("recurring_reminders"), list) else []
+    normalized_labels = {label.lower() for label in labels}
+    for item in reminders:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("label", "") or "").strip().lower() in normalized_labels:
+            return item
+    return {}
+
+
+def _format_time_range(item: Dict[str, Any], start_key: str, end_key: str, start_minute_key: str, end_minute_key: str) -> str:
+    return (
+        f"{_clock_to_label(int(item.get(start_key, 9) or 9), int(item.get(start_minute_key, 0) or 0))}"
+        f" -> {_clock_to_label(int(item.get(end_key, 18) or 18), int(item.get(end_minute_key, 0) or 0))}"
+    )
+
+
+def _build_suggested_schedule_message(preferences: Dict[str, Any]) -> str:
+    prefs = _seed_suggested_schedule_preferences(preferences)
+    working_hours = prefs.get("working_hours", {}) if isinstance(prefs.get("working_hours"), dict) else {}
+    lunch_window = _find_window(prefs, "Lunch window")
+    focus_window = _find_window(prefs, "Focus time", "Focus block", "Focus mornings")
+    gym_reminder = _find_reminder(prefs, "Gym", "Gym time")
+    meditation_reminder = _find_reminder(prefs, "Meditation")
     lines = [
-        f"Scheduler setup {step + 1}/{len(_SCHEDULER_PREFERENCE_QUESTIONS)}: {question['title']}",
-        question["prompt"],
+        "Here is a suggested daily schedule (you can edit anything):",
+        "",
+        f"Work hours: {_format_time_range(working_hours, 'start_hour', 'end_hour', 'start_minute', 'end_minute')}",
+        f"Lunch: {_format_time_range(lunch_window or {'start_hour': 13, 'start_minute': 0, 'end_hour': 14, 'end_minute': 0}, 'start_hour', 'end_hour', 'start_minute', 'end_minute')}",
+        f"Focus time (no meetings): {_format_time_range(focus_window or {'start_hour': 10, 'start_minute': 0, 'end_hour': 12, 'end_minute': 0}, 'start_hour', 'end_hour', 'start_minute', 'end_minute')}",
+        f"Meeting reminder: {int(prefs.get('default_meeting_reminder_minutes', 15) or 15)} minutes before",
+        "",
+        "Personal reminders:",
+        f"- Gym: {_clock_to_label(int(gym_reminder.get('hour', 20) or 20), int(gym_reminder.get('minute', 0) or 0))}",
+        f"- Meditation: {_clock_to_label(int(meditation_reminder.get('hour', 6) or 6), int(meditation_reminder.get('minute', 30) or 30))}",
+        "",
+        "You can:",
+        "1. Edit anything directly",
+        '2. Say "looks good"',
+        "3. Ask me to customize",
     ]
-    for index, (value, label) in enumerate(question["options"], start=1):
-        marker = " (current)" if value == current_value else ""
-        lines.append(f"{index}. {label}{marker}")
     return "\n".join(lines)
+
+
+def _looks_like_scheduler_preference_input(raw_query: str) -> bool:
+    text = str(raw_query or "").strip()
+    lowered = text.lower()
+    if not text:
+        return False
+    if _NUMERIC_REPLY_RE.match(text):
+        return True
+    if parse_scheduler_preferences_template(text, load_scheduler_preferences()) is not None:
+        return True
+    return any(token in lowered for token in (
+        "scheduler preference",
+        "scheduler preferences",
+        "prefrence",
+        "prefrences",
+        "work hours",
+        "work start",
+        "work end",
+        "focus block",
+        "meeting buffer",
+        "meeting reminder",
+        "protected window",
+        "protected time",
+        "lunch",
+        "gym",
+        "meditation",
+        "recurring reminders",
+    ))
 
 
 def _start_scheduler_preferences_setup(session_key: str, *, base_preferences: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     state = {
-        "kind": "guided_setup",
-        "step": 0,
+        "kind": "template_setup",
         "preferences": base_preferences or load_scheduler_preferences() or default_scheduler_preferences(),
     }
     _set_pending_scheduler_preferences(session_key, state)
@@ -234,52 +446,72 @@ def _start_scheduler_preferences_setup(session_key: str, *, base_preferences: Op
         "status": "success",
         "action": "scheduler_preferences_question",
         "_fast_path": "scheduler_preferences_question",
-        "message": _build_scheduler_preference_question_message(state),
+        "message": _build_scheduler_preference_setup_message(state),
     }
+
+
+def _start_suggested_schedule_setup(session_key: str, *, base_preferences: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    return _save_schedule_suggestion_preview(
+        session_key,
+        _seed_suggested_schedule_preferences(base_preferences or _load_scheduler_schedule_draft() or load_scheduler_preferences() or default_scheduler_preferences()),
+    )
 
 
 def _handle_pending_scheduler_preferences_reply(raw_query: str, session_key: str) -> Optional[Dict[str, Any]]:
     pending = _get_pending_scheduler_preferences(session_key)
     if not pending:
         return None
-    if not _NUMERIC_REPLY_RE.match(str(raw_query or "")):
+    text = str(raw_query or "").strip()
+    if not text:
         return None
-    selection = int(re.findall(r"\d+", raw_query)[0])
-    step = int(pending.get("step", 0) or 0)
-    question = _SCHEDULER_PREFERENCE_QUESTIONS[step]
-    options = question["options"]
-    if selection < 1 or selection > len(options):
+    if _SCHEDULER_SETUP_CANCEL_RE.search(text):
+        _clear_pending_scheduler_preferences(session_key)
         return {
             "status": "success",
-            "action": "scheduler_preferences_question",
-            "_fast_path": "scheduler_preferences_question",
-            "message": f"Please reply with a number between 1 and {len(options)}.\n\n{_build_scheduler_preference_question_message(pending)}",
+            "action": "scheduler_preferences_cancelled",
+            "_fast_path": "scheduler_preferences_cancelled",
+            "message": "Scheduler preference setup cancelled. Your existing preferences are unchanged.",
         }
-    chosen_value = options[selection - 1][0]
-    preferences = dict(pending.get("preferences", {}) if isinstance(pending.get("preferences"), dict) else {})
-    if question["key"] == "no_meeting_windows_preset":
-        preferences["no_meeting_windows"] = _preset_to_no_meeting_windows(str(chosen_value))
-    else:
-        preferences[question["key"]] = chosen_value
-    next_step = step + 1
-    if next_step >= len(_SCHEDULER_PREFERENCE_QUESTIONS):
+    if _SCHEDULE_APPROVAL_RE.search(text) or _SCHEDULE_APPLY_RE.search(text):
+        approved_preferences = pending.get("preferences", {}) if isinstance(pending.get("preferences"), dict) else load_scheduler_preferences()
+        return _apply_schedule_draft(session_key, approved_preferences)
+    parsed = parse_scheduler_preferences_template(
+        text,
+        pending.get("preferences", {}) if isinstance(pending.get("preferences"), dict) else load_scheduler_preferences(),
+    )
+    if parsed is None:
+        direct_edit = try_apply_scheduler_preference_edits(
+            text,
+            pending.get("preferences", {}) if isinstance(pending.get("preferences"), dict) else load_scheduler_preferences(),
+        )
+        if not isinstance(direct_edit, dict):
+            return None
+        updated_preferences = direct_edit.get("preferences", {}) if isinstance(direct_edit.get("preferences"), dict) else pending.get("preferences", {})
+        if str(pending.get("kind", "") or "") == "daily_schedule_setup":
+            changes = direct_edit.get("changes", []) if isinstance(direct_edit.get("changes"), list) else []
+            return _save_schedule_suggestion_preview(session_key, updated_preferences, changes)
         _clear_pending_scheduler_preferences(session_key)
-        save_result = save_scheduler_preferences(preferences)
+        save_result = save_scheduler_preferences(updated_preferences)
+        changes = direct_edit.get("changes", []) if isinstance(direct_edit.get("changes"), list) else []
+        change_lines = "\n".join(f"- {item}" for item in changes if str(item or "").strip())
+        message = f"Scheduler preferences saved.\n{render_scheduler_preferences_summary(save_result.get('preferences', {}))}"
+        if change_lines:
+            message = f"{message}\n\nApplied changes:\n{change_lines}"
         return {
             "status": "success",
             "action": "scheduler_preferences_saved",
             "_fast_path": "scheduler_preferences_saved",
-            "message": f"Scheduler preferences saved.\n{render_scheduler_preferences_summary(save_result.get('preferences', {}))}",
+            "message": message,
             "file_path": save_result.get("file_path", ""),
         }
-    pending["preferences"] = preferences
-    pending["step"] = next_step
-    _set_pending_scheduler_preferences(session_key, pending)
+    _clear_pending_scheduler_preferences(session_key)
+    save_result = save_scheduler_preferences(parsed)
     return {
         "status": "success",
-        "action": "scheduler_preferences_question",
-        "_fast_path": "scheduler_preferences_question",
-        "message": _build_scheduler_preference_question_message(pending),
+        "action": "scheduler_preferences_saved",
+        "_fast_path": "scheduler_preferences_saved",
+        "message": f"Scheduler preferences saved.\n{render_scheduler_preferences_summary(save_result.get('preferences', {}))}",
+        "file_path": save_result.get("file_path", ""),
     }
 
 
@@ -333,6 +565,61 @@ def _looks_like_scheduler_preference_followup_setup(raw_query: str) -> bool:
     return "topic=scheduler_preferences" in lowered or '"scheduler_preferences"' in lowered or "scheduler preferences" in lowered
 
 
+def _parse_schedule_report_window(raw_query: str) -> tuple[str, str] | None:
+    from datetime import date as _date, timedelta as _td  # noqa: PLC0415
+
+    lowered = str(raw_query or "").lower()
+    if not _SCHEDULE_REPORT_RE.search(lowered):
+        return None
+    today = _date.today()
+    if "tomorrow" in lowered:
+        value = (today + _td(days=1)).isoformat()
+        return value, value
+    if "today" in lowered:
+        value = today.isoformat()
+        return value, value
+    if "this week" in lowered or "next 7 days" in lowered:
+        return today.isoformat(), (today + _td(days=6)).isoformat()
+    explicit = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", lowered)
+    if explicit:
+        value = explicit.group(1)
+        return value, value
+    return today.isoformat(), (today + _td(days=6)).isoformat()
+
+
+def _build_scheduler_report(session_key: str, raw_query: str) -> Optional[Dict[str, Any]]:
+    from src.agent.runtime_paths import get_your_data_dir  # noqa: PLC0415
+    import src.calendar.calendar_service as cs  # noqa: PLC0415
+
+    date_window = _parse_schedule_report_window(raw_query)
+    if date_window is None:
+        return None
+    prefs = load_scheduler_preferences()
+    report = cs.generate_schedule_report(
+        date_window[0],
+        date_window[1],
+        int(prefs["working_hours"]["start_hour"]),
+        int(prefs["working_hours"].get("start_minute", 0)),
+        int(prefs["working_hours"]["end_hour"]),
+        int(prefs["working_hours"].get("end_minute", 0)),
+        prefs.get("no_meeting_windows", []),
+        int(prefs.get("meeting_buffer_minutes", 0) or 0),
+    )
+    if not isinstance(report, dict) or report.get("status") != "success":
+        return report if isinstance(report, dict) else None
+    report_path = get_your_data_dir(
+        "reports",
+        f"schedule_report_{date_window[0]}_{date_window[1]}.md",
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(report.get("message", ""), encoding="utf-8")
+    _sync_scheduler_preferences_followup_context(session_key, prefs, followup_kind="report")
+    report["action"] = "scheduler_report"
+    report["_fast_path"] = "scheduler_report"
+    report["file_path"] = str(report_path)
+    return report
+
+
 def _extract_session_state(user_query: str) -> Dict[str, Any]:
     marker = "## Session State"
     if marker not in user_query:
@@ -359,13 +646,36 @@ def _load_skill_context() -> str:
 
 
 def _build_all_tools(user_query: str = "") -> Dict[str, Any]:
-    from src.calendar import calendar_service as cs  # noqa: PLC0415
+    import src.calendar.calendar_service as cs  # noqa: PLC0415
     from src.agent.manifest.context_manifest import (  # noqa: PLC0415
         auto_save_calendar_context, make_save_context_tool, write_context,
     )
-    from datetime import date as _date, timedelta as _td
+    from datetime import date as _date, datetime as _datetime, timedelta as _td
 
     session_vars = _extract_session_state(user_query)
+    scheduler_preferences = load_scheduler_preferences()
+
+    def _window_conflicts(start_iso: str, end_iso: str) -> str:
+        day = _date.fromisoformat(str(start_iso)[:10])
+        start_dt = _datetime.fromisoformat(str(start_iso).replace("Z", "+00:00"))
+        end_dt = _datetime.fromisoformat(str(end_iso).replace("Z", "+00:00"))
+        working_hours = scheduler_preferences.get("working_hours", {}) if isinstance(scheduler_preferences.get("working_hours"), dict) else {}
+        work_start = _datetime(day.year, day.month, day.day, int(working_hours.get("start_hour", 9) or 9), int(working_hours.get("start_minute", 0) or 0), tzinfo=start_dt.tzinfo)
+        work_end = _datetime(day.year, day.month, day.day, int(working_hours.get("end_hour", 18) or 18), int(working_hours.get("end_minute", 0) or 0), tzinfo=end_dt.tzinfo)
+        if start_dt < work_start or end_dt > work_end:
+            return "Requested time is outside your saved work hours."
+        weekday = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][day.weekday()]
+        for window in scheduler_preferences.get("no_meeting_windows", []) if isinstance(scheduler_preferences.get("no_meeting_windows"), list) else []:
+            if not isinstance(window, dict):
+                continue
+            days = window.get("days", []) if isinstance(window.get("days"), list) else []
+            if days and weekday not in {str(value).strip().lower() for value in days}:
+                continue
+            blocked_start = _datetime(day.year, day.month, day.day, int(window.get("start_hour", 0) or 0), int(window.get("start_minute", 0) or 0), tzinfo=start_dt.tzinfo)
+            blocked_end = _datetime(day.year, day.month, day.day, int(window.get("end_hour", 0) or 0), int(window.get("end_minute", 0) or 0), tzinfo=end_dt.tzinfo)
+            if blocked_start < end_dt and blocked_end > start_dt:
+                return f"Requested time overlaps protected window: {window.get('label', 'Protected time')}."
+        return ""
 
     def _remember_event(result: dict) -> dict:
         if not isinstance(result, dict) or result.get("status") != "success":
@@ -419,15 +729,86 @@ def _build_all_tools(user_query: str = "") -> Dict[str, Any]:
         result = cs.get_events_for_date(date_str)
         return auto_save_calendar_context(result, date_str, agent="scheduler")
 
+    def find_free_slots(date_str: str, duration_minutes: int | None = None, calendar_id: str = "primary") -> dict:
+        working_hours = scheduler_preferences.get("working_hours", {}) if isinstance(scheduler_preferences.get("working_hours"), dict) else {}
+        result = cs.find_free_slots(
+            date_str,
+            int(duration_minutes or scheduler_preferences.get("focus_block_minutes", 90) or 90),
+            int(working_hours.get("start_hour", 9) or 9),
+            int(working_hours.get("start_minute", 0) or 0),
+            int(working_hours.get("end_hour", 18) or 18),
+            int(working_hours.get("end_minute", 0) or 0),
+            int(scheduler_preferences.get("meeting_buffer_minutes", 0) or 0),
+            calendar_id,
+        )
+        if result.get("status") != "success":
+            return result
+        protected_windows = scheduler_preferences.get("no_meeting_windows", []) if isinstance(scheduler_preferences.get("no_meeting_windows"), list) else []
+        if not protected_windows:
+            return result
+        filtered = []
+        for slot in result.get("free_slots", []):
+            start_iso = str(slot.get("start", "") or "")
+            end_iso = str(slot.get("end", "") or "")
+            if not start_iso or not end_iso:
+                continue
+            if _window_conflicts(start_iso, end_iso):
+                continue
+            filtered.append(slot)
+        result["free_slots"] = filtered
+        result["message"] = (
+            f"Found {len(filtered)} preference-aware free slot(s) on {date_str}."
+            if filtered else
+            f"No free slots matched your saved work hours and protected windows on {date_str}."
+        )
+        return result
+
+    def create_event_with_preferences(title: str, start: str, end: str, description: str = "", location: str = "", attendees=None, calendar_id: str = "primary") -> dict:
+        conflict = _window_conflicts(start, end)
+        if conflict:
+            return {"status": "error", "message": conflict}
+        result = cs.create_event(title, start, end, description, location, attendees, calendar_id)
+        if isinstance(result, dict) and result.get("status") == "success":
+            event = result.get("event") if isinstance(result.get("event"), dict) else {}
+            event_id = str(event.get("id", "") or "")
+            if event_id:
+                cs.set_reminder(event_id, int(scheduler_preferences.get("default_meeting_reminder_minutes", 15) or 15), calendar_id)
+        return _remember_event(result)
+
+    def update_event_with_preferences(event_id: str, **kwargs) -> dict:
+        start_value = str(kwargs.get("start", "") or "")
+        end_value = str(kwargs.get("end", "") or "")
+        if start_value and end_value:
+            conflict = _window_conflicts(start_value, end_value)
+            if conflict:
+                return {"status": "error", "message": conflict}
+        return _remember_event(cs.update_event(event_id, **kwargs))
+
+    def get_schedule_report(start_date: str, end_date: str, calendar_id: str = "primary") -> dict:
+        working_hours = scheduler_preferences.get("working_hours", {}) if isinstance(scheduler_preferences.get("working_hours"), dict) else {}
+        return cs.generate_schedule_report(
+            start_date,
+            end_date,
+            int(working_hours.get("start_hour", 9) or 9),
+            int(working_hours.get("start_minute", 0) or 0),
+            int(working_hours.get("end_hour", 18) or 18),
+            int(working_hours.get("end_minute", 0) or 0),
+            scheduler_preferences.get("no_meeting_windows", []),
+            int(scheduler_preferences.get("meeting_buffer_minutes", 0) or 0),
+            calendar_id,
+        )
+
     return {
         "get_todays_events":    get_todays_events,
         "get_tomorrows_events": get_tomorrows_events,
         "get_upcoming_events":  get_upcoming_events,
         "get_events_for_date":  get_events_for_date,
+        "find_free_slots": find_free_slots,
+        "get_schedule_report": get_schedule_report,
         "search_events":  lambda query, days=30, max_results=10: cs.search_events(query, days, max_results),
-        "create_event":   lambda title, start, end, description="", location="", attendees=None, calendar_id="primary": _remember_event(cs.create_event(title, start, end, description, location, attendees, calendar_id)),
+        "create_event":   create_event_with_preferences,
         "quick_add_event": lambda text: _remember_event(cs.quick_add_event(_augment_quick_add_text(text))),
-        "update_event":    lambda event_id, **kwargs: _remember_event(cs.update_event(event_id, **kwargs)),
+        "update_event":    update_event_with_preferences,
         "delete_event":    lambda event_id: cs.delete_event(event_id),
         "list_calendars":  lambda: cs.list_calendars(),
         "save_context":    make_save_context_tool("scheduler"),
@@ -444,7 +825,7 @@ def _get_tool_docs_for_react(user_query: str) -> str:
     return load_tool_docs(
         "scheduler",
         user_query,
-        always_include=["save_context", "create_event", "quick_add_event"],
+        always_include=["save_context", "create_event", "quick_add_event", "find_free_slots", "get_schedule_report"],
     )
 
 
@@ -459,7 +840,7 @@ def _get_tool_map_for_react(
         selected = select_tool_names(
             "scheduler",
             user_query,
-            always_include=["save_context", "create_event", "quick_add_event"],
+            always_include=["save_context", "create_event", "quick_add_event", "find_free_slots", "get_schedule_report"],
         )
         filtered = {name: all_tools[name] for name in selected if name in all_tools}
         if filtered:
@@ -481,17 +862,40 @@ def execute_with_llm_orchestration(
     fast_path_query = _extract_preference_query(user_query)
     normalized_query = fast_path_query.lower()
     session_key = _scheduler_preferences_session_key(artifacts_out)
+    draft_preferences = _load_scheduler_schedule_draft() or load_scheduler_preferences()
 
     pending_result = _handle_pending_scheduler_preferences_reply(fast_path_query, session_key)
     if pending_result is not None:
         return pending_result
 
-    if _looks_like_scheduler_preference_followup_setup(user_query):
+    if _get_pending_scheduler_preferences(session_key) and not _looks_like_scheduler_preference_input(fast_path_query):
+        _clear_pending_scheduler_preferences(session_key)
+
+    if _SUGGESTED_SCHEDULE_RE.search(normalized_query):
+        return _start_suggested_schedule_setup(session_key, base_preferences=draft_preferences)
+
+    if (_SCHEDULE_APPROVAL_RE.search(normalized_query) or _SCHEDULE_APPLY_RE.search(normalized_query)) and _schedule_suggestion_context_present(user_query):
+        return _apply_schedule_draft(session_key, draft_preferences)
+
+    if _schedule_suggestion_context_present(user_query):
+        draft_direct_edit = try_apply_scheduler_preference_edits(fast_path_query, draft_preferences)
+        if isinstance(draft_direct_edit, dict):
+            updated_preferences = draft_direct_edit.get("preferences", {}) if isinstance(draft_direct_edit.get("preferences"), dict) else draft_preferences
+            changes = draft_direct_edit.get("changes", []) if isinstance(draft_direct_edit.get("changes"), list) else []
+            return _save_schedule_suggestion_preview(session_key, updated_preferences, changes)
+        if _SCHEDULER_PREFERENCE_FOLLOWUP_RE.search(normalized_query):
+            return _start_suggested_schedule_setup(session_key, base_preferences=draft_preferences)
+
+    if _SCHEDULER_PREFERENCE_FOLLOWUP_RE.search(normalized_query) and _looks_like_scheduler_preference_followup_setup(user_query):
         return _start_scheduler_preferences_setup(session_key, base_preferences=load_scheduler_preferences())
 
     direct_edit_result = _apply_direct_scheduler_preference_edits(fast_path_query, session_key)
     if direct_edit_result is not None:
         return direct_edit_result
+
+    report_result = _build_scheduler_report(session_key, fast_path_query)
+    if report_result is not None:
+        return report_result
 
     if _SCHEDULER_PREFERENCES_SHOW_RE.search(normalized_query):
         prefs = load_scheduler_preferences()

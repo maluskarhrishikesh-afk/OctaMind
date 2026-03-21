@@ -28,6 +28,25 @@ _LOCAL_FALLBACK_TOKEN_CAPS = {
     "nl_workflow_planning": 224,
 }
 
+_LOCAL_PROVIDER_NAMES = {
+    "ollama",
+    "ollama_qwen_fast",
+    "ollama_llama3",
+    "lmstudio",
+    "custom",
+    "gemma3_local",
+}
+
+_LOCAL_TIMEOUT_BY_PURPOSE = {
+    "routing": 240,
+    "intent_classification": 240,
+    "agent_planning": 300,
+    "dag_planning": 420,
+    "skill_dag_planning": 420,
+    "nl_workflow_planning": 420,
+    "general": 180,
+}
+
 
 def _is_retryable_llm_error(exc: Exception) -> bool:
     text = str(exc).lower()
@@ -36,18 +55,6 @@ def _is_retryable_llm_error(exc: Exception) -> bool:
         "rate limit",
         "ratelimitreached",
         "too many requests",
-        "timeout",
-        "timed out",
-        "temporarily unavailable",
-        "connection reset",
-        "connection aborted",
-        "connection refused",
-        "connection error",
-        "apiconnectionerror",
-        "internal server error",
-        "bad gateway",
-        "service unavailable",
-        "gateway timeout",
     )
     return any(marker in text for marker in retryable_markers)
 
@@ -68,7 +75,7 @@ def _get_planner_fallback_provider_name() -> str:
     if config.get("planner_fallback_enabled", True) is False:
         return ""
 
-    provider_name = str(config.get("planner_fallback_model", "gemma3_local") or "").strip()
+    provider_name = str(config.get("planner_fallback_model", "ollama") or "").strip()
     providers = config.get("providers", {})
     if provider_name and provider_name in providers:
         return provider_name
@@ -94,6 +101,20 @@ def _strip_markdown_code_fence(text: str) -> str:
     return cleaned
 
 
+def _is_local_provider_name(provider_name: str) -> bool:
+    return str(provider_name or "").strip().lower() in _LOCAL_PROVIDER_NAMES
+
+
+def _effective_timeout(provider_name: str, purpose: str, requested_timeout: int) -> int:
+    timeout = max(int(requested_timeout or 0), 1)
+    if not _is_local_provider_name(provider_name):
+        return timeout
+    local_timeout = _LOCAL_TIMEOUT_BY_PURPOSE.get(str(purpose or "general").strip().lower())
+    if local_timeout is None:
+        local_timeout = _LOCAL_TIMEOUT_BY_PURPOSE["general"]
+    return max(timeout, int(local_timeout))
+
+
 class GitHubModelsLLM:
     """
     Octa Bot LLM client.
@@ -101,7 +122,7 @@ class GitHubModelsLLM:
     Supports any provider registered in config/providers.json:
       - openai_compatible  (GitHub Models, OpenAI, Ollama, LM Studio, llama.cpp, vLLM, …)
       - anthropic          (Claude 3.5 Sonnet / Haiku)
-      - local_hf           (Gemma 3 4B — default; any cached HuggingFace model)
+    - local_hf           (locally cached HuggingFace model)
 
     Switch the active provider by changing ``active`` in config/providers.json
     or calling ``src.agent.llm.provider_registry.set_active_provider(name)``.
@@ -127,13 +148,14 @@ class GitHubModelsLLM:
         purpose: str = "general",
         allow_local_fallback: bool = False,
     ) -> Any:
+        effective_timeout = _effective_timeout(self.provider_name, purpose, timeout)
         try:
             return self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                timeout=timeout,
+                timeout=effective_timeout,
             )
         except Exception as exc:
             fallback_provider = _get_planner_fallback_provider_name()
@@ -148,7 +170,7 @@ class GitHubModelsLLM:
             fallback_llm = get_llm_client(provider_name=fallback_provider)
             fallback_max_tokens = _cap_local_fallback_tokens(purpose, max_tokens)
             fallback_temperature = 0.0 if temperature <= 0.2 else min(temperature, 0.2)
-            fallback_timeout = max(timeout, 300)
+            fallback_timeout = max(effective_timeout, 300)
 
             logger.warning(
                 "Planner fallback to local model — purpose=%s primary=%s fallback=%s reason=%s max_tokens=%d→%d",
@@ -349,12 +371,14 @@ After EVERY response (including pure conversation), end with a short section:
 """
 
         messages = [{"role": "system", "content": system_prompt}]
+        is_local_provider = _is_local_provider_name(self.provider_name)
+        history_limit = 4 if is_local_provider else 10
 
         # Add conversation history if provided (last 5 exchanges)
         # Strip to only role+content — extra fields (file_artifacts, search_paths,
         # ts, elapsed …) can push the request past the token limit.
         if conversation_history:
-            for _h in conversation_history[-10:]:
+            for _h in conversation_history[-history_limit:]:
                 if isinstance(_h, dict) and "role" in _h and "content" in _h:
                     messages.append({"role": _h["role"], "content": _h["content"]})
 
@@ -365,8 +389,9 @@ After EVERY response (including pure conversation), end with a short section:
             response = self.create_chat_completion(
                 messages=messages,
                 temperature=0.7,  # Balanced creativity and consistency
-                max_tokens=300,
-                timeout=30,  # 30 second timeout to prevent hanging
+                max_tokens=160,
+                timeout=180 if is_local_provider else 30,
+                purpose="general",
             )
 
             return response.choices[0].message.content.strip()

@@ -354,7 +354,12 @@ def build_client(provider_name: Optional[str] = None) -> Tuple[Any, str, str]:
                 f"Set '{cfg.get('api_key_env')}' in config/credentials.json or as an env var."
             )
 
-        client = OpenAI(base_url=base_url, api_key=api_key)
+        is_local_server = str(base_url or "").startswith(("http://localhost", "http://127.0.0.1"))
+        client = OpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            max_retries=0 if is_local_server else 2,
+        )
         logger.info("LLM provider: %s  model: %s  type: %s", label, model, ptype)
         return client, model, ptype
 

@@ -7,13 +7,16 @@ Date: 2026-03-20
 ### 1. Scheduler markdown preferences
 
 - Added durable Scheduler preferences in `your_data/scheduler_preferences.md`
-- Added guided `show`, `edit`, `review`, and `apply` flows in the Scheduler orchestrator
+- Added `show`, `edit`, `review`, and `apply` flows in the Scheduler orchestrator
 - Added supported policy fields:
+  - work hours
   - focus-block length
   - meeting buffer
+  - default meeting reminder
   - planning style
   - hard vs soft constraints
   - optional protected no-meeting windows
+  - recurring reminders
 - Scheduler no-meeting windows now support exact minute ranges such as `7:45 PM to 9:15 PM` for cases like gym time
 - Scheduler planning context now includes the saved preference summary so future scheduling requests can use those defaults
 - Scheduler preference setup and edit detection now tolerate common typos such as `schedular` and `prefrences`

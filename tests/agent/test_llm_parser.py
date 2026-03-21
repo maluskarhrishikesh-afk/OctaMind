@@ -200,7 +200,7 @@ class TestGetLlmClient:
 
 
 class TestPlannerLocalFallback:
-    def test_retryable_planning_error_uses_local_fallback(self):
+    def test_rate_limit_error_uses_local_fallback(self):
         import src.agent.llm.llm_parser as mod
 
         primary_client = MagicMock()
@@ -243,6 +243,46 @@ class TestPlannerLocalFallback:
         assert fallback_kwargs["max_tokens"] == 224
         assert fallback_kwargs["temperature"] == 0.0
 
+    def test_timeout_error_does_not_use_local_fallback(self):
+        import src.agent.llm.llm_parser as mod
+
+        primary_client = MagicMock()
+        primary_client.chat.completions.create.side_effect = RuntimeError("Request timed out")
+
+        fallback_client = MagicMock()
+
+        def fake_build_client(provider_name=None):
+            if provider_name == "ollama_qwen_fast":
+                return fallback_client, "qwen2.5:1.5b", "openai_compatible"
+            return primary_client, "gpt-4o-mini", "openai_compatible"
+
+        provider_cfg = {
+            "active": "github_models",
+            "planner_fallback_enabled": True,
+            "planner_fallback_model": "ollama_qwen_fast",
+            "providers": {
+                "github_models": {"type": "openai_compatible"},
+                "ollama_qwen_fast": {"type": "openai_compatible"},
+            },
+        }
+
+        with patch("src.agent.llm.provider_registry.build_client", side_effect=fake_build_client), patch(
+            "src.agent.llm.provider_registry.load_provider_config",
+            return_value=provider_cfg,
+        ):
+            llm = mod.get_llm_client()
+            with pytest.raises(RuntimeError, match="timed out"):
+                llm.create_chat_completion(
+                    messages=[{"role": "user", "content": "Plan this task"}],
+                    temperature=0,
+                    max_tokens=200,
+                    timeout=40,
+                    purpose="dag_planning",
+                    allow_local_fallback=True,
+                )
+
+        fallback_client.chat.completions.create.assert_not_called()
+
     def test_non_retryable_error_does_not_use_local_fallback(self):
         import src.agent.llm.llm_parser as mod
 
@@ -282,6 +322,110 @@ class TestPlannerLocalFallback:
                 )
 
         fallback_client.chat.completions.create.assert_not_called()
+
+
+class TestConversationalChatLocalProviders:
+    def test_local_chat_uses_longer_timeout_and_shorter_history(self):
+        import src.agent.llm.llm_parser as mod
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _fake_completion("hello")
+
+        with patch(
+            "src.agent.llm.provider_registry.build_client",
+            return_value=(mock_client, "qwen2.5:1.5b", "openai_compatible"),
+        ):
+            llm = mod.GitHubModelsLLM(provider_name="ollama_qwen_fast")
+
+        history = [{"role": "user", "content": f"msg {idx}"} for idx in range(6)]
+        reply = llm.chat(
+            "Tell me something about India",
+            agent_name="My Assistant",
+            agent_type="assistant",
+            memory_context="",
+            conversation_history=history,
+        )
+
+        assert reply == "hello"
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["timeout"] == 180
+        assert kwargs["max_tokens"] == 160
+        assert len(kwargs["messages"]) == 1 + 4 + 1
+
+    def test_remote_chat_keeps_default_timeout_and_history(self):
+        import src.agent.llm.llm_parser as mod
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _fake_completion("hello")
+
+        with patch(
+            "src.agent.llm.provider_registry.build_client",
+            return_value=(mock_client, "gpt-4o-mini", "openai_compatible"),
+        ):
+            llm = mod.GitHubModelsLLM(provider_name="github_models")
+
+        history = [{"role": "user", "content": f"msg {idx}"} for idx in range(12)]
+        llm.chat(
+            "Tell me something about India",
+            agent_name="My Assistant",
+            agent_type="assistant",
+            memory_context="",
+            conversation_history=history,
+        )
+
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["timeout"] == 30
+        assert len(kwargs["messages"]) == 1 + 10 + 1
+
+
+class TestLocalTimeoutPolicy:
+    def test_local_dag_planning_timeout_is_raised(self):
+        import src.agent.llm.llm_parser as mod
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _fake_completion("[]")
+
+        with patch(
+            "src.agent.llm.provider_registry.build_client",
+            return_value=(mock_client, "qwen2.5:1.5b", "openai_compatible"),
+        ):
+            llm = mod.GitHubModelsLLM(provider_name="ollama_qwen_fast")
+
+        llm.create_chat_completion(
+            messages=[{"role": "user", "content": "Plan this task"}],
+            temperature=0,
+            max_tokens=2000,
+            timeout=40,
+            purpose="dag_planning",
+            allow_local_fallback=True,
+        )
+
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["timeout"] == 420
+
+    def test_local_intent_timeout_is_raised(self):
+        import src.agent.llm.llm_parser as mod
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = _fake_completion('{"category": "chat", "reason": "ok"}')
+
+        with patch(
+            "src.agent.llm.provider_registry.build_client",
+            return_value=(mock_client, "qwen2.5:1.5b", "openai_compatible"),
+        ):
+            llm = mod.GitHubModelsLLM(provider_name="ollama_qwen_fast")
+
+        llm.create_chat_completion(
+            messages=[{"role": "user", "content": "Classify this task"}],
+            temperature=0,
+            max_tokens=60,
+            timeout=40,
+            purpose="intent_classification",
+            allow_local_fallback=True,
+        )
+
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        assert kwargs["timeout"] == 240
 
 
 if __name__ == "__main__":

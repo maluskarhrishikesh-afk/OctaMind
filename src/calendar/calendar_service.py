@@ -105,6 +105,104 @@ def _today_start() -> datetime:
     return datetime(d.year, d.month, d.day, tzinfo=_local_tz())
 
 
+def _normalize_interval(start: datetime, end: datetime) -> tuple[datetime, datetime] | None:
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=_local_tz())
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=_local_tz())
+    if end <= start:
+        return None
+    return start, end
+
+
+def _merge_intervals(intervals: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    ordered = sorted((interval for interval in intervals if interval and interval[1] > interval[0]), key=lambda item: item[0])
+    if not ordered:
+        return []
+    merged: list[list[datetime]] = [[ordered[0][0], ordered[0][1]]]
+    for start, end in ordered[1:]:
+        current = merged[-1]
+        if start <= current[1]:
+            if end > current[1]:
+                current[1] = end
+            continue
+        merged.append([start, end])
+    return [(start, end) for start, end in merged]
+
+
+def _subtract_intervals(
+    base_intervals: list[tuple[datetime, datetime]],
+    blocked_intervals: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
+    remaining = _merge_intervals(base_intervals)
+    blockers = _merge_intervals(blocked_intervals)
+    if not blockers:
+        return remaining
+    output: list[tuple[datetime, datetime]] = []
+    for base_start, base_end in remaining:
+        segments = [(base_start, base_end)]
+        for block_start, block_end in blockers:
+            next_segments: list[tuple[datetime, datetime]] = []
+            for seg_start, seg_end in segments:
+                if block_end <= seg_start or block_start >= seg_end:
+                    next_segments.append((seg_start, seg_end))
+                    continue
+                if block_start > seg_start:
+                    next_segments.append((seg_start, block_start))
+                if block_end < seg_end:
+                    next_segments.append((block_end, seg_end))
+            segments = next_segments
+            if not segments:
+                break
+        output.extend(interval for interval in segments if interval[1] > interval[0])
+    return output
+
+
+def _interval_minutes(intervals: list[tuple[datetime, datetime]]) -> int:
+    total = 0
+    for start, end in intervals:
+        total += max(0, int((end - start).total_seconds() // 60))
+    return total
+
+
+def _window_for_day(
+    day: date,
+    start_hour: int,
+    start_minute: int,
+    end_hour: int,
+    end_minute: int,
+) -> tuple[datetime, datetime]:
+    tz = _local_tz()
+    return (
+        datetime(day.year, day.month, day.day, start_hour, start_minute, tzinfo=tz),
+        datetime(day.year, day.month, day.day, end_hour, end_minute, tzinfo=tz),
+    )
+
+
+def _blocked_windows_for_day(day: date, protected_windows: list[dict[str, Any]] | None) -> list[tuple[datetime, datetime]]:
+    if not protected_windows:
+        return []
+    weekday = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][day.weekday()]
+    intervals: list[tuple[datetime, datetime]] = []
+    for item in protected_windows:
+        if not isinstance(item, dict):
+            continue
+        days = item.get("days", []) if isinstance(item.get("days"), list) else []
+        if days and weekday not in {str(value).strip().lower() for value in days}:
+            continue
+        start, end = _window_for_day(
+            day,
+            int(item.get("start_hour", 0) or 0),
+            int(item.get("start_minute", 0) or 0),
+            int(item.get("end_hour", 0) or 0),
+            int(item.get("end_minute", 0) or 0),
+        )
+        interval = _normalize_interval(start, end)
+        if interval is not None:
+            intervals.append(interval)
+    return _merge_intervals(intervals)
+
+
 def _event_summary(ev: dict) -> dict:
     """Extract a readable summary dict from a raw Calendar API event."""
     start_raw = ev.get("start", {})
@@ -549,7 +647,10 @@ def find_free_slots(
     date_str: str,
     duration_minutes: int = 60,
     working_start_hour: int = 9,
+    working_start_minute: int = 0,
     working_end_hour: int = 18,
+    working_end_minute: int = 0,
+    buffer_minutes: int = 0,
     calendar_id: str = "primary",
 ) -> dict:
     """
@@ -572,13 +673,16 @@ def find_free_slots(
                     s = s.replace(tzinfo=_local_tz())
                 if e.tzinfo is None:
                     e = e.replace(tzinfo=_local_tz())
+                if buffer_minutes:
+                    s = s - timedelta(minutes=buffer_minutes)
+                    e = e + timedelta(minutes=buffer_minutes)
                 busy.append((s, e))
-        busy.sort(key=lambda x: x[0])
+        busy = _merge_intervals(busy)
 
         # Generate candidate slots across working hours
         day = date.fromisoformat(date_str)
-        cursor   = datetime(day.year, day.month, day.day, working_start_hour, 0, tzinfo=_local_tz())
-        work_end = datetime(day.year, day.month, day.day, working_end_hour,   0, tzinfo=_local_tz())
+        cursor   = datetime(day.year, day.month, day.day, working_start_hour, working_start_minute, tzinfo=_local_tz())
+        work_end = datetime(day.year, day.month, day.day, working_end_hour, working_end_minute, tzinfo=_local_tz())
         delta = timedelta(minutes=duration_minutes)
         free_slots: list[dict] = []
 
@@ -608,6 +712,131 @@ def find_free_slots(
         }
     except Exception as exc:
         return {"status": "error", "message": f"Could not find free slots: {exc}"}
+
+
+def generate_schedule_report(
+    start_date_str: str,
+    end_date_str: str,
+    working_start_hour: int = 9,
+    working_start_minute: int = 0,
+    working_end_hour: int = 18,
+    working_end_minute: int = 0,
+    protected_windows: list[dict[str, Any]] | None = None,
+    buffer_minutes: int = 0,
+    calendar_id: str = "primary",
+) -> dict:
+    try:
+        start_date = date.fromisoformat(start_date_str)
+        end_date = date.fromisoformat(end_date_str)
+        if end_date < start_date:
+            start_date, end_date = end_date, start_date
+
+        day_cursor = start_date
+        total_event_count = 0
+        total_busy_minutes = 0
+        total_work_minutes = 0
+        total_available_minutes = 0
+        total_protected_minutes = 0
+        day_summaries: list[dict[str, Any]] = []
+
+        while day_cursor <= end_date:
+            date_str = day_cursor.isoformat()
+            result = get_events_for_date(date_str, calendar_id)
+            if result.get("status") != "success":
+                return result
+            events = list(result.get("events", []))
+            total_event_count += len(events)
+            work_start, work_end = _window_for_day(
+                day_cursor,
+                working_start_hour,
+                working_start_minute,
+                working_end_hour,
+                working_end_minute,
+            )
+            working_interval = _normalize_interval(work_start, work_end)
+            if working_interval is None:
+                return {"status": "error", "message": "Invalid working-hour window for schedule report."}
+            work_minutes = _interval_minutes([working_interval])
+            busy_intervals: list[tuple[datetime, datetime]] = []
+            for event in events:
+                event_start = _dt(event.get("start"))
+                event_end = _dt(event.get("end"))
+                if not event_start or not event_end:
+                    continue
+                if event_start.tzinfo is None:
+                    event_start = event_start.replace(tzinfo=_local_tz())
+                if event_end.tzinfo is None:
+                    event_end = event_end.replace(tzinfo=_local_tz())
+                if buffer_minutes:
+                    event_start = event_start - timedelta(minutes=buffer_minutes)
+                    event_end = event_end + timedelta(minutes=buffer_minutes)
+                overlap_start = max(event_start, work_start)
+                overlap_end = min(event_end, work_end)
+                interval = _normalize_interval(overlap_start, overlap_end)
+                if interval is not None:
+                    busy_intervals.append(interval)
+            merged_busy = _merge_intervals(busy_intervals)
+            protected = _subtract_intervals(_blocked_windows_for_day(day_cursor, protected_windows), [])
+            protected_inside_work: list[tuple[datetime, datetime]] = []
+            for protected_start, protected_end in protected:
+                overlap = _normalize_interval(max(protected_start, work_start), min(protected_end, work_end))
+                if overlap is not None:
+                    protected_inside_work.append(overlap)
+            protected_inside_work = _merge_intervals(protected_inside_work)
+            available_intervals = _subtract_intervals([working_interval], merged_busy + protected_inside_work)
+
+            busy_minutes = _interval_minutes(merged_busy)
+            protected_minutes = _interval_minutes(protected_inside_work)
+            available_minutes = _interval_minutes(available_intervals)
+
+            total_work_minutes += work_minutes
+            total_busy_minutes += busy_minutes
+            total_protected_minutes += protected_minutes
+            total_available_minutes += available_minutes
+            day_summaries.append(
+                {
+                    "date": date_str,
+                    "event_count": len(events),
+                    "busy_minutes": busy_minutes,
+                    "protected_minutes": protected_minutes,
+                    "available_minutes": available_minutes,
+                }
+            )
+            day_cursor += timedelta(days=1)
+
+        busiest_day = max(day_summaries, key=lambda item: item["busy_minutes"], default=None)
+        freest_day = max(day_summaries, key=lambda item: item["available_minutes"], default=None)
+        report_lines = [
+            f"Schedule report for {start_date_str} to {end_date_str}:",
+            f"- Meetings and events scheduled: {total_event_count}",
+            f"- Busy time inside work hours: {total_busy_minutes // 60}h {total_busy_minutes % 60:02d}m",
+            f"- Protected time inside work hours: {total_protected_minutes // 60}h {total_protected_minutes % 60:02d}m",
+            f"- Free time inside work hours: {total_available_minutes // 60}h {total_available_minutes % 60:02d}m",
+        ]
+        if busiest_day:
+            report_lines.append(
+                f"- Busiest day: {busiest_day['date']} ({busiest_day['busy_minutes'] // 60}h {busiest_day['busy_minutes'] % 60:02d}m busy)"
+            )
+        if freest_day:
+            report_lines.append(
+                f"- Most free time: {freest_day['date']} ({freest_day['available_minutes'] // 60}h {freest_day['available_minutes'] % 60:02d}m free)"
+            )
+        return {
+            "status": "success",
+            "start_date": start_date_str,
+            "end_date": end_date_str,
+            "event_count": total_event_count,
+            "work_minutes": total_work_minutes,
+            "busy_minutes": total_busy_minutes,
+            "protected_minutes": total_protected_minutes,
+            "free_minutes": total_available_minutes,
+            "days": day_summaries,
+            "message": "\n".join(report_lines),
+        }
+    except Exception as exc:
+        if _is_auth_error(exc):
+            return _auth_error(exc)
+        return {"status": "error", "message": f"Could not build schedule report: {exc}"}
 
 
 def find_conflicts(days: int = 7, calendar_id: str = "primary") -> dict:

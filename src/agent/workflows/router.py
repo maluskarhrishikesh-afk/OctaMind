@@ -279,6 +279,19 @@ def _stem(word: str) -> str:
     return word
 
 
+_PREFILTER_NOISY_TOKENS: FrozenSet[str] = frozenset({
+    "can",
+    "could",
+    "would",
+    "should",
+    "tell",
+    "show",
+    "check",
+    "give",
+    "please",
+})
+
+
 def _looks_like_fresh_web_query(command: str) -> bool:
     """Heuristic for freshness-sensitive public-web questions.
 
@@ -344,7 +357,10 @@ def keyword_pre_filter(command: str) -> bool:
     """
     kmap = _get_keyword_map()
     lower = command.lower()
-    cmd_words = set(re.findall(r"[a-z]{3,}", lower))
+    cmd_words = {
+        word for word in re.findall(r"[a-z]{3,}", lower)
+        if word not in _PREFILTER_NOISY_TOKENS
+    }
     # Expand both sides with stemmed forms for plural/inflection tolerance
     cmd_stems = cmd_words | {_stem(w) for w in cmd_words}
     matched = any(
@@ -547,7 +563,7 @@ _CURRENT_CHANNEL_DELIVERY_RE = re.compile(
     r"|\bdownload\s+(it|them|those|that)\b",
     re.IGNORECASE,
 )
-_MAILBOX_DOMAIN_RE = re.compile(r"\b(email|emails|mail|mails|gmail|inbox|spam|junk)\b", re.IGNORECASE)
+_MAILBOX_DOMAIN_RE = re.compile(r"\b(mailbox|email|emails|mail|mails|gmail|inbox|spam|junk)\b", re.IGNORECASE)
 _MAILBOX_TIME_RE = re.compile(
     r"\b(today|today's|yesterday|yesterday's|last\s+week|this\s+week|last\s+month|between|from|since|before|after|on)\b"
     r"|\b\d{4}-\d{2}-\d{2}\b"

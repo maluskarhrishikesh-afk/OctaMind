@@ -22,6 +22,16 @@
 - **description**: Retrieve all events for one specific date in `YYYY-MM-DD` format. Use when the user mentions an explicit day such as "check 2026-03-12", "what do I have on Friday", "find availability on March 15", or before booking a meeting on a fixed date.
 - **tags**: specific date, date, schedule on date, check date, Friday, March 15, what do I have on, explicit date
 
+### find_free_slots
+- **signature**: `find_free_slots(date_str, duration_minutes=None, calendar_id="primary")`
+- **description**: Find free slots that already respect saved work hours, meeting buffers, and protected no-meeting windows. Use before suggesting or booking when the user asks for availability, best meeting times, or focus blocks.
+- **tags**: free slots, best time, availability, meeting windows, protected time, work hours, open slots
+
+### get_schedule_report
+- **signature**: `get_schedule_report(start_date, end_date, calendar_id="primary")`
+- **description**: Generate a deterministic schedule report across a date range, including event count, busy time, protected time, and free time inside saved work hours. Use when the user asks for analytics, free-time totals, meeting load, or a schedule report.
+- **tags**: schedule report, free time, meeting count, analytics, workload, busy time, productivity summary
+
 ### search_events
 - **signature**: `search_events(query, days=30, max_results=10)`
 - **description**: Search existing calendar events by title, attendee, or keyword over a date window. Use when the user says "find my appraisal meeting", "search calendar for dentist", "do I have anything about finance review", or "look for meetings with John".

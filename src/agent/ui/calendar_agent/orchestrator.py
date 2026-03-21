@@ -337,6 +337,25 @@ def _looks_like_calendar_preference_followup_setup(raw_query: str) -> bool:
     return "topic=calendar_preferences" in lowered or '"calendar_preferences"' in lowered or "calendar preferences" in lowered
 
 
+def _looks_like_calendar_preference_input(raw_query: str) -> bool:
+    text = str(raw_query or "").strip().lower()
+    if not text:
+        return False
+    if _NUMERIC_REPLY_RE.match(text):
+        return True
+    return any(token in text for token in (
+        "calendar preference",
+        "calendar preferences",
+        "calendar setting",
+        "working hours",
+        "meeting duration",
+        "default reminder",
+        "reminder",
+        "work start",
+        "work end",
+    ))
+
+
 def _query_has_explicit_duration(text: str) -> bool:
     lowered = str(text or "").lower()
     return bool(
@@ -727,7 +746,7 @@ def _handle_month_overview_query(user_query: str, tool_map: Dict[str, Any]) -> O
 
 
 def _build_all_tools(user_query: str = "") -> Dict[str, Any]:
-    from src.calendar import calendar_service as cs  # noqa: PLC0415
+    import src.calendar.calendar_service as cs  # noqa: PLC0415
     from src.agent.manifest.context_manifest import (  # noqa: PLC0415
         auto_save_calendar_context, make_save_context_tool, write_context,
     )
@@ -794,11 +813,14 @@ def _build_all_tools(user_query: str = "") -> Dict[str, Any]:
         "search_events": lambda query, days=30, max_results=10: cs.search_events(query, days, max_results),
         "list_events": lambda start=None, end=None, max_results=20, calendar_id="primary": cs.list_events(start, end, max_results, calendar_id),
         "get_event": lambda event_id: cs.get_event(event_id),
-        "find_free_slots": lambda date_str, duration_minutes=None, working_start_hour=None, working_end_hour=None, calendar_id="primary": cs.find_free_slots(
+        "find_free_slots": lambda date_str, duration_minutes=None, working_start_hour=None, working_start_minute=None, working_end_hour=None, working_end_minute=None, calendar_id="primary": cs.find_free_slots(
             date_str,
             int(duration_minutes or calendar_preferences["default_meeting_minutes"]),
             int(working_start_hour or calendar_preferences["working_hours"]["start_hour"]),
+            int(working_start_minute if working_start_minute is not None else calendar_preferences["working_hours"].get("start_minute", 0)),
             int(working_end_hour or calendar_preferences["working_hours"]["end_hour"]),
+            int(working_end_minute if working_end_minute is not None else calendar_preferences["working_hours"].get("end_minute", 0)),
+            0,
             calendar_id,
         ),
         "create_event": lambda title, start, end, description="", location="", attendees=None, calendar_id="primary": _remember_event(cs.create_event(title, start, end, description, location, attendees, calendar_id)),
@@ -868,7 +890,10 @@ def execute_with_llm_orchestration(
     if pending_result is not None:
         return _return_fast_path_result(pending_result)
 
-    if _looks_like_calendar_preference_followup_setup(user_query):
+    if _get_pending_calendar_preferences(session_key) and not _looks_like_calendar_preference_input(fast_path_query):
+        _clear_pending_calendar_preferences(session_key)
+
+    if _looks_like_calendar_preference_followup_setup(fast_path_query):
         return _return_fast_path_result(_start_calendar_preferences_setup(session_key, base_preferences=load_calendar_preferences()))
 
     if _CALENDAR_PREFERENCES_SHOW_RE.search(normalized_query):

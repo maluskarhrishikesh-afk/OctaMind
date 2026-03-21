@@ -5,9 +5,9 @@
 
   "_planner_fallback_comment": "Optional: use a local model only for intent/routing/planning retries when the active provider is rate-limited or transiently unavailable.",
   "planner_fallback_enabled": true,
-  "planner_fallback_model": "gemma3_local",
+  "planner_fallback_model": "ollama_qwen_fast",
 
-  "_memory_model_comment": "Optional: dedicated provider for memory consolidation LLM calls (insight enrichment in _enrich_recent_insights). Falls back to 'active' if not set. Set to 'gemma3_local' for fully offline/fast consolidation.",
+  "_memory_model_comment": "Optional: dedicated provider for memory consolidation LLM calls (insight enrichment in _enrich_recent_insights). Falls back to 'active' if not set. Set to 'ollama' for fully offline/fast consolidation.",
   "memory_model": "github_models",
 
   "providers": {
@@ -66,11 +66,20 @@
 
     "ollama": {
       "type": "openai_compatible",
-      "label": "Ollama (local server — default model: gemma3:4b)",
+      "label": "Ollama (local server — Phi-3 Mini)",
       "base_url": "http://localhost:11434/v1",
-      "model": "gemma3:4b",
+      "model": "phi3:mini",
       "api_key": "ollama",
-      "_note": "Run: ollama run gemma3:4b"
+      "_note": "Run: ollama run phi3:mini"
+    },
+
+    "ollama_qwen_fast": {
+      "type": "openai_compatible",
+      "label": "Ollama (local server — Qwen 2.5 1.5B fast)",
+      "base_url": "http://localhost:11434/v1",
+      "model": "qwen2.5:1.5b",
+      "api_key": "ollama",
+      "_note": "Run: ollama run qwen2.5:1.5b"
     },
 
     "ollama_llama3": {

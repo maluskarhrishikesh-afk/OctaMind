@@ -14,15 +14,21 @@ _CALENDAR_PREFERENCES_PATH = get_your_data_dir("calendar_preferences.md")
 _JSON_BLOCK_RE = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 
 DEFAULT_CALENDAR_PREFERENCES: Dict[str, Any] = {
-    "version": 1,
+    "version": 2,
     "updated_at": "",
     "working_hours": {
         "start_hour": 9,
+        "start_minute": 0,
         "end_hour": 18,
+        "end_minute": 0,
     },
     "default_meeting_minutes": 45,
-    "default_reminder_minutes": 30,
+    "default_reminder_minutes": 15,
 }
+
+
+def _clock_to_string(hour: int, minute: int) -> str:
+    return f"{int(hour) % 24:02d}:{max(0, min(int(minute), 59)):02d}"
 
 
 def get_calendar_preferences_path() -> Path:
@@ -47,10 +53,18 @@ def _normalize_calendar_preferences(raw_preferences: Dict[str, Any] | None) -> D
     except Exception:
         working_hours["start_hour"] = int(DEFAULT_CALENDAR_PREFERENCES["working_hours"]["start_hour"])
     try:
+        working_hours["start_minute"] = max(min(int(working_hours.get("start_minute", 0) or 0), 59), 0)
+    except Exception:
+        working_hours["start_minute"] = int(DEFAULT_CALENDAR_PREFERENCES["working_hours"]["start_minute"])
+    try:
         working_hours["end_hour"] = max(min(int(working_hours.get("end_hour", 18) or 18), 24), 1)
     except Exception:
         working_hours["end_hour"] = int(DEFAULT_CALENDAR_PREFERENCES["working_hours"]["end_hour"])
-    if working_hours["end_hour"] <= working_hours["start_hour"]:
+    try:
+        working_hours["end_minute"] = max(min(int(working_hours.get("end_minute", 0) or 0), 59), 0)
+    except Exception:
+        working_hours["end_minute"] = int(DEFAULT_CALENDAR_PREFERENCES["working_hours"]["end_minute"])
+    if (working_hours["end_hour"], working_hours["end_minute"]) <= (working_hours["start_hour"], working_hours["start_minute"]):
         working_hours = copy.deepcopy(DEFAULT_CALENDAR_PREFERENCES["working_hours"])
     preferences["working_hours"] = working_hours
 
@@ -93,7 +107,7 @@ def render_calendar_preferences_summary(preferences: Dict[str, Any] | None = Non
     prefs = _normalize_calendar_preferences(preferences)
     lines = [
         "Saved calendar preferences:",
-        f"- Working hours: {int(prefs['working_hours']['start_hour']):02d}:00 to {int(prefs['working_hours']['end_hour']):02d}:00",
+        f"- Working hours: {_clock_to_string(int(prefs['working_hours']['start_hour']), int(prefs['working_hours']['start_minute']))} to {_clock_to_string(int(prefs['working_hours']['end_hour']), int(prefs['working_hours']['end_minute']))}",
         f"- Default meeting duration: {int(prefs['default_meeting_minutes'])} minutes",
         f"- Default reminder: {int(prefs['default_reminder_minutes'])} minutes before",
     ]
@@ -158,7 +172,7 @@ def render_calendar_preference_guidance(preferences: Dict[str, Any] | None = Non
     prefs = _normalize_calendar_preferences(preferences)
     return "\n".join([
         "Calendar preferences currently active:",
-        f"- Preferred working hours for slot searches: {int(prefs['working_hours']['start_hour']):02d}:00 to {int(prefs['working_hours']['end_hour']):02d}:00",
+        f"- Preferred working hours for slot searches: {_clock_to_string(int(prefs['working_hours']['start_hour']), int(prefs['working_hours']['start_minute']))} to {_clock_to_string(int(prefs['working_hours']['end_hour']), int(prefs['working_hours']['end_minute']))}",
         f"- Default meeting duration when omitted: {int(prefs['default_meeting_minutes'])} minutes",
         f"- Default reminder when omitted: {int(prefs['default_reminder_minutes'])} minutes before the event",
     ])

@@ -460,6 +460,17 @@ def test_classify_and_route_typoed_scheduler_preferences_uses_scheduler_only() -
     assert result.agents == ["scheduler"]
 
 
+def test_classify_and_route_joke_request_stays_chat_fast_path() -> None:
+    from src.agent.workflows.router import run_routing_pipeline
+
+    result = run_routing_pipeline("Can you tell me a joke?")
+
+    assert result.classification.category == "chat"
+    assert result.classification.source == "fast_path"
+    assert result.intent.category == "chat"
+    assert result.intent.agents == []
+
+
 def test_classify_and_route_gym_time_preference_uses_scheduler_only() -> None:
     from src.agent.workflows.router import classify_and_route
 

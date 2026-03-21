@@ -139,12 +139,14 @@ This is a deliberate safety rule: underspecified cleanup requests should never s
 
 ### Skill Preferences Architecture
 
-Persistent markdown-backed preferences are currently implemented only for mailbox behavior in Email.
+Persistent markdown-backed preferences are now implemented for Email, Calendar, and Scheduler.
 
 - Email has a durable markdown preference file plus review history and learning state.
-- Files, Drive, Calendar, and Scheduler currently expose explainability through execution plans, but they do not yet have persistent user-policy markdown files.
+- Calendar has a durable markdown preference file for working hours, default meeting duration, and reminder timing.
+- Scheduler has a durable markdown preference file for work hours, focus defaults, meeting buffers, meeting reminders, protected no-meeting windows, and recurring reminders.
+- Files and Drive still expose explainability through execution plans, but they do not yet have persistent user-policy markdown files.
 
-That asymmetry is intentional for now. A skill should only gain persistent preferences when it has stable, user-owned policy decisions that matter across sessions, for example cleanup posture, default review cadence, or automation mode.
+That rollout remains intentional. A skill should only gain persistent preferences when it has stable, user-owned policy decisions that matter across sessions, for example cleanup posture, scheduling policy, default review cadence, or automation mode.
 
 See [documentation/architecture/SKILL_PREFERENCES_ROADMAP.md](documentation/architecture/SKILL_PREFERENCES_ROADMAP.md) for the recommended rollout model.
 

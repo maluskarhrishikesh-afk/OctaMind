@@ -2,6 +2,7 @@
 
 Single source of truth for what is and isn't implemented. Use this to avoid hallucinating features that don't exist.
 
+Last updated: 2026-03-21 (Session 15 - scheduler template setup, sticky follow-up fix, schedule reporting)
 Last updated: 2026-03-20 (Session 13 - mailbox follow-up routing safety, ambiguity clarification guard, skill-preferences roadmap, skill help guidance)
 Last updated: 2026-03-20 (Session 14 - scheduler preferences, calendar preferences, product guide help path)
 Last updated: 2026-03-20 (Session 12 - mailbox learning, adaptive mailbox setup, shared execution-plan metadata across email/files/calendar/drive)
@@ -17,6 +18,23 @@ Previous: 2026-03-02 (Session 3 — New Files tools: search_file_all_drives, del
 Previous: 2026-03-02 (Bug fixes: calendar date-context loss, ReAct observation truncation, Telegram Markdown entity crash, DAG JSON fence parsing verified; added human-friendly per-request workflow summary log; DAG algorithm walkthrough document added)  
 Previous: 2026-03-02 (Telegram UX overhaul: typing indicators, real-time progress editing, /reset & /agents commands, long-message splitting, file-artifact delivery; Dashboard download button for file artifacts; HubProcessor scheduling-context enrichment propagated to Telegram channel; `send_document_file` multipart upload added to telegram_service)  
 Previous: 2026-03-01 (fixed Python-bool JSON parse bug in skill_react_engine causing cascading `unknown action ''` failures; fixed tilde path expansion in dag_planner instruction resolver; added total LLM call count to workflow completion log; fixed website unicode emoji rendering; updated quickstart to remove internal Python snippet)
+
+---
+
+## ✅ 2026-03-21 Session 15 — Scheduler Template Setup + Sticky Follow-Up Fix + Reporting
+
+Detailed session log:
+
+- [documentation/status/SESSION_15_SCHEDULER_TEMPLATE_AND_REPORTING.md](documentation/status/SESSION_15_SCHEDULER_TEMPLATE_AND_REPORTING.md)
+
+Highlights:
+
+- `setup my schedule` now opens a suggested daily schedule draft flow with editable defaults, natural-language draft updates, and explicit apply commands like `apply these changes to my schedule`
+- Scheduler preference setup is now template-based so Telegram and dashboard users can edit work hours, protected windows, reminders, and recurring commitments in one reply
+- stale pending scheduler and calendar setup state now clears when the user switches to an unrelated request, which fixes the repeated `Scheduler setup 1/5` trap
+- scheduler preferences now cover work hours, meeting reminder defaults, recurring reminders, and richer protected windows
+- scheduler saves now sync calendar working hours and reminder defaults so slot-finding and reminders use the same policy baseline
+- scheduler now has a deterministic schedule-report fast path for meeting count, busy time, protected time, and free time summaries
 
 ---
 
