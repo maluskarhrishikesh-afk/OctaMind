@@ -159,6 +159,7 @@ Good smoke tests:
 - Email: "How many unread emails do I have?"
 - Calendar: "What is on my calendar today?"
 - Files: "Search my laptop for PDF invoices"
+- Document Parser: "Parse my invoice PDF into JSON"
 - Browser: "Search the web for the latest Python release"
 - Telegram: save a bot token on a Personal Assistant card, start the bot, then send `/status` to the bot from Telegram
 
@@ -169,6 +170,7 @@ Good smoke tests:
 - [TELEGRAM_SETUP.md](TELEGRAM_SETUP.md)
 - [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md)
 - [FILES_SETUP.md](FILES_SETUP.md)
+- [DOCUMENT_PARSER_SETUP.md](DOCUMENT_PARSER_SETUP.md)
 - [BROWSER_AGENT_SETUP.md](BROWSER_AGENT_SETUP.md)
 - [STOCK_AGENT_SETUP.md](STOCK_AGENT_SETUP.md)
 - [LINKEDIN_SETUP.md](LINKEDIN_SETUP.md)

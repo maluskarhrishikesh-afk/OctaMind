@@ -517,3 +517,23 @@ Single-agent commands skip the workflow planner entirely and go straight to the 
 - "What apps are using the most memory?" → `list_running_apps`
 - "What does this .lnk shortcut point to?" → `resolve_shortcut`
 - "Watch my Downloads folder for new files" → `monitor_folder`
+
+## Document Parser Skill Tools
+
+4 parsing tools plus supporting local file inspection helpers.
+
+### Core LiteParse Tools
+
+| Tool | Parameters | Default | Description |
+|------|-----------|---------|-------------|
+| `check_liteparse_installation` | — | — | Check whether the LiteParse CLI is available locally and return setup guidance if not. |
+| `parse_document_spatially` | `path`, `output_format`, `output_path`, `target_pages`, `max_pages`, `dpi`, `ocr_enabled`, `ocr_language`, `precise_bounding_boxes`, `preserve_small_text`, `timeout_seconds` | required, `"json"`, `""`, `""`, `1000`, `150`, `True`, `"en"`, `True`, `False`, `600` | Parse a document with LiteParse while preserving layout. Best for PDFs, invoices, contracts, reports, and OCR-heavy files. |
+| `batch_parse_documents` | `input_dir`, `output_dir`, `output_format`, `recursive`, `extension`, `max_pages`, `dpi`, `ocr_enabled`, `ocr_language`, `timeout_seconds` | required, `""`, `"json"`, `True`, `""`, `1000`, `150`, `True`, `"en"`, `1200` | Parse a folder of documents into JSON or text outputs. |
+| `screenshot_document_pages` | `path`, `output_dir`, `target_pages`, `dpi`, `image_format`, `timeout_seconds` | required, `""`, `""`, `200`, `"png"`, `900` | Generate screenshots for selected document pages. Useful for charts, diagrams, layout checks, and visual reasoning. |
+
+### Typical prompts
+
+- "Parse my invoice PDF into JSON"
+- "Extract page 3 of this report as screenshots"
+- "Batch parse all PDFs in my Statements folder"
+- "Check whether LiteParse is installed"

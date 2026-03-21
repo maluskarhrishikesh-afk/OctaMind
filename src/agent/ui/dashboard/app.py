@@ -583,6 +583,11 @@ def _render_create_pa_panel() -> None:
             "title": "Local Files",
             "description": "Search, organize, and inspect local files.",
         },
+        "document_parser": {
+            "icon": "🧾",
+            "title": "Document Parser",
+            "description": "Parse PDFs, Office files, and page screenshots with LiteParse.",
+        },
         "calendar": {
             "icon": "📅",
             "title": "Calendar",

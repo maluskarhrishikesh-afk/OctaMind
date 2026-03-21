@@ -17,6 +17,7 @@ For tool-by-tool parameter details, see [TOOL_REFERENCE.md](TOOL_REFERENCE.md). 
 | `email` | `src/agent/ui/email_agent/orchestrator.py` | Gmail operations | read inbox, search threads, draft, reply, schedule mail, extract actions | [../setup/EMAIL_SETUP.md](../setup/EMAIL_SETUP.md) |
 | `drive` | `src/agent/ui/drive_agent/orchestrator.py` | Google Drive operations | search files, upload, download, share, summarize, analyze storage | [../setup/EMAIL_SETUP.md](../setup/EMAIL_SETUP.md) |
 | `files` | `src/agent/ui/files_agent/orchestrator.py` | Local filesystem operations | search across drives, zip or unzip, inspect files, write reports, deliver downloads | [../setup/FILES_SETUP.md](../setup/FILES_SETUP.md) |
+| `document_parser` | `src/agent/ui/document_parser_agent/orchestrator.py` | Local document parsing | parse PDFs and Office files, OCR scans, extract structured text, generate screenshots | [../setup/DOCUMENT_PARSER_SETUP.md](../setup/DOCUMENT_PARSER_SETUP.md) |
 | `calendar` | `src/agent/ui/calendar_agent/orchestrator.py` | Google Calendar operations | create events, list agendas, search events, manage recurring items | [../setup/CALENDAR_SETUP.md](../setup/CALENDAR_SETUP.md) |
 | `scheduler` | `src/agent/ui/scheduler_agent/orchestrator.py` | Intelligent scheduling | find best slots, protect focus time, analyze meeting load, resolve conflicts | [../setup/CALENDAR_SETUP.md](../setup/CALENDAR_SETUP.md) |
 | `file_organizer` | `src/agent/ui/file_organizer_agent/orchestrator.py` | Approval-based organization | scan folders, preview plans, archive old files, run archival policies | [../setup/FILES_SETUP.md](../setup/FILES_SETUP.md) |
@@ -73,6 +74,8 @@ Use `calendar` when the request is about direct calendar CRUD operations.
 Use `scheduler` when the request needs reasoning about availability, focus protection, tradeoffs, or optimization.
 
 Use `files` for direct local file actions and download delivery.
+
+Use `document_parser` when the request is about extracting structure or OCR from a local document rather than generic file management.
 
 Use `file_organizer` when the user wants a proposed folder cleanup plan or archival workflow with explicit approval before changes.
 

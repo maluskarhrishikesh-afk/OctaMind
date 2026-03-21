@@ -66,6 +66,7 @@ The workflow router currently exposes these skills:
 - `drive`
 - `whatsapp`
 - `files`
+- `document_parser`
 - `calendar`
 - `scheduler`
 - `file_organizer`

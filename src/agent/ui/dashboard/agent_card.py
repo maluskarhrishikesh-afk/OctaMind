@@ -57,6 +57,13 @@ _SKILL_ABILITIES: dict[str, list[str]] = {
         "🖼️ Sort by type or date",
         "💾 Check disk usage & large files",
     ],
+    "document_parser": [
+        "🧾 Parse PDFs, DOCX, XLSX and slides locally",
+        "🧠 Preserve layout and spatial text structure",
+        "🔎 OCR scanned documents and invoices",
+        "📊 Extract page screenshots for charts and diagrams",
+        "📁 Batch-parse folders of documents",
+    ],
     "whatsapp": [
         "💬 Send & read messages",
         "⏰ Schedule messages for later",

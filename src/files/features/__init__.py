@@ -66,6 +66,12 @@ from .cross_agent import (
     upload_file_to_drive,
     send_file_via_whatsapp,
 )
+from .document_parser import (
+    check_liteparse_installation,
+    parse_document_spatially,
+    batch_parse_documents,
+    screenshot_document_pages,
+)
 
 __all__ = [
     # file_ops
@@ -85,6 +91,9 @@ __all__ = [
     # reader
     "read_text_file", "get_file_stats", "preview_csv",
     "read_json_file", "tail_log", "calculate_file_hash",
+    # document_parser
+    "check_liteparse_installation", "parse_document_spatially",
+    "batch_parse_documents", "screenshot_document_pages",
     # smart_features
     "summarize_file", "analyze_folder", "suggest_organization",
     "generate_rename_suggestions", "find_related_files", "describe_file",

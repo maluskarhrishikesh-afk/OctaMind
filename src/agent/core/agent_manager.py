@@ -132,6 +132,12 @@ class AgentManager:
             'icon': '🗂️',
             'capabilities': ['search', 'organise', 'archive', 'read', 'analyse', 'cross_agent']
         },
+        'document_parser': {
+            'name': 'Document Parser Agent',
+            'description': 'Parse local PDFs, Office documents, spreadsheets, slides, and images with LiteParse while preserving layout and OCR context',
+            'icon': '🧾',
+            'capabilities': ['parse_document', 'batch_parse', 'ocr', 'table_extraction', 'page_screenshots']
+        },
         'scheduler': {
             'name': 'Scheduler Agent',
             'description': 'Smart calendar scheduling — find optimal meeting slots, protect deep-work time, and resolve conflicts',

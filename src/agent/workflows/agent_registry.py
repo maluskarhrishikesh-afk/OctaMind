@@ -109,6 +109,21 @@ AGENT_REGISTRY: Dict[str, Dict[str, str]] = {
         "module": "src.agent.ui.files_agent.orchestrator",
         "function": "execute_with_llm_orchestration",
     },
+    "document_parser": {
+        "description": (
+            "Document Parser agent. Handles: parse local PDFs, Office files, spreadsheets, slides, and images "
+            "with LiteParse; preserve layout and spatial text structure; output text or JSON; generate page "
+            "screenshots for charts and diagrams; and batch-process document folders. Use when the user wants "
+            "document extraction, OCR, table parsing, invoice-to-JSON conversion, or visual page inspection."
+        ),
+        "trigger_keywords": [
+            "document parser", "liteparse", "parse pdf", "parse document", "extract table",
+            "invoice to json", "ocr pdf", "pdf to json", "screenshot page", "document ocr",
+            "parse docx", "parse xlsx", "parse pptx",
+        ],
+        "module": "src.agent.ui.document_parser_agent.orchestrator",
+        "function": "execute_with_llm_orchestration",
+    },
     "calendar": {
         "description": (
             "Google Calendar agent. Handles: list/view/search events, create/update/delete events, "

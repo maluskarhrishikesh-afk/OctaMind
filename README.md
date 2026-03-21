@@ -10,6 +10,7 @@ OctaMind is a multi-agent personal assistant platform that lets you operate Gmai
 - Telemetry-backed Log Analyser for per-turn LLM counts, fast-path counters, fallback counters, and agent event summaries
 - Manifest Inspector for the active file manifest and recent historical manifests
 - Skill routing across email, drive, files, calendar, scheduler, file organizer, habit tracking, browser, stock market, LinkedIn, WhatsApp, and Telegram
+- Skill routing across email, drive, files, document parsing, calendar, scheduler, file organizer, habit tracking, browser, stock market, LinkedIn, WhatsApp, and Telegram
 - Staged routing pipeline with classification, context resolution, and agent planning, plus optional local planner fallback for retryable routing/planning failures
 - Persistent assistant memory plus cross-channel history merging for dashboard and Telegram
 - Per-assistant Telegram bots with dedicated pollers, per-PA message stores, and direct Telegram runtime controls from each assistant card
@@ -26,6 +27,7 @@ OctaMind is a multi-agent personal assistant platform that lets you operate Gmai
 | Email | Read, search, summarize, draft, reply, schedule, and report on Gmail |
 | Google Drive | Search, upload, download, share, organize, and analyze Drive files |
 | Files | Search across drives, inspect local files, zip or unzip, write reports, and deliver files back into the current chat |
+| Document Parser | Parse PDFs and Office files with LiteParse, extract structured text, and generate page screenshots |
 | Calendar | Create, update, delete, list, and search Google Calendar events |
 | Scheduler | Find the best slots, protect focus time, resolve conflicts, and optimize schedules |
 | File Organizer | Propose folder cleanup or archival plans and apply them only after approval |
@@ -146,6 +148,7 @@ OctaMind/
 - [documentation/setup/TELEGRAM_SETUP.md](documentation/setup/TELEGRAM_SETUP.md)
 - [documentation/setup/WHATSAPP_SETUP.md](documentation/setup/WHATSAPP_SETUP.md)
 - [documentation/setup/FILES_SETUP.md](documentation/setup/FILES_SETUP.md)
+- [documentation/setup/DOCUMENT_PARSER_SETUP.md](documentation/setup/DOCUMENT_PARSER_SETUP.md)
 - [documentation/setup/BROWSER_AGENT_SETUP.md](documentation/setup/BROWSER_AGENT_SETUP.md)
 - [documentation/setup/STOCK_AGENT_SETUP.md](documentation/setup/STOCK_AGENT_SETUP.md)
 - [documentation/setup/LINKEDIN_SETUP.md](documentation/setup/LINKEDIN_SETUP.md)
