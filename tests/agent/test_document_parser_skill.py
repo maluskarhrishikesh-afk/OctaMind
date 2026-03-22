@@ -33,5 +33,6 @@ def test_document_parser_orchestrator_builds_tool_map() -> None:
     tool_map = build_all_tools()
 
     assert "parse_document_spatially" in tool_map
+    assert "extract_document_key_fields" in tool_map
     assert "batch_parse_documents" in tool_map
     assert "screenshot_document_pages" in tool_map

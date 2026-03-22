@@ -25,13 +25,18 @@
 ## Category: Parsing
 
 ### parse_document_spatially
-- **signature**: `parse_document_spatially(path, output_format="json", output_path="", target_pages="", max_pages=1000, dpi=150, ocr_enabled=True, ocr_language="en", precise_bounding_boxes=True, preserve_small_text=False, timeout_seconds=600)`
-- **description**: Parse a local document with LiteParse while preserving layout and spatial structure. Use when the user wants to summarize a contract, extract invoice fields, inspect a table, convert a document to structured JSON/text, or OCR a scanned PDF. Outputs go under `your_data/reports/document_parser/` by default.
+- **signature**: `parse_document_spatially(path, output_format="json", output_path="", target_pages="", max_pages=1000, dpi=150, ocr_enabled=True, ocr_language="en", precise_bounding_boxes=True, preserve_small_text=False, timeout_seconds=600, generate_structured_output=True)`
+- **description**: Parse a local document with LiteParse while preserving layout and spatial structure. Use when the user wants to summarize a contract, extract invoice fields, inspect a table, convert a document to structured JSON/text, or OCR a scanned PDF. For JSON parses, this also generates a companion structured JSON with normalized key fields and heuristic tamper checks under `your_data/reports/document_parser/` by default.
 - **tags**: liteparse, parse pdf, parse docx, parse xlsx, parse pptx, spatial text, bounding boxes, ocr, invoice to json, contract summary, table extraction
 
+### extract_document_key_fields
+- **signature**: `extract_document_key_fields(parse_output_path, source_path="", output_path="")`
+- **description**: Convert an existing LiteParse JSON output into a smaller, normalized JSON containing document type, extracted key fields, candidate labeled values, and heuristic tamper-risk checks. Use when the user wants a useful machine-readable summary instead of raw page text.
+- **tags**: structured json, key fields, payslip json, invoice fields, normalized extraction, tamper check, fraud heuristic
+
 ### batch_parse_documents
-- **signature**: `batch_parse_documents(input_dir, output_dir="", output_format="json", recursive=True, extension="", max_pages=1000, dpi=150, ocr_enabled=True, ocr_language="en", timeout_seconds=1200)`
-- **description**: Parse an entire folder of documents with LiteParse. Use when the user wants to process a batch of PDFs, invoices, reports, or mixed Office/image files into text or JSON outputs.
+- **signature**: `batch_parse_documents(input_dir, output_dir="", output_format="json", recursive=True, extension="", max_pages=1000, dpi=150, ocr_enabled=True, ocr_language="en", timeout_seconds=1200, generate_structured_output=True)`
+- **description**: Parse an entire folder of documents with LiteParse. Use when the user wants to process a batch of PDFs, invoices, reports, or mixed Office/image files into text or JSON outputs. For JSON batches, companion structured JSON summaries can also be created per file.
 - **tags**: batch parse, parse folder, all pdfs, multiple documents, ingestion, bulk ocr, document pipeline
 
 ### screenshot_document_pages

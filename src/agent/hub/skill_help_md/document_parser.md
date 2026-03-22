@@ -15,11 +15,13 @@ The Document Parser skill helps you read complex local documents while keeping l
 **What it helps with**
 - Parsing PDFs, DOCX files, spreadsheets, slide decks, and images with preserved structure
 - Extracting text or JSON outputs from documents using LiteParse
+- Producing a second normalized JSON with extracted key fields and heuristic tamper-risk checks
 - Generating page screenshots for charts, diagrams, or visually important sections
 - Batch-processing folders of documents into structured outputs
 
 **Try asking things like**
 - Parse this invoice PDF into JSON
+- Parse this payslip and also create a clean key-fields JSON
 - Extract the table from my bank statement
 - Generate screenshots for page 2 of this contract
 

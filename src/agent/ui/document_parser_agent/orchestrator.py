@@ -29,6 +29,7 @@ def _build_all_tools() -> Dict[str, Any]:
     from src.files.features.document_parser import (  # noqa: PLC0415
         batch_parse_documents,
         check_liteparse_installation,
+        extract_document_key_fields,
         parse_document_spatially,
         screenshot_document_pages,
     )
@@ -43,6 +44,7 @@ def _build_all_tools() -> Dict[str, Any]:
         "search_by_name": search_by_name,
         "search_by_extension": search_by_extension,
         "parse_document_spatially": parse_document_spatially,
+        "extract_document_key_fields": extract_document_key_fields,
         "batch_parse_documents": batch_parse_documents,
         "screenshot_document_pages": screenshot_document_pages,
         "read_text_file": read_text_file,

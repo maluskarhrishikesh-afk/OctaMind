@@ -71,6 +71,7 @@ from .document_parser import (
     parse_document_spatially,
     batch_parse_documents,
     screenshot_document_pages,
+    extract_document_key_fields,
 )
 
 __all__ = [
@@ -93,7 +94,7 @@ __all__ = [
     "read_json_file", "tail_log", "calculate_file_hash",
     # document_parser
     "check_liteparse_installation", "parse_document_spatially",
-    "batch_parse_documents", "screenshot_document_pages",
+    "batch_parse_documents", "screenshot_document_pages", "extract_document_key_fields",
     # smart_features
     "summarize_file", "analyze_folder", "suggest_organization",
     "generate_rename_suggestions", "find_related_files", "describe_file",

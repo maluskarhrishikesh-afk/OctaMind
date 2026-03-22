@@ -69,12 +69,20 @@ TESSDATA_PREFIX=C:\path\to\tessdata
 
 Generated outputs default to `your_data/reports/document_parser/`, which is already ignored by Git.
 
+For JSON parses, the skill now writes two artifacts by default:
+
+- the raw LiteParse output, such as `report_liteparse.json`
+- a companion structured summary, such as `report_structured.json`
+
+The structured summary is designed for downstream automation. It includes normalized key fields, candidate labeled values, document-type hints, and heuristic tamper-consistency checks.
+
 ---
 
 ## What The Skill Exposes
 
 - `check_liteparse_installation()`
 - `parse_document_spatially(...)`
+- `extract_document_key_fields(...)`
 - `batch_parse_documents(...)`
 - `screenshot_document_pages(...)`
 
@@ -106,6 +114,7 @@ Parse C:/Users/<YourName>/Documents/report.pdf into JSON
 Expected result:
 
 - a JSON output file created under `your_data/reports/document_parser/`
+- a companion structured JSON with extracted key fields and tamper heuristics
 - a preview of the parsed content or keys
 
 ### Parse a DOCX file
@@ -145,8 +154,10 @@ Expected result:
 
 - Keep large parsing jobs under `your_data/` and do not commit generated outputs.
 - Prefer JSON output when the next step is extraction or structured post-processing.
+- Prefer the companion structured JSON when another tool or workflow needs normalized fields instead of raw page text.
 - Prefer text output when the next step is summarization.
 - Use screenshots when the answer depends on charts, diagrams, handwriting, signatures, or cell color.
+- Tamper detection here is heuristic only. For authenticity-sensitive workflows, combine these checks with digital signatures, PDF metadata inspection, or issuer-side verification.
 
 ---
 
